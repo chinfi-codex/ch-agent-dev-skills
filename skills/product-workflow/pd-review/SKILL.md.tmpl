@@ -28,6 +28,8 @@ allowed-tools:
 
 {{ARTIFACT_PATHS}}
 
+{{GLOSSARY}}
+
 {{COMPLETION_STATUS}}
 
 {{DOC_WRITING_RULES}}
@@ -95,5 +97,9 @@ Current task boundary:
 - 先给出交付结论
 - 再给出完成状态
 - 回显当前匹配的 `feature-slug`
-- 再输出改好的 PRD
+- 再输出改好的 PRD（章节结构仍须遵循 `shared/templates/prd.md`）
 - 最后输出 `pd-review-report`
+
+输出模板见本 skill 包内 `shared/templates/pd-review-report.md`（相对本 SKILL.md 为 `../shared/templates/pd-review-report.md`）。
+产出报告前必须先读取该文件，严格遵循其章节结构，不自行增删一级章节。
+模板文件的修改即时生效，无需重新生成 SKILL.md。

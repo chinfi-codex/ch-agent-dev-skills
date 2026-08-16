@@ -17,7 +17,11 @@ const fragmentMap: Record<string, string> = {
   ARTIFACT_PATHS: "artifact-paths.md",
   DOC_WRITING_RULES: "doc-writing-rules.md",
   REVIEW_METHOD: "review-method.md",
+  GLOSSARY: "glossary.md",
+  GRILLING: "grilling.md",
 };
+
+const templatesDir = join(rootDir, "shared", "templates");
 
 const generatedNotice = [
   "<!-- AUTO-GENERATED from SKILL.md.tmpl -->",
@@ -75,6 +79,18 @@ function findSkillDirs(): string[] {
     });
 }
 
+function validateTemplateRefs(rendered: string, skillName: string): void {
+  const refs = rendered.match(/shared\/templates\/[\w.-]+\.md/g) ?? [];
+  for (const ref of new Set(refs)) {
+    const filename = ref.split("/").pop() ?? "";
+    try {
+      statSync(join(templatesDir, filename));
+    } catch {
+      throw new Error(`${skillName}: referenced template not found: ${ref}`);
+    }
+  }
+}
+
 function main(): void {
   const fragments = loadFragments();
   const skillDirs = findSkillDirs();
@@ -88,6 +104,7 @@ function main(): void {
     const outputPath = join(skillDir, "SKILL.md");
     const template = readFileSync(templatePath, "utf8");
     const rendered = renderTemplate(template, fragments);
+    validateTemplateRefs(rendered, templatePath);
     writeFileSync(outputPath, prependNotice(rendered), "utf8");
     console.log(`Generated ${outputPath}`);
   }

@@ -29,9 +29,13 @@ allowed-tools:
 
 {{ARTIFACT_PATHS}}
 
+{{GLOSSARY}}
+
 {{COMPLETION_STATUS}}
 
 {{DOC_WRITING_RULES}}
+
+{{GRILLING}}
 
 # /ceo-office —— 真正的 CEO Office
 
@@ -192,8 +196,8 @@ allowed-tools:
 - **存在明显断点**
 - **目前不足以判断**
 
-### Step 4：提问与追问
-先把未决问题归类为：
+### Step 4：拷打与追问
+按「拷打规则（Grilling）」执行轮次制拷打。先把未决问题归类为：
 - `可假设继续`
 - `必须提问后继续`
 - `仅记录为低优先级风险`
@@ -206,27 +210,18 @@ allowed-tools:
 - 当前讨论对象或 top-level 决策是否清晰
 - 关键用户、关键约束、关键资源是否明确
 
-当缺少关键变量，且会显著影响判断时，必须优先使用 `AskUserQuestion`，而不是脑补。
+商业链路拷打维度（逐项过，显式标记 `已确认` / `假设` / `待确认`）：
+- 谁付钱、为什么现在愿意付钱
+- 单位经济怎么算（收入 / 成本 / 毛利 / 回本周期）
+- 真实可进入的市场切口
+- 增长靠什么、不靠什么
+- 哪一环一放大就会坏
 
-默认动作：
-1. 停止继续推导
-2. 调用 `AskUserQuestion`
-3. 一次只问一个最关键的问题
-4. 等待回答
-5. 再继续构建链路
-
-每次提问：
-1. 简短重述当前上下文
-2. 说明为什么必须问
-3. 给出当前推荐方向，但明确仍依赖确认
-4. 仅在适合做决策分叉时给 A / B / C options
-5. 一次只问一个问题
-
-提问风格：
-- 短、具体、sharp
-- 不要为了礼貌而削弱问题力度
-- 不要在关键变量缺失时输出大段结论
-- 不接受“市场很大”“用户会喜欢”“以后可以变现”这类空话
+规则：
+- 一轮问完当前可问的独立问题，每题带推荐方向，分叉题给 A / B / C
+- 能从数据、公告、已有文档查到的事实先自查，不问用户
+- 不接受“市场很大”“用户会喜欢”“以后可以变现”这类空话；回答仍抽象就继续追问
+- 阻塞型单点确认（方向批准、是否切换到执行层技能）仍一次只问一个
 
 优先问：
 - 谁真正付钱？
@@ -268,17 +263,8 @@ allowed-tools:
 
 #### D. Project Memo
 只有在关键变量清楚、链路基本闭环、前提对齐时才允许输出。  
-只覆盖：
-- Current Stage
-- Business Model
-- Economic Model
-- Market Size
-- Growth Path
-- Core Constraint
-- Strategic Thesis
-- What We Still Don’t Know
-- Key Decision Now
-- What We Will Not Discuss Yet
+输出模板见本 skill 包内 `shared/templates/project-memo.md`（相对本 SKILL.md 为 `../shared/templates/project-memo.md`）。
+产出前必须先读取该文件，严格遵循其章节结构，不自行增删一级章节。
 
 ---
 

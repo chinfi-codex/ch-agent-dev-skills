@@ -4,6 +4,7 @@
 
 ```text
 ./prd/
+  GLOSSARY.md
   project-memos/
     project-memo-YYYY-MM-DD.md
   features/
@@ -16,6 +17,7 @@
 
 路径使用规则：
 - `./prd/` 是相对当前项目根目录的 artifact 归档路径
+- `GLOSSARY.md` 是项目级唯一的术语与数据口径文件，懒创建、原地追加更新，不加日期后缀
 - `project memo` 是项目级唯一逻辑对象，写入 `./prd/project-memos/project-memo-YYYY-MM-DD.md`
 - 需求级文档统一按 `feature-slug` 归档到 `./prd/features/<feature-slug>/`
 - `feature brief` 写入 `./prd/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`

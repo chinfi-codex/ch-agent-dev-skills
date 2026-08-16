@@ -1,6 +1,6 @@
 ## `/pd-review` 评审方法
 
-从以下 6 个维度评审 PRD，并给出 0-10 分评分：
+从以下 7 个维度评审 PRD，并给出 0-10 分评分：
 
 1. `Goal Completeness`
    - 目标是否明确、可判断、与背景一致
@@ -14,6 +14,8 @@
    - 是否足以交给技术、设计、测试协作，不依赖口头补充
 6. `Acceptance Readiness`
    - 验收标准、指标、事件定义是否可执行
+7. `Terminology & Metric Consistency`
+   - 用词是否与 GLOSSARY 标准术语一致、指标口径是否完整且一致、有无自相矛盾的叫法
 
 评审规则：
 

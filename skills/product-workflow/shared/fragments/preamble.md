@@ -6,6 +6,7 @@
   - 项目级文档：读取最新的 `project memo`
   - 需求级文档：先确定唯一 `feature-slug`，再读取该目录下的相关上游文档
 - 优先读取顺序：
+  0. `./prd/GLOSSARY.md`（如存在；术语与数据口径的项目级唯一来源）
   1. 最新的 `project memo`
   2. 与当前 `feature-slug` 对应的最新 `feature brief`
   3. 与当前 `feature-slug` 对应的最新 `PRD`
@@ -26,6 +27,7 @@
 - 匹配时只使用可解释规则，不使用不可解释的模糊猜测
 
 匹配输入来源：
+- `./prd/GLOSSARY.md` 术语表的「别名/口语说法」与「关联 feature-slug」列
 - 目录名 `feature-slug`
 - 文档头部的 `feature_slug`
 - 文档头部的 `feature_name`
