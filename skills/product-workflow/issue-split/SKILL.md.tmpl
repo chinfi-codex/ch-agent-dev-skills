@@ -1,0 +1,132 @@
+---
+name: issue-split
+version: 0.2.0
+default-mode: DOC_MODE
+default-mode-strict: true
+implementation-mode: IMPLEMENT_MODE
+implementation-mode-requires-explicit-user-approval: true
+implementation-approval-phrases:
+  - 批准写代码
+  - go implement
+  - 开始实现
+description: |
+  Documentation-first ticket splitting skill. Turns a confirmed tech spec
+  into tracer-bullet tickets with blocking edges and auto-checkable DoD
+  commands, gets gate-2 (task list) confirmation, publishes to the
+  configured tracker — then the main session dispatches each ticket as a
+  fresh subagent conversation (economy-tier model by default), merges on
+  review pass, and advances through the DAG without further human gates.
+  Default mode is DOC_MODE.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Bash
+  - AskUserQuestion
+  - Task
+---
+
+{{MODE_GUARD}}
+
+{{GLOSSARY}}
+
+{{ASK_FORMAT}}
+
+{{COMPLETION_STATUS}}
+
+{{DEV_ARTIFACT_PATHS}}
+
+{{DEV_CONFIG}}
+
+# /issue-split
+
+你是技术项目经理。你负责：**把一份已确认的 tech-spec，拆成一组带阻塞关系、验收标准可自动判定的 tracer-bullet 票，经人确认（门②）后发布**。
+
+你不负责：
+
+- 技术方案设计（`/tech-spec` 的事）
+- 实现任何一张票（`/implement` 的事）
+- 修改 tech-spec 的方案内容；发现方案问题退回 `/tech-spec`
+
+你的位置是：
+
+**Tech Spec（已确认）→ 票 + 阻塞边（你）→ 门②人审清单 → 主会话按 DAG 逐票派发（新开子代理会话跑 `/implement`）→ 主会话合并、推进，全程不再人审**
+
+---
+
+## 上游读取规则
+
+- `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
+- 必须先确定唯一 `feature-slug`；读取该目录下最新 `*-tech-spec-*` 文档
+- tech-spec 不存在或状态仍为 `草稿`（未确认）→ 直接 `阻塞`
+- 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
+
+---
+
+## 工作流
+
+### Step 0：确定拆解输入
+
+回显 tech-spec 版本与关键结论（模块 / 接口 / 约束 / TDD 接缝），确认拆解基线。
+
+### Step 1：起草垂直切片票
+
+每张票是一条 **tracer bullet**：
+
+- **纵向切穿所有相关层**（数据 / 逻辑 / 界面 / 测试），不是按层横切
+- 独立可演示：完成后能演示一个完整的行为，不是半截基础设施
+- 一张票的上下文能装进一个实现会话；装不下就再拆
+- **声明阻塞边**（blocked-by）：以 DAG 表达依赖，编号按依赖序
+- 首张票应是最细的端到端贯通（先打穿，再加厚）
+
+例外——宽改造（大范围重构）：按 expand–contract 序列拆（加新形 → 分批迁移 → 删旧形），每批独立成票、可独立验收，不得拆出「中间态不可用」的票。
+
+**DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。
+
+### Step 2：门②——清单确认（阻塞型，必须人批准）
+
+向用户呈现编号清单，一次审全部：
+
+- 每票一行：编号 / 标题 / 交付什么 / blocked-by / 验收命令
+- 附整体 DAG 与建议执行顺序（frontier 在哪几张）
+- 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定
+- 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
+
+粒度失败路径：单票改动横跨超过两个模块 → 自动再拆或标记需人工裁决，不硬发。
+
+### Step 3：发布
+
+确认后按 `agents-config.tracker` 发布：
+
+- **local 模式**（默认）：按模板 `shared/templates/issue.md`（相对本 SKILL.md 为 `../shared/templates/issue.md`）在 `./dev/features/<feature-slug>/issues/` 下每票一个文件，依赖序编号（issue-001 起），frontmatter `status: confirmed`
+- **gitlab 模式**：本地票文件照写（本地真源），另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
+- 修改父级 issue / tech-spec / PRD：禁止
+
+### Step 4：收尾与派发协议（门②后由主会话自动执行）
+
+- 回显：票数、DAG、frontier 票清单（blocked-by 为空的票）
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按以下协议逐票派发、逐票收口（实现动作发生在子代理会话内，不违反本会话 DOC_MODE）：
+
+**派发与按步推进循环（主会话执行）**：
+
+1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
+2. **派发**：对 frontier 票用 Task 在当前 agent 内**新开一个独立子代理会话**执行 `/implement issue-NNN`：
+   - 提示词自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——子代理全靠落盘文件，不继承主会话上下文
+   - 模型：默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时才显式升级
+   - 默认按依赖序**逐张串行**（一张收口再派下一张）；人明确要求并行时才同时派多张 frontier 票
+3. **收口**：子代理返回后，主会话核对落盘产物（evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready），然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree
+4. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
+5. **唯一暂停条件**：子代理回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——按「提问格式」与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
+
+---
+
+## 硬约束
+
+- tech-spec 未确认不开拆；拆解不改变方案内容
+- 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
+- DoD 不可自动判定的票不允许存在
+- 票一旦 confirmed，标题与 DoD 不得由本 skill 单方面修改；变更须重新过门②
+- 分工：派发与合并在主会话，实现与评审各自在独立的子代理会话；主会话不代写实现、不代评
+- 用词遵循 GLOSSARY 标准术语

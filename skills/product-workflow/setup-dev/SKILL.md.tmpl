@@ -1,0 +1,87 @@
+---
+name: setup-dev
+version: 0.3.0
+default-mode: IMPLEMENT_MODE
+description: |
+  One-time per-repo setup for the dev-stage skills. Detects ocr / glab /
+  GitLab CI readiness, collects tracker mode, main branch, quality gate,
+  redlines, repo level, and open-code-review mode (default: delegate —
+  review runs as a fresh subagent inside the current agent), then writes
+  ./dev/agents-config.md plus CI/rule seeds. Run once before /tech-spec,
+  /issue-split, /implement, /ai-review.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Bash
+  - AskUserQuestion
+---
+
+{{ASK_FORMAT}}
+
+{{COMPLETION_STATUS}}
+
+{{DEV_ARTIFACT_PATHS}}
+
+{{DEV_CONFIG}}
+
+# /setup-dev
+
+你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
+
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话新开独立子代理会话派发实现（`dispatch.executor: subagent`），子代理模型默认取宿主可用范围内经济性最高的一档（`dispatch.model: economy`）；评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，独立子代理评审，无需 LLM 端点）；质量门日常只跑 fast 档，full 档保留到交付前。
+
+你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
+
+## 工作流
+
+### Step 0：探查仓库与环境事实（自查，不问人）
+
+- git：`git remote -v`（GitLab / GitHub / 无远程）、主分支名、`.gitlab-ci.yml` 是否存在及是否已 include ocr job
+- glab：`glab auth status`（GitLab CLI 登录态）
+- ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）
+- 规则：`<repo>/.opencodereview/rule.json` 是否已存在
+- 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/`
+
+探查结果先回显给人，作为后续推荐依据。内网 GitLab 已确认可用（2026-09-09），tracker 默认推荐 `gitlab`；评审与执行默认都在当前 agent 内完成（delegate + subagent 派发），CI 接入是可选项而非前提。
+
+### Step 1：逐项确认配置
+
+按「阻塞型单点确认，一次只问一个」依次裁决（探查结果明确时给推荐项 A）：
+
+1. **tracker**：`gitlab`（glab 已登录时推荐）或 `local`（markdown 票文件，fallback）
+2. **ocr.mode**：`delegate`（**默认推荐**：评审在当前 agent 内以新开的独立子代理执行，ocr 只做文件筛选与规则解析，不需要 LLM 端点、不需要 CI）/ `local`（push 前本地跑 ocr，需端点）/ `ci`（已接 / 准备接 GitLab CI，需端点）
+3. **ocr 端点**：仅 `local` / `ci` 需要——GLM（bigmodel.cn，境内）为默认推荐，`ocr config set custom_providers.glm.url https://open.bigmodel.cn/api/paas/v4`、`protocol openai`、`model` 与 `api_key` 由人提供；配置后必须 `ocr llm test` 通过。`delegate` 模式跳过本项
+4. **main-branch**：默认取探查结果
+5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
+6. **quality-gate**：fast / full 两档命令，从项目实际测试框架推导后请人确认。默认规则写进配置注释：**日常开发（实现、自修复每一轮）只跑 fast；full 在交付前（MR ready / 证据落盘时）必跑**
+7. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
+8. **max-fix-rounds**：默认 5，可调
+
+### Step 2：写配置与种子
+
+按模板落盘（写作前必须先读对应模板）：
+
+- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含 `dispatch` 节（subagent 派发 + economy 模型档）与质量门 fast / full 默认规则
+- `.gitignore` 追加 `.worktrees/`（已存在则跳过）
+- **仅当 ocr.mode = ci 时**：
+  - 复制 `shared/templates/gitlab-ci-ocr.yml`（相对本 SKILL.md 为 `../shared/templates/gitlab-ci-ocr.yml`）为仓库 `ci/ocr-review.gitlab-ci.yml`，并在项目 `.gitlab-ci.yml` 加 `include: local`；回贴脚本 `ci/ocr-post-review.py` 需人从上游仓库获取放置（模板头部有说明，内网不能现场 curl 外网）
+  - 明确列出**人要在 GitLab 后台设置的 CI 变量清单**（`OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN` 掩码 / `OCR_LLM_MODEL` 必需，`GITLAB_API_TOKEN` 掩码可选）——本 skill 不碰 GitLab 后台
+- `.opencodereview/rule.json` 种子（存在则不动；三种模式通用，delegate 同样靠它解析评审规则）：`exclude` 放协议 / 密钥等不送审目录，`rules` 按主要模块放占位条目（真实评审规则由人从 REVIEW.md 提炼维护）
+- 若仓库存在 AGENTS.md 或 CLAUDE.md，追加一节 `## Dev workflow skills`：5 行以内，逐条一行说明 `/tech-spec` `/issue-split` `/implement` `/ai-review` 各自读什么写什么；两者都存在时只改 AGENTS.md，都不存在则不创建
+
+### Step 3：验证与收尾
+
+- 回读写出的配置，逐项复述关键取值（tracker / ocr.mode / dispatch 默认 / provider+model（仅 local / ci）/ main-branch / repo-level / 质量门 fast+full 及默认规则 / redlines / 轮次上限 / CI 接入状态）请人最终确认
+- `ocr.mode = ci` 时逐条核对 CI 前提：include 已加、post 脚本已放、GitLab 变量已设（后两项须人确认，未确认则 `gitlab-ci: manual` 落配置）；`delegate` 模式无 CI 前提，跳过核对
+- repo-level = A 时显式警示：本仓库不得运行 `/implement`，AI 仅只读辅助
+- 输出完成状态与下一步提示（`/tech-spec`）
+
+## 硬约束
+
+- 只写配置与种子：`./dev/agents-config.md`、`.gitignore` 一行、`.opencodereview/rule.json`、AGENTS.md / CLAUDE.md 说明节；`ci/ocr-review.gitlab-ci.yml` 与 `.gitlab-ci.yml` 的 include 节仅在 ci 模式写；不写任何业务代码
+- 不替人决定 repo-level；不代替人在 GitLab 后台设变量；api_key 只进 `ocr config`（或人手填），不写进任何入库文件
+- `delegate` 是默认模式而非降级，无需 LLM 端点即可落；`ocr llm test` 不通过不得把 `ocr.mode` 落为 `local` / `ci`
+- 配置写完后不进入任何后续 skill

@@ -1,0 +1,57 @@
+# ocr-review GitLab CI job（种子模板）
+#
+# 改编自 alibaba/open-code-review 官方示例 examples/gitlab_ci/.gitlab-ci.yml（Apache-2.0）。
+# 官方示例的回贴脚本 post_review.py 不在本 skill 包内，需要单独获取并放在仓库
+# ci/ocr-post-review.py（获取方式：能访问 GitHub 的机器从上游仓库 examples/gitlab_ci/
+# 下载后入库；内网机器无法直连 GitHub，不要在 CI 里现场 curl 外网）。
+#
+# 前提（缺一 job 即失败）：
+#   1. GitLab Settings → CI/CD → Variables：
+#      OCR_LLM_URL / OCR_LLM_AUTH_TOKEN(掩码) / OCR_LLM_MODEL 必需；
+#      GITLAB_API_TOKEN(掩码, api scope) 可选（缺省回退 CI_JOB_TOKEN）
+#   2. 项目根 .gitlab-ci.yml 引入本文件：
+#      include:
+#        - local: 'ci/ocr-review.gitlab-ci.yml'
+#   3. 评审触发条件：merge_requests 事件——每次 MR push 自动复审（含 draft MR）
+
+ocr-review:
+  stage: review
+  image: node:20
+  only:
+    - merge_requests
+  interruptible: true
+  resource_group: mr-review-${CI_MERGE_REQUEST_IID}   # 同一 MR 串行，避免重复评审
+  variables:
+    GIT_DEPTH: "0"          # 全历史，保证 merge-base diff 正确
+    OCR_VERSION: "latest"   # 可固定为具体版本号，如 "1.9.0"
+  script:
+    # 1. 安装 ocr
+    - npm install -g @alibaba-group/open-code-review@${OCR_VERSION}
+    # 2. 配置端点（三个必需变量缺失即 fail fast）
+    - |
+      if [ -z "$OCR_LLM_URL" ] || [ -z "$OCR_LLM_AUTH_TOKEN" ] || [ -z "$OCR_LLM_MODEL" ]; then
+        echo "缺少 OCR_LLM_URL / OCR_LLM_AUTH_TOKEN / OCR_LLM_MODEL 之一"; exit 1
+      fi
+    - ocr config set llm.url "$OCR_LLM_URL"
+    - ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+    - ocr config set llm.model "$OCR_LLM_MODEL"
+    - ocr config set llm.use_anthropic false
+    - ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+    # 3. 评审（--from 目标分支，--to 当前 commit；失败不中断，退出码后面统一判定）
+    - |
+      ARGS=(--from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" --to "${CI_COMMIT_SHA}"
+            --format json --audience agent --output .ocr/ocr-result.json)
+      mkdir -p .ocr
+      ocr review "${ARGS[@]}" 2>.ocr/ocr-stderr.log || OCR_EXIT=$?
+    # 4. 回贴内联评论 + 结果判定
+    - python3 ci/ocr-post-review.py .ocr/ocr-result.json || POST_EXIT=$?
+    - |
+      if [ "${OCR_EXIT:-0}" -ne 0 ] || [ "${POST_EXIT:-0}" -ne 0 ]; then
+        echo "ocr 退出码 ${OCR_EXIT:-0}，回贴退出码 ${POST_EXIT:-0}"; exit 1
+      fi
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - .ocr/ocr-result.json
+      - .ocr/ocr-stderr.log

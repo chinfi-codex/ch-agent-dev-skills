@@ -7,7 +7,7 @@
 ### `DOC_MODE`
 
 - 只允许读代码、读文档、写文档
-- 只允许写入：`./prd/**`、`docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
+- 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
 - 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report
 - 禁止写或改：源码、测试、脚手架、运行配置
 - 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`

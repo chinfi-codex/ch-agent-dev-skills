@@ -34,7 +34,7 @@ allowed-tools:
 ### `DOC_MODE`
 
 - 只允许读代码、读文档、写文档
-- 只允许写入：`./prd/**`、`docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
+- 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
 - 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report
 - 禁止写或改：源码、测试、脚手架、运行配置
 - 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
@@ -67,7 +67,7 @@ allowed-tools:
   - 项目级文档：读取最新的 `project memo`
   - 需求级文档：先确定唯一 `feature-slug`，再读取该目录下的相关上游文档
 - 优先读取顺序：
-  0. `./prd/GLOSSARY.md`（如存在；术语与数据口径的项目级唯一来源）
+  0. `./docs/GLOSSARY.md`（如存在；术语与数据口径的项目级唯一来源）
   1. 最新的 `project memo`
   2. 与当前 `feature-slug` 对应的最新 `feature brief`
   3. 与当前 `feature-slug` 对应的最新 `PRD`
@@ -82,13 +82,13 @@ allowed-tools:
 
 ## `feature-slug` 识别规则
 
-- `feature-slug` 是需求级唯一稳定标识，用于定位 `./prd/features/<feature-slug>/`，默认使用中文
+- `feature-slug` 是需求级唯一稳定标识，用于定位 `./docs/features/<feature-slug>/`，默认使用中文
 - 当用户直接提供 `feature-slug` 时，优先按该 slug 定位
-- 当用户提供中文需求名或口语化需求描述时，先在 `./prd/features/` 下做匹配，再决定是否继续
+- 当用户提供中文需求名或口语化需求描述时，先在 `./docs/features/` 下做匹配，再决定是否继续
 - 匹配时只使用可解释规则，不使用不可解释的模糊猜测
 
 匹配输入来源：
-- `./prd/GLOSSARY.md` 术语表的「别名/口语说法」与「关联 feature-slug」列
+- `./docs/GLOSSARY.md` 术语表的「别名/口语说法」与「关联 feature-slug」列
 - 目录名 `feature-slug`
 - 文档头部的 `feature_slug`
 - 文档头部的 `feature_name`
@@ -144,7 +144,7 @@ allowed-tools:
 统一根目录：
 
 ```text
-./prd/
+./docs/
   GLOSSARY.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -157,14 +157,14 @@ allowed-tools:
 ```
 
 路径使用规则：
-- `./prd/` 是相对当前项目根目录的 artifact 归档路径
+- `./docs/` 是相对当前项目根目录的 artifact 归档路径
 - `GLOSSARY.md` 是项目级唯一的术语与数据口径文件，懒创建、原地追加更新，不加日期后缀
-- `project memo` 是项目级唯一逻辑对象，写入 `./prd/project-memos/project-memo-YYYY-MM-DD.md`
-- 需求级文档统一按 `feature-slug` 归档到 `./prd/features/<feature-slug>/`
-- `feature brief` 写入 `./prd/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
-- `PRD` 写入 `./prd/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
-- `issue` 写入 `./prd/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
-- `pd-review-report` 写入 `./prd/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
+- `project memo` 是项目级唯一逻辑对象，写入 `./docs/project-memos/project-memo-YYYY-MM-DD.md`
+- 需求级文档统一按 `feature-slug` 归档到 `./docs/features/<feature-slug>/`
+- `feature brief` 写入 `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
+- `PRD` 写入 `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
+- `issue` 写入 `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
+- `pd-review-report` 写入 `./docs/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
 - `feature-slug` 是需求级稳定标识，默认使用中文；一经建立不因标题调整而改变
 - `feature-summary` 是文件级中文摘要名，用于标识大功能下的具体子功能或本次子范围
 - `feature-summary` 只用于文件名，不替代 `feature-slug` 的稳定标识作用
@@ -181,11 +181,11 @@ allowed-tools:
 
 ## 术语与数据口径（GLOSSARY）
 
-项目级唯一术语文件：`./prd/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
+项目级唯一术语文件：`./docs/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
 
 ### 读取纪律
 
-- 在开始任何判断、提问或写作前，先读 `./prd/GLOSSARY.md`（存在才读，不存在不阻塞）。
+- 在开始任何判断、提问或写作前，先读 `./docs/GLOSSARY.md`（存在才读，不存在不阻塞）。
 - 读取顺序上，GLOSSARY 先于 project memo 与需求级文档。
 
 ### 使用纪律
@@ -197,7 +197,7 @@ allowed-tools:
 ### 回写纪律
 
 - 讨论中确定的新术语或新口径，**立即写入** GLOSSARY，不批量积压到文档产出时。
-- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./prd/GLOSSARY.md`。
+- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./docs/GLOSSARY.md`。
 - GLOSSARY 原地追加更新，不加日期后缀，不新建版本文件。
 - 表内只放定义与口径；方案、决策理由、实现细节一律不进 GLOSSARY。
 
@@ -355,7 +355,7 @@ allowed-tools:
 - 禁止把关键规则留给“开发时再决定”或“实现时再说”。
 - 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里。
 - 若存在 tradeoff，必须明确说明选择、放弃项与原因。
-- 用词必须遵循 `./prd/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现。
+- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现。
 - 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致。
 
 # /issue

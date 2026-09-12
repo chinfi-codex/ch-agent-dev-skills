@@ -1,6 +1,9 @@
 # ch-pd-workflow
 
 实施思路参考借鉴：https://github.com/garrytan/gstack
+开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）
+
+> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 10 个 skill 的逐一使用说明。本 README 讲设计思路。
 
 ## 这套 skills 在解决什么问题
 
@@ -11,6 +14,35 @@
 - `/issue`: 对已存在、通常已上线功能的小范围需求更新
 - `/prd`: 再把已经明确的方案写成正式 PRD
 - `/pd-review`: 最后检查这份 PRD 是否真的能交给设计、研发、测试继续往下做
+
+## 开发阶段：从 PRD 到 Merge Request
+
+`/pd-review` 可交付之后，接 5 个 dev skill，产物从 `./docs/` 树延伸到 `./dev/` 树。评审引擎为 [open-code-review](https://github.com/alibaba/open-code-review)（ocr，阿里开源 Apache-2.0），MR 走 GitLab（内网已确认）；**执行与评审默认都在当前 agent 内完成**：issue 生成后由主会话新开独立子代理会话逐票派发（默认用低一档的经济模型），评审默认 ocr `delegate` 模式（ocr 只筛文件 / 解析规则，独立子代理评审，无需 LLM 端点与 CI）：
+
+```
+/prd → /pd-review → /setup-dev（每仓库一次：agents-config + rule.json 种子；CI 种子仅 ci 模式落盘）
+                  → /tech-spec   PRD → 技术方案（约束/假设分栏，预定 TDD 接缝）
+                  → /issue-split 方案 → tracer-bullet 票（阻塞边 DAG + 可自动判定 DoD）
+                                      → 门②：人审任务清单 → 票 confirmed
+                  → 主会话派发   逐票新开独立子代理会话跑 /implement（低一档经济模型）：
+                                      worktree 隔离 + TDD（日常只跑 fast 质量门）
+                                      → 证据落盘（交付前跑 full 质量门）→ draft MR
+                                      → /ai-review 独立评审（默认 delegate：ocr 筛文件 +
+                                        规则解析，新开子代理评审；可选 local / ci 接 GLM 端点）
+                                      → BLOCKER 回修 → MR ready
+                  → 主会话收口   评审通过即合并 MR、票置 done、推进下一张——
+                                      无需人审；只有 needs-human / 阻塞 / 无法裁决时才停下找人
+```
+
+- `/setup-dev`: 每仓库一次。探查 ocr / glab / GitLab CI 就绪度，收集 tracker（gitlab 首选 / local fallback）、主分支、质量门命令（fast 日常档 / full 交付档）、红线、仓库等级、ocr 模式（默认 delegate），写 `./dev/agents-config.md`，落 `.opencodereview/rule.json` 种子（`ci/ocr-review.gitlab-ci.yml` 仅 ci 模式落盘）
+- `/tech-spec`: 把可交付 PRD 变成技术方案；约束与假设分栏；预定 TDD 接缝
+- `/issue-split`: 拆垂直切片票（tracer bullet，纵向打通、独立可演示、声明阻塞边），DoD 写成「命令 + 期望输出」；门②人确认清单后发布，随后主会话自动按 DAG 逐票派发执行
+- `/implement`: 一张票一个 worktree；通常由主会话以新开子代理会话派发（低一档经济模型）；TDD；自修复循环有轮次上限；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（子代理只到 MR ready）
+- `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、当前 agent 内新开子代理评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 = BLOCKER
+
+GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shared/templates/gitlab-ci-ocr.yml` 与 `shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
+
+关键纪律：写查分离（评审必须独立实例——delegate / local 由新开子代理执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，full 档留在交付前；A 类仓库（飞行软件 / 涉密）不进 `/implement`。
 
 
 ## 这套方法背后的哲学
@@ -65,7 +97,7 @@
 
 ### 3. 两个横切机制：术语表与拷打
 
-- **GLOSSARY（术语与数据口径）**：所有 skill 共用项目级 `./prd/GLOSSARY.md`，统一专业术语和指标口径。文档用词必须与之一致；讨论中确定的新术语会立即写入，跨文档、跨会话保持一致。
+- **GLOSSARY（术语与数据口径）**：所有 skill 共用项目级 `./docs/GLOSSARY.md`，统一专业术语和指标口径。文档用词必须与之一致；讨论中确定的新术语会立即写入，跨文档、跨会话保持一致。
 - **Grilling（轮次制拷打）**：`/pd-plan`、`/issue`、`/ceo-office` 在澄清阶段按「决策树 + frontier 轮次」反复拷打需求——一轮问完当前可问的独立问题，逐项覆盖需求意义、范围边界、异常、权限、数据口径、验收标准等 11 个维度，全部有归属并经你确认后才产出正式文档，减少遗漏。
 
 如果不是新功能，而是对一个已存在、通常已上线的功能做局部优化，比如入口调整、规则修订、文案更新、阈值变化或轻量流程修补，用 `/issue`。

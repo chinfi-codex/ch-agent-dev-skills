@@ -61,14 +61,14 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 
 ## 产物约定
 
-这些 skills 默认把正式产物写入当前项目根目录下的 `./prd/`。
+这些 skills 默认把正式产物写入当前项目根目录下的 `./docs/`。
 
-- `GLOSSARY` -> `./prd/GLOSSARY.md`（项目级唯一术语与数据口径文件，懒创建、原地追加更新）
-- `project memo` -> `./prd/project-memos/project-memo-YYYY-MM-DD.md`
-- `feature brief` -> `./prd/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
-- `change request` -> `./prd/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
-- `PRD` -> `./prd/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
-- `pd-review-report` -> `./prd/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
+- `GLOSSARY` -> `./docs/GLOSSARY.md`（项目级唯一术语与数据口径文件，懒创建、原地追加更新）
+- `project memo` -> `./docs/project-memos/project-memo-YYYY-MM-DD.md`
+- `feature brief` -> `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
+- `change request` -> `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
+- `PRD` -> `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
+- `pd-review-report` -> `./docs/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
 
 命名分工：
 - `feature-slug`：稳定、中文、目录级标识，用于归档同一需求

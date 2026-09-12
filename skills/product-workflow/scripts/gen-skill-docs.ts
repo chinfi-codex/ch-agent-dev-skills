@@ -19,6 +19,8 @@ const fragmentMap: Record<string, string> = {
   REVIEW_METHOD: "review-method.md",
   GLOSSARY: "glossary.md",
   GRILLING: "grilling.md",
+  DEV_ARTIFACT_PATHS: "dev-artifact-paths.md",
+  DEV_CONFIG: "dev-config.md",
 };
 
 const templatesDir = join(rootDir, "shared", "templates");

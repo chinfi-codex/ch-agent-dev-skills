@@ -1,10 +1,10 @@
 ## 术语与数据口径（GLOSSARY）
 
-项目级唯一术语文件：`./prd/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
+项目级唯一术语文件：`./docs/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
 
 ### 读取纪律
 
-- 在开始任何判断、提问或写作前，先读 `./prd/GLOSSARY.md`（存在才读，不存在不阻塞）。
+- 在开始任何判断、提问或写作前，先读 `./docs/GLOSSARY.md`（存在才读，不存在不阻塞）。
 - 读取顺序上，GLOSSARY 先于 project memo 与需求级文档。
 
 ### 使用纪律
@@ -16,7 +16,7 @@
 ### 回写纪律
 
 - 讨论中确定的新术语或新口径，**立即写入** GLOSSARY，不批量积压到文档产出时。
-- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./prd/GLOSSARY.md`。
+- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./docs/GLOSSARY.md`。
 - GLOSSARY 原地追加更新，不加日期后缀，不新建版本文件。
 - 表内只放定义与口径；方案、决策理由、实现细节一律不进 GLOSSARY。
 
