@@ -3,7 +3,7 @@
 实施思路参考借鉴：https://github.com/garrytan/gstack
 开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）
 
-> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 10 个 skill 的逐一使用说明。本 README 讲设计思路。
+> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 11 个 skill 的逐一使用说明。本 README 讲设计思路。
 
 ## 这套 skills 在解决什么问题
 
@@ -43,6 +43,16 @@
 GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shared/templates/gitlab-ci-ocr.yml` 与 `shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
 
 关键纪律：写查分离（评审必须独立实例——delegate / local 由新开子代理执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，full 档留在交付前；A 类仓库（飞行软件 / 涉密）不进 `/implement`。
+
+## 发布之后：复盘与经验沉淀
+
+`/review` 是全链末端的一环：一个 feature 的票全部 done、通过验收并确认发布后，把这个 feature-slug 在 `./docs/` 与 `./dev/` 两棵树里留下的全部过程产物读成一份复盘——
+
+- **过程全景**：阶段时间线（每段时长与依据文件）、每票的开发轮次（自修复 / 评审回修 / needs-human）、全量问题清单
+- **需求侧关键点**：从产品经理视角，需求文档阶段应加深思考的点（低分维度、爆雷的假设、返工次数），每条挂证据
+- **开发侧关键点**：导致重复修改的坑，按根因分类（需求不清 / 方案缺口 / 实现疏忽 / 环境工具）
+
+经验分两级沉淀：项目级追加到 `./docs/EXPERIENCE.md`（与仓库技术栈 / 业务强相关），通用级追加到 `~/.pd-workflow/general-experience.md`（跨项目的流程方法类）；相似条目自动合并计数，项目级条目复现 ≥2 个 feature 后晋升通用级。统计只认落盘文件，取不到标「缺失」，不信自报。
 
 
 ## 这套方法背后的哲学

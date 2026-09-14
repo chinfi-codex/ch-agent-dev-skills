@@ -139,6 +139,11 @@ allowed-tools:
   - 再按类型匹配读取该目录下最新 `PRD`
   - 再补读该目录下最新 `feature brief` 与最新 `project memo`
   - 若 `PRD` 不存在，则直接 `阻塞`
+- `/review`
+  - 必须先确定唯一 `feature-slug` 与本次 `feature-summary`
+  - 读取该 slug 下 `./docs/features/<feature-slug>/` 全部版本的需求文档（计数版本数）
+  - 再读取 `./dev/features/<feature-slug>/` 全部 dev 产物（tech-spec / 票 / impl-log / evidence / review report / MR）
+  - 若票未全部 `done`，直接 `阻塞`（用户明确要求部分复盘除外）
 
 ## Artifact 路径约定
 
@@ -147,6 +152,7 @@ allowed-tools:
 ```text
 ./docs/
   GLOSSARY.md
+  EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
   features/
@@ -155,17 +161,20 @@ allowed-tools:
       <feature-summary>-prd-YYYY-MM-DD.md
       <feature-summary>-change-request-YYYY-MM-DD.md
       <feature-summary>-pd-review-report-YYYY-MM-DD.md
+      <feature-summary>-retro-YYYY-MM-DD.md
 ```
 
 路径使用规则：
 - `./docs/` 是相对当前项目根目录的 artifact 归档路径
 - `GLOSSARY.md` 是项目级唯一的术语与数据口径文件，懒创建、原地追加更新，不加日期后缀
+- `EXPERIENCE.md` 是项目级唯一的复盘经验库文件，懒创建、原地追加更新，不加日期后缀；由 `/review` 维护
 - `project memo` 是项目级唯一逻辑对象，写入 `./docs/project-memos/project-memo-YYYY-MM-DD.md`
 - 需求级文档统一按 `feature-slug` 归档到 `./docs/features/<feature-slug>/`
 - `feature brief` 写入 `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
 - `PRD` 写入 `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
 - `issue` 写入 `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
 - `pd-review-report` 写入 `./docs/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
+- `retro`（复盘报告）写入 `./docs/features/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`
 - `feature-slug` 是需求级稳定标识，默认使用中文；一经建立不因标题调整而改变
 - `feature-summary` 是文件级中文摘要名，用于标识大功能下的具体子功能或本次子范围
 - `feature-summary` 只用于文件名，不替代 `feature-slug` 的稳定标识作用
@@ -178,6 +187,7 @@ allowed-tools:
   - `*-prd-*`
   - `*-change-request-*`
   - `*-pd-review-report-*`
+  - `*-retro-*`
 - 文件命名保持稳定、可搜索、可比较，避免使用含糊名称如 `final-v2-latest`
 
 ## 术语与数据口径（GLOSSARY）

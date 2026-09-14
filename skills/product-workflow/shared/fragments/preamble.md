@@ -77,3 +77,8 @@
   - 再按类型匹配读取该目录下最新 `PRD`
   - 再补读该目录下最新 `feature brief` 与最新 `project memo`
   - 若 `PRD` 不存在，则直接 `阻塞`
+- `/review`
+  - 必须先确定唯一 `feature-slug` 与本次 `feature-summary`
+  - 读取该 slug 下 `./docs/features/<feature-slug>/` 全部版本的需求文档（计数版本数）
+  - 再读取 `./dev/features/<feature-slug>/` 全部 dev 产物（tech-spec / 票 / impl-log / evidence / review report / MR）
+  - 若票未全部 `done`，直接 `阻塞`（用户明确要求部分复盘除外）
