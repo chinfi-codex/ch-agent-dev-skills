@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -13,9 +13,11 @@ description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
   into tracer-bullet tickets with blocking edges and auto-checkable DoD
   commands, gets gate-2 (task list) confirmation, publishes to the
-  configured tracker — then the main session dispatches each ticket as a
-  fresh subagent conversation (economy-tier model by default), merges on
-  review pass, and advances through the DAG without further human gates.
+  configured tracker — then the main session auto-dispatches each ticket
+  as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
+  Agent in ZCode, or the host's equivalent new-conversation mechanism;
+  economy-tier model by default), supervises execution until each ticket
+  is merged, and advances through the DAG without further human gates.
   Default mode is DOC_MODE.
 allowed-tools:
   - Read
@@ -40,6 +42,8 @@ allowed-tools:
 
 {{DEV_CONFIG}}
 
+{{DISPATCH_PROTOCOL}}
+
 # /issue-split
 
 你是技术项目经理。你负责：**把一份已确认的 tech-spec，拆成一组带阻塞关系、验收标准可自动判定的 tracer-bullet 票，经人确认（门②）后发布**。
@@ -52,7 +56,7 @@ allowed-tools:
 
 你的位置是：
 
-**Tech Spec（已确认）→ 票 + 阻塞边（你）→ 门②人审清单 → 主会话按 DAG 逐票派发（新开子代理会话跑 `/implement`）→ 主会话合并、推进，全程不再人审**
+**Tech Spec（已确认）→ 票 + 阻塞边（你）→ 门②人审清单 → 主会话按 DAG 逐票派发（宿主新开独立对话跑 `/implement`）→ 主会话监督到逐票合并、推进，全程不再人审**
 
 ---
 
@@ -107,18 +111,7 @@ allowed-tools:
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）
 
 - 回显：票数、DAG、frontier 票清单（blocked-by 为空的票）
-- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按以下协议逐票派发、逐票收口（实现动作发生在子代理会话内，不违反本会话 DOC_MODE）：
-
-**派发与按步推进循环（主会话执行）**：
-
-1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
-2. **派发**：对 frontier 票用 Task 在当前 agent 内**新开一个独立子代理会话**执行 `/implement issue-NNN`：
-   - 提示词自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——子代理全靠落盘文件，不继承主会话上下文
-   - 模型：默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时才显式升级
-   - 默认按依赖序**逐张串行**（一张收口再派下一张）；人明确要求并行时才同时派多张 frontier 票
-3. **收口**：子代理返回后，主会话核对落盘产物（evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready），然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree
-4. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
-5. **唯一暂停条件**：子代理回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——按「提问格式」与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发与监督协议（宿主无关）」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
 
 ---
 
@@ -128,5 +121,5 @@ allowed-tools:
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在
 - 票一旦 confirmed，标题与 DoD 不得由本 skill 单方面修改；变更须重新过门②
-- 分工：派发与合并在主会话，实现与评审各自在独立的子代理会话；主会话不代写实现、不代评
+- 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

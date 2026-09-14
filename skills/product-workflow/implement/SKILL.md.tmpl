@@ -1,15 +1,17 @@
 ---
 name: implement
-version: 0.2.0
+version: 0.3.0
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally dispatched by the main
-  session as a fresh subagent conversation (economy-tier model by default):
-  works in a dedicated git worktree with TDD, records on-disk evidence,
-  invokes /ai-review as an independent subagent (delegate mode by default),
-  fixes BLOCKERs, and submits the merge request. The main session merges
-  once review passes — no human gate. Success is judged by on-disk
-  evidence, never by self-report.
+  session as a fresh host-agent conversation (host-agnostic: Task in
+  Claude Code, Agent in ZCode, or the host's equivalent new-conversation
+  mechanism; economy-tier model by default): works in a dedicated git
+  worktree with TDD, records on-disk evidence, invokes /ai-review in an
+  independent conversation (delegate mode by default), fixes BLOCKERs,
+  and submits the merge request. The main session supervises through
+  merge — no human gate. Success is judged by on-disk evidence, never by
+  self-report.
 allowed-tools:
   - Read
   - Write
@@ -29,6 +31,8 @@ allowed-tools:
 
 {{DEV_CONFIG}}
 
+{{DISPATCH_PROTOCOL}}
+
 # /implement
 
 你是实现工程师（Implementer）。你负责：**把一张已确认的票，在独立 worktree 里实现、测试、留证据，经独立评审（`/ai-review`）并回修 BLOCKER 后，把 merge request 推到 ready；评审通过后由主会话合并，无需人审**。
@@ -36,7 +40,7 @@ allowed-tools:
 你不负责：
 
 - 质疑票的范围与验收标准（发现范围问题 → 票状态置 `needs-human` 并说明，不自行改票）
-- 合并 MR（合并由主会话在评审通过后执行；你以子代理身份运行时只到 MR ready 并结构化回报）
+- 合并 MR（合并由主会话在评审通过后执行；你以被派发独立对话身份运行时只到 MR ready 并结构化回报）
 - 修复 Medium / Low 评审意见（记入 impl-log 遗留即可）
 - 部署与发布
 
@@ -46,8 +50,8 @@ allowed-tools:
 
 运行身份：
 
-- 标准形态：issue 生成后，由主会话用 Task **新开独立子代理会话**派发执行；派发提示词自包含（票文件 / tech-spec / `./dev/agents-config.md` 路径与 `feature-slug`），你不继承、也不应依赖派发方的会话上下文
-- 子代理模型默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）
+- 标准形态：issue 生成后，由主会话按「派发与监督协议」通过宿主 agent 的新开独立对话能力**自动新开一个独立对话**派发执行（宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自机制）；派发提示词自包含（票文件 / tech-spec / `./dev/agents-config.md` 路径与 `feature-slug`），你不继承、也不应依赖派发方的会话上下文
+- 被派发对话的模型默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
 ---
@@ -99,10 +103,10 @@ allowed-tools:
 
 - 票置 `in-review`；push 分支
 - **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审子代理模型默认取 `dispatch.model` 的 economy 档）：
-  - `delegate`（默认）：以**独立子代理**（Task，新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的子代理实例执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec
-  - `local`：以**独立子代理**（Task，新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
-  - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立会话 / 子代理**运行 `/ai-review`（ci 模式）解析结果、产出报告
+- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审对话模型默认取 `dispatch.model` 的 economy 档）：
+  - `delegate`（默认）：按「派发与监督协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec
+  - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
+  - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
 - 评审报告落 `reviews/`；不指示、不引导评审结论
 
 ### Step 7：BLOCKER 回修（同一上下文，计入轮次预算）
@@ -117,7 +121,7 @@ allowed-tools:
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
-  - 你是被派发的**子代理** → 不合并；票置 `mr-submitted`，把「分支名 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
+  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
   - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID>`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，删除远 / 本地分支并 `git worktree remove .worktrees/<issue-id>`
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合；仍无法自动解决 → 票置 `needs-human`，停下与人确认，不硬合
 
@@ -133,5 +137,5 @@ allowed-tools:
 - 一切改动只在 worktree 分支；红线命中即停
 - 成功只认落盘证据（evidence + commit hash），不认自报
 - `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
-- 合并只在评审通过、证据齐全后由主会话执行；子代理只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
+- 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
 - 用词遵循 GLOSSARY 标准术语

@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -13,9 +13,11 @@ description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
   into tracer-bullet tickets with blocking edges and auto-checkable DoD
   commands, gets gate-2 (task list) confirmation, publishes to the
-  configured tracker — then the main session dispatches each ticket as a
-  fresh subagent conversation (economy-tier model by default), merges on
-  review pass, and advances through the DAG without further human gates.
+  configured tracker — then the main session auto-dispatches each ticket
+  as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
+  Agent in ZCode, or the host's equivalent new-conversation mechanism;
+  economy-tier model by default), supervises execution until each ticket
+  is merged, and advances through the DAG without further human gates.
   Default mode is DOC_MODE.
 allowed-tools:
   - Read
@@ -231,10 +233,45 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
 - `quality-gate`：质量门命令，分快速档（fast：秒级，类型 / lint / 单文件测试）与全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；full 在交付前（MR ready / 证据落盘时）必须跑一次并留记录**
-- `max-fix-rounds`：自修复轮次上限，默认 5
+- `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
-- `dispatch`：执行派发方式。默认 `executor: subagent`——issue 生成后由主会话在当前 agent 内**新开独立子代理会话**逐票派发执行，不依赖外部 CI 或人工触发；`model: economy`——派发的子代理默认使用当前宿主可用模型范围内**经济性最高的一档**（比主会话低一档），仅在票被标记为高风险 / 复杂时显式升级
-- `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由当前 agent 内新开的独立子代理执行；`local` / `ci` 为可选增强，需配置 LLM 端点
+- `dispatch`：执行派发方式。默认 `executor: subagent`——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力逐票自动派发执行（宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制），不依赖外部 CI 或人工触发；派发后由主会话监督执行直到完成合并。完整协议与宿主适配表见「派发与监督协议」节；`model: economy`——被派发对话默认使用当前宿主可用模型范围内**经济性最高的一档**（比主会话低一档），仅在票被标记为高风险 / 复杂时显式升级
+- `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
+
+## 派发与监督协议（宿主无关）
+
+dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自动新开一个独立对话执行派发提示词**。不绑定任何具体工具名，不依赖外部 CI 或人工触发。
+
+### 派发原语
+
+- 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
+- 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——被派发方全靠落盘文件工作
+- 模型档位：被派发对话默认取当前宿主可用模型范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时显式升级
+
+### 宿主适配
+
+| 宿主 | 新开独立对话的机制 |
+|---|---|
+| Claude Code | `Task` 工具（subagent） |
+| ZCode | `Agent` 工具（subagent） |
+| Codex | 宿主的新会话 / 子代理能力（以实际版本为准） |
+| WorkBuddy | 宿主的任务派发 / 新对话能力 |
+| 其他通用 agent | 任何「同一宿主内新开独立对话」的等价机制 |
+
+- skill frontmatter 里 `allowed-tools` 的 `Task` 是 Claude Code 的工具命名；其他宿主安装或运行时按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变
+- 兜底：宿主完全没有自动新开对话能力时，主会话产出自包含派发提示词、请人在新对话窗口启动执行；不得在主会话同一上下文里「顺便自己实现」充数
+- 写查分离不可降级：无论宿主能力如何，**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境中执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评
+
+### 监督循环（主会话职责，直到完成合并）
+
+门②（票清单确认）通过后，主会话自动进入监督循环，**派出后不停手，监督到每张票合并完成**：
+
+1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
+2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
+3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
+5. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
+6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
 
 # /issue-split
 
@@ -248,7 +285,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 
 你的位置是：
 
-**Tech Spec（已确认）→ 票 + 阻塞边（你）→ 门②人审清单 → 主会话按 DAG 逐票派发（新开子代理会话跑 `/implement`）→ 主会话合并、推进，全程不再人审**
+**Tech Spec（已确认）→ 票 + 阻塞边（你）→ 门②人审清单 → 主会话按 DAG 逐票派发（宿主新开独立对话跑 `/implement`）→ 主会话监督到逐票合并、推进，全程不再人审**
 
 ---
 
@@ -303,18 +340,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）
 
 - 回显：票数、DAG、frontier 票清单（blocked-by 为空的票）
-- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按以下协议逐票派发、逐票收口（实现动作发生在子代理会话内，不违反本会话 DOC_MODE）：
-
-**派发与按步推进循环（主会话执行）**：
-
-1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
-2. **派发**：对 frontier 票用 Task 在当前 agent 内**新开一个独立子代理会话**执行 `/implement issue-NNN`：
-   - 提示词自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——子代理全靠落盘文件，不继承主会话上下文
-   - 模型：默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时才显式升级
-   - 默认按依赖序**逐张串行**（一张收口再派下一张）；人明确要求并行时才同时派多张 frontier 票
-3. **收口**：子代理返回后，主会话核对落盘产物（evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready），然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree
-4. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
-5. **唯一暂停条件**：子代理回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——按「提问格式」与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发与监督协议（宿主无关）」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
 
 ---
 
@@ -324,5 +350,5 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在
 - 票一旦 confirmed，标题与 DoD 不得由本 skill 单方面修改；变更须重新过门②
-- 分工：派发与合并在主会话，实现与评审各自在独立的子代理会话；主会话不代写实现、不代评
+- 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

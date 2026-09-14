@@ -21,6 +21,7 @@ const fragmentMap: Record<string, string> = {
   GRILLING: "grilling.md",
   DEV_ARTIFACT_PATHS: "dev-artifact-paths.md",
   DEV_CONFIG: "dev-config.md",
+  DISPATCH_PROTOCOL: "dispatch-protocol.md",
 };
 
 const templatesDir = join(rootDir, "shared", "templates");

@@ -1,14 +1,15 @@
 ---
 name: ai-review
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
   Independent code review powered by open-code-review (ocr). Three modes:
   delegate (default: ocr filters files and resolves rules, a fresh
-  host-agent subagent reviews — no LLM endpoint needed), local (run ocr
-  against main...HEAD with the ticket file as background), ci (GitLab CI
-  auto-review on MR push, findings posted as inline discussions).
+  independent conversation in the host agent reviews — host-agnostic,
+  no LLM endpoint needed), local (run ocr against main...HEAD with the
+  ticket file as background), ci (GitLab CI auto-review on MR push,
+  findings posted as inline discussions).
   Review-only: never modifies code, writes the review report only.
 allowed-tools:
   - Read
@@ -46,7 +47,7 @@ allowed-tools:
 
 | 模式 | 触发 | ocr 在哪跑 | 结果来源 |
 |---|---|---|---|
-| `delegate`（默认） | 每次评审 | 本地（ocr 只做文件筛选与规则解析，不调 LLM） | 当前 agent 内新开的独立子代理评审 |
+| `delegate`（默认） | 每次评审 | 本地（ocr 只做文件筛选与规则解析，不调 LLM） | 宿主 agent 内新开的独立对话评审 |
 | `local` | push 前本地跑 | 票的 worktree 内 | `ocr review --format json --output` |
 | `ci` | MR push 自动触发 | GitLab CI job | MR 内联 discussions + CI artifacts `.ocr/ocr-result.json` |
 
@@ -87,8 +88,8 @@ allowed-tools:
 **delegate 模式**（默认）：
 
 - `ocr delegate preview --format json` 取可评审文件清单与模式元数据；`ocr delegate rule --format json <paths...>` 取各文件规则
-- 以**独立子代理**（Task，新实例、不共享实现会话上下文）执行逐文件评审：diff（按 preview 给的 merge_base）+ 规则组 + 票 DoD，输出 path/content/start_line/end_line/category/severity 结构
-- 子代理模型：默认按 `agents-config.dispatch.model`（economy）取当前宿主可用范围内经济性最高的一档；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
+- 以**独立对话**（宿主新开对话机制：Claude Code `Task`、ZCode `Agent`，Codex / WorkBuddy 等用各自等价机制；新实例、不共享实现会话上下文）执行逐文件评审：diff（按 preview 给的 merge_base）+ 规则组 + 票 DoD，输出 path/content/start_line/end_line/category/severity 结构
+- 评审对话模型：默认按 `agents-config.dispatch.model`（economy）取当前宿主可用范围内经济性最高的一档；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
 - 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
 
 ### Step 3：红线复核（第二双眼睛）
@@ -104,7 +105,7 @@ allowed-tools:
 ### Step 5：结论、返回与校准
 
 - 结论：无 BLOCKER → `pass`；仅 medium / low → `pass-with-notes`；任一 BLOCKER → `blocked`
-- 报告路径与结论返回调用方（`/implement` 子代理或主会话），供回修或主会话合并判断
+- 报告路径与结论返回调用方（`/implement` 被派发对话或主会话），供回修或主会话合并判断
 - 标准失配校准：若连续多轮首轮全 PASS / 全 BLOCK，提示人用已合并 MR 回测误报漏报，再修订 `.opencodereview/rule.json` 的 `rules`；反复出现的判据沉淀进仓库 `REVIEW.md`（无则提示人创建）
 
 ---
@@ -112,7 +113,7 @@ allowed-tools:
 ## 硬约束
 
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
-- 评审必须由独立实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）
+- 评审必须由独立实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评，必须新开独立对话）
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
 - 红线命中一律 Critical，无论引擎结论
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
