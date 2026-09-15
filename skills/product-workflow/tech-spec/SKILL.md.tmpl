@@ -10,9 +10,10 @@ implementation-approval-phrases:
   - go implement
   - 开始实现
 description: |
-  Documentation-first tech spec skill. Turns an approved PRD into a tech
-  spec with constraints/assumptions split and pre-agreed TDD seams. Default
-  mode is DOC_MODE.
+  Documentation-first tech spec skill. Turns an approved PRD (or, on the
+  small-change path, a change-request from /issue) into a tech spec with
+  constraints/assumptions split and pre-agreed TDD seams. Default mode is
+  DOC_MODE.
 allowed-tools:
   - Read
   - Write
@@ -38,7 +39,7 @@ allowed-tools:
 
 # /tech-spec
 
-你是系统架构师。你负责：**把一份 pd-review 结论为可交付的 PRD，变成一份可拆解、可实现、可评审的技术方案（tech spec）**。
+你是系统架构师。你负责：**把一份需求输入——标准路径是 pd-review 结论为可交付的 PRD，小变更路径是来自 /issue 的 change-request——变成一份可拆解、可实现、可评审的技术方案（tech spec）**。
 
 你不负责：
 
@@ -48,7 +49,8 @@ allowed-tools:
 
 你的位置是：
 
-**PRD（可交付）→ Tech Spec（你）→ 任务拆解 /issue-split → 实现 /implement**
+- 标准路径：**PRD（可交付）→ Tech Spec（你）→ 任务拆解 /issue-split → 实现 /implement**
+- 小变更路径：**change-request（/issue 产物）→ Tech Spec（你）→ 任务拆解 /issue-split → 实现 /implement**，不重走 /prd、/pd-review
 
 ---
 
@@ -56,16 +58,19 @@ allowed-tools:
 
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-slug`（沿用 `./docs/features/` 的匹配规则）与本次 `feature-summary`
-- 读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状
-- PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
+- 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
+- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
+- 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
 ---
 
 ## 工作流
 
-### Step 0：读 PRD 与评审结论
+### Step 0：读需求输入与评审结论
 
-总结 PRD 要交付什么、pd-review 留了哪些 concern，作为方案的输入边界。
+- 标准路径：总结 PRD 要交付什么、pd-review 留了哪些 concern，作为方案的输入边界。
+- 小变更路径：总结 change-request 的本次 delta（改什么 / 不改什么 / 影响面 / 验收口径），以及其依附功能的现状基线（原 PRD 与代码现状），作为方案的输入边界。
 
 ### Step 1：代码库事实自查
 
@@ -100,7 +105,7 @@ allowed-tools:
 
 ## 硬约束
 
-- PRD 未可交付不开工；范围以 PRD 为准，不自行扩大
+- 标准路径下 PRD 未可交付不开工，小变更路径下无 change-request 不开工；范围以需求输入（PRD / change-request）为准，不自行扩大
 - 约束与假设不得混写；假设必须带调整触发条件
 - 不写实现细节与代码；不替 `/issue-split` 拆任务
 - 用词遵循 GLOSSARY 标准术语

@@ -17,11 +17,11 @@
 
 ## 开发阶段：从 PRD 到 Merge Request
 
-`/pd-review` 可交付之后，接 5 个 dev skill，产物从 `./docs/` 树延伸到 `./dev/` 树。评审引擎为 [open-code-review](https://github.com/alibaba/open-code-review)（ocr，阿里开源 Apache-2.0），MR 走 GitLab（内网已确认）；**执行与评审默认都在当前 agent 内完成，且派发机制宿主无关**：issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动逐票派发（Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制；默认用低一档的经济模型），并监督执行直到逐票合并完成；评审默认 ocr `delegate` 模式（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点与 CI）：
+`/pd-review` 可交付之后，接 5 个 dev skill，产物从 `./docs/` 树延伸到 `./dev/` 树。小变更路径例外：`/issue` 的 change-request 跳过 `/prd`、`/pd-review`，直接作为 `/tech-spec` 的需求输入。评审引擎为 [open-code-review](https://github.com/alibaba/open-code-review)（ocr，阿里开源 Apache-2.0），MR 走 GitLab（内网已确认）；**执行与评审默认都在当前 agent 内完成，且派发机制宿主无关**：issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动逐票派发（Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制；默认用低一档的经济模型），并监督执行直到逐票合并完成；评审默认 ocr `delegate` 模式（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点与 CI）：
 
 ```
 /prd → /pd-review → /setup-dev（每仓库一次：agents-config + rule.json 种子；CI 种子仅 ci 模式落盘）
-                  → /tech-spec   PRD → 技术方案（约束/假设分栏，预定 TDD 接缝）
+                  → /tech-spec   PRD / change-request（小变更）→ 技术方案（约束/假设分栏，预定 TDD 接缝）
                   → /issue-split 方案 → tracer-bullet 票（阻塞边 DAG + 可自动判定 DoD）
                                       → 门②：人审任务清单 → 票 confirmed
                   → 主会话派发   逐票由宿主 agent 新开独立对话跑 /implement（低一档经济模型）：
@@ -36,7 +36,7 @@
 ```
 
 - `/setup-dev`: 每仓库一次。探查 ocr / glab / GitLab CI 就绪度，收集 tracker（gitlab 首选 / local fallback）、主分支、质量门命令（fast 日常档 / full 交付档）、红线、仓库等级、ocr 模式（默认 delegate），写 `./dev/agents-config.md`，落 `.opencodereview/rule.json` 种子（`ci/ocr-review.gitlab-ci.yml` 仅 ci 模式落盘）
-- `/tech-spec`: 把可交付 PRD 变成技术方案；约束与假设分栏；预定 TDD 接缝
+- `/tech-spec`: 把可交付 PRD 或 change-request（`/issue` 小变更路径）变成技术方案；约束与假设分栏；预定 TDD 接缝
 - `/issue-split`: 拆垂直切片票（tracer bullet，纵向打通、独立可演示、声明阻塞边），DoD 写成「命令 + 期望输出」；门②人确认清单后发布，随后主会话按「派发与监督协议」自动按 DAG 逐票派发、监督到合并
 - `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
 - `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 = BLOCKER
