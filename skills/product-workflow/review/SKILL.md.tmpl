@@ -74,7 +74,7 @@ allowed-tools:
 ### Step 1：全量读取
 
 - `./docs/features/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
-- `./dev/features/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件
+- `./dev/features/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
 - `./docs/EXPERIENCE.md` 与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重合并要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞

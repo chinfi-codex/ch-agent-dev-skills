@@ -11,7 +11,7 @@ PACK="$ROOT/skills/product-workflow"
 
 node --experimental-strip-types "$PACK/scripts/gen-skill-docs.ts"
 
-FLAT_ITEMS=(ceo-office pd-plan issue prd pd-review review tech-spec issue-split implement ai-review setup-dev shared)
+FLAT_ITEMS=(ceo-office pd-plan issue prd pd-review review tech-spec issue-split implement ai-review setup-dev prototype shared)
 
 sync_flat() {
   local target_root="$1"

@@ -8,7 +8,7 @@ $Pack = Join-Path $Root "skills\product-workflow"
 node --experimental-strip-types (Join-Path $Pack "scripts\gen-skill-docs.ts")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$FlatItems = @("ceo-office","pd-plan","issue","prd","pd-review","review","tech-spec","issue-split","implement","ai-review","setup-dev","shared")
+$FlatItems = @("ceo-office","pd-plan","issue","prd","pd-review","review","tech-spec","issue-split","implement","ai-review","setup-dev","prototype","shared")
 
 function Sync-Flat($TargetRoot) {
   New-Item -ItemType Directory -Force $TargetRoot | Out-Null

@@ -61,6 +61,7 @@ allowed-tools:
 - 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
 - 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
 - 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
+- 两条路径均补读 `./dev/features/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
 ---
@@ -87,6 +88,8 @@ allowed-tools:
 
 **测试策略 = 预先约定 TDD 接缝**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案。这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。
 
+**原型 verdict 的消化**：若 `prototypes/` 下存在 verdict，已裁决结论作为方案输入边界；其中的决策性片段按模板「3.5 决策性片段」收录——裁剪到决策相关部分、逐片标注来源（原型路径 + verdict 日期）。片段是决策的精确化记录，不是实现，不得以片段替代方案文字。
+
 ### Step 3：技术拷打
 
 按「拷打规则（Grilling）」对技术决策做轮次制拷打：模块边界、数据流向、兼容策略、失败路径。能从代码查到的不问；分叉题给 A / B / C（A 为推荐）。frontier 未清空前不输出完整方案。
@@ -107,7 +110,7 @@ allowed-tools:
 
 - 标准路径下 PRD 未可交付不开工，小变更路径下无 change-request 不开工；范围以需求输入（PRD / change-request）为准，不自行扩大
 - 约束与假设不得混写；假设必须带调整触发条件
-- 不写实现细节与代码；不替 `/issue-split` 拆任务
+- 不写实现细节与代码，唯一例外：`/prototype` verdict 中已裁决的决策性片段（状态机 / reducer / schema / type shape 等比散文更精确编码决策的片段），裁剪到决策相关部分后内联进「3.5 决策性片段」，并标注来源（原型路径 + verdict 日期）；不替 `/issue-split` 拆任务
 - 用词遵循 GLOSSARY 标准术语
 - 不把推断写成事实
 

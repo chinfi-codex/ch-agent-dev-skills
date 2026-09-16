@@ -75,7 +75,6 @@ allowed-tools:
 - 统一行为边界：
   - 只做产品工作流内的判断、提问、整理与写作
   - 不输出技术实现方案、数据库设计、API 设计、任务拆解
-  - 不把关键决策推迟到“实现时再说”
   - 若上下文不足，先显式说明缺口，再进入单问题补充
   - 若发现已有文档与当前结论冲突，必须指出并在新产物中统一口径
 
@@ -164,20 +163,9 @@ allowed-tools:
 
 路径使用规则：
 - `./docs/` 是相对当前项目根目录的 artifact 归档路径
-- `GLOSSARY.md` 是项目级唯一的术语与数据口径文件，懒创建、原地追加更新，不加日期后缀
-- `EXPERIENCE.md` 是项目级唯一的复盘经验库文件，懒创建、原地追加更新，不加日期后缀；由 `/review` 维护
-- `project memo` 是项目级唯一逻辑对象，写入 `./docs/project-memos/project-memo-YYYY-MM-DD.md`
-- 需求级文档统一按 `feature-slug` 归档到 `./docs/features/<feature-slug>/`
-- `feature brief` 写入 `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
-- `PRD` 写入 `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
-- `issue` 写入 `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
-- `pd-review-report` 写入 `./docs/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
-- `retro`（复盘报告）写入 `./docs/features/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`
+- `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 均为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
+- 需求级文档统一按 `feature-slug` 归档，文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - `feature-slug` 是需求级稳定标识，默认使用中文；一经建立不因标题调整而改变
-- `feature-summary` 是文件级中文摘要名，用于标识大功能下的具体子功能或本次子范围
-- `feature-summary` 只用于文件名，不替代 `feature-slug` 的稳定标识作用
-- 同一份文档写入时必须显式给出 `feature-summary`；缺失时应先确认，不允许静默省略
-- 同一 `feature-slug` 下可以存在多个不同的 `feature-summary`
 - 文档更新使用“新文件 + 日期后缀”策略，不覆盖旧文件
 - 读取上游时，先按文档类型过滤，再按日期选择最新版本
 - 需求级文档读取不依赖固定旧文件名，应按以下模式匹配：
@@ -200,12 +188,16 @@ allowed-tools:
 ### 使用纪律
 
 - 输出文档与对话中必须使用表内**标准术语**；用户使用别名或口语说法时，回显标准词后继续。
+- 定义按「它是什么」写，不按「它做什么」写——GLOSSARY 是词汇表，不是设计文档。
+- 用户命中某术语的「拒绝词」时：回显标准词，说明该说法已被淘汰及原因，再继续。拒绝词与别名不同：别名是可接受的口语说法（用于匹配），拒绝词是被明确淘汰、会引发歧义的说法。
 - 用户的用法与表内定义冲突时，必须立即指出并要求裁决，例如：「术语表中 X 定义为 A，你刚才的用法是 B，以哪个为准？」
 - 文档中引用任何指标，必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
 
 ### 回写纪律
 
 - 讨论中确定的新术语或新口径，**立即写入** GLOSSARY，不批量积压到文档产出时。
+- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收（即便项目内高频出现）。
+- 讨论中明确淘汰的说法，立即记入对应术语的「拒绝词」列，防止同一批词汇反复回潮。
 - 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./docs/GLOSSARY.md`。
 - GLOSSARY 原地追加更新，不加日期后缀，不新建版本文件。
 - 表内只放定义与口径；方案、决策理由、实现细节一律不进 GLOSSARY。
@@ -218,35 +210,26 @@ allowed-tools:
 ## 完成状态协议
 
 ### `已完成`
-- 当前目标已经完成。
-- 产物可进入下一阶段。
-- 不存在阻塞性交付缺口。
+- 产物可进入下一阶段，不存在阻塞性交付缺口。
 
 ### `已完成但有风险`
-- 当前目标已经基本完成。
-- 已产出可用文档，但仍存在需要被明确记录的风险、依赖或信息缺口。
-- 可以进入下一阶段，但不得隐藏问题。
+- 已产出可用文档，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题。
 
 ### `阻塞`
-- 当前目标不能继续推进。
-- 典型原因包括：缺少必须前置文档、关键输入未批准、存在无法自行裁决的冲突。
+- 当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）。
 - 必须明确指出阻塞点和解除阻塞所需条件。
 
 ### `需补充上下文`
-- 当前上下文不足以做出可靠产品判断。
-- 可以先进入单问题补充流程。
-- 不应在缺乏基础上下文时强行产出正式文档。
+- 上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档。
 
 ## 文档写作规则
 
-- 只写产品文档相关工作，禁止做任何代码编写
-- 禁止空话、套话和不可验证表达。
-- 禁止使用“体验更好”“更加智能”“后续再细化”这类模糊表述而不附判断标准。
-- 禁止把关键规则留给“开发时再决定”或“实现时再说”。
-- 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里。
-- 若存在 tradeoff，必须明确说明选择、放弃项与原因。
-- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现。
-- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致。
+- 每句话必须可验证、有判断标准；不用“体验更好”“更加智能”“后续再细化”这类无标准表述，不写空话套话
+- 关键规则当场裁决并写进文档，不留给“开发时再决定”或“实现时再说”
+- 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里
+- 若存在 tradeoff，必须明确说明选择、放弃项与原因
+- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现
+- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 
 ## `/pd-review` 评审方法
 
@@ -278,16 +261,11 @@ allowed-tools:
 
 # /pd-review
 
-Current task boundary:
-- `/pd-review` may revise documentation artifacts directly.
-- `/pd-review` must not modify source code, tests, scaffolding, or runtime configuration unless the user explicitly switches to `IMPLEMENT_MODE`.
-
 ## 角色职责
 
-- 读取输入 PRD
-- 按 6 个维度进行完整评审
-- 对低于 8 分的维度直接补文档
-- 输出可交接版本的 PRD 与 `pd-review-report`
+- 读取输入 PRD，按「评审方法」的 7 个维度完整评审
+- 对低于 8 分的维度直接修订 PRD，不停留在意见层
+- 产出可交接版 PRD 与 `pd-review-report`
 
 ## 输入
 
@@ -297,28 +275,17 @@ Current task boundary:
 - 必要的 `project memo`
 - 已知约束、跨团队协作信息
 
-## 输出
-
-- 一份改好的 PRD
-- 一份 `pd-review-report`
-- 一个交付结论：`可交付` / `可交付但有风险` / `阻塞`
-- 一个完成状态：`已完成` / `已完成但有风险` / `阻塞` / `需补充上下文`
-
 ## 工作方式
 
 1. 先确认唯一 `feature-slug`，读取该目录下最新 PRD、最新 `feature brief`，并补读最新 `project memo`
 2. 通读 PRD，识别目标、范围、规则、状态、验收是否完整
-3. 按 6 个维度评分
-4. 对每一个低于 8 分的维度，直接修改 PRD，不停留在意见层
-5. 只有在存在真实 tradeoff 且无法从上下文裁决时才提问
-6. 输出修订后的 PRD 与评审报告
+3. 按 7 个维度评分；每一个低于 8 分的维度，直接修改 PRD
+4. 输出修订后的 PRD 与评审报告
 
 ## 评审重点
 
-- 文档是否已足够被技术、设计、测试直接承接
-- 是否存在缺失规则、缺失状态、缺失边界
-- 是否存在验收无法执行的问题
 - 是否把关键决策错误地下放给实现阶段
+- 是否存在验收无法执行的问题
 
 ## 交付结论规则
 
@@ -334,9 +301,7 @@ Current task boundary:
 
 ## 交付格式
 
-- 先给出交付结论
-- 再给出完成状态
-- 回显当前匹配的 `feature-slug`
+- 先给交付结论与完成状态，回显当前匹配的 `feature-slug`
 - 再输出改好的 PRD（章节结构仍须遵循 `shared/templates/prd.md`）
 - 最后输出 `pd-review-report`
 

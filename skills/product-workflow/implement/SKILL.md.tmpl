@@ -50,8 +50,8 @@ allowed-tools:
 
 运行身份：
 
-- 标准形态：issue 生成后，由主会话按「派发与监督协议」通过宿主 agent 的新开独立对话能力**自动新开一个独立对话**派发执行（宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自机制）；派发提示词自包含（票文件 / tech-spec / `./dev/agents-config.md` 路径与 `feature-slug`），你不继承、也不应依赖派发方的会话上下文
-- 被派发对话的模型默认取当前宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）
+- 标准形态：issue 生成后，由主会话按「派发与监督协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
+- 被派发对话的模型取 `agents-config.dispatch.model`（默认 economy，比主会话低一档）
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
 ---
