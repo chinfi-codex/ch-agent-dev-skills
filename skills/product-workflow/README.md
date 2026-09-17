@@ -10,6 +10,7 @@
 - `issue/`: 已有功能的小范围需求更新 skill
 - `prd/`: 正式 PRD 编写 skill
 - `pd-review/`: PRD 交接审查与补齐 skill
+- `handoff/`: 会话交接 skill（横切；不落盘，交接提示词直接输出在对话里供复制到新会话）
 - `shared/fragments/`: 多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
 - `shared/templates/`: 输出格式模板（不内联，agent 运行时按指针读取）
 - `scripts/`: 生成 `SKILL.md` 的构建脚本

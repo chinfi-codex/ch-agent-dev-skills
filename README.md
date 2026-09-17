@@ -3,7 +3,7 @@
 实施思路参考借鉴：https://github.com/garrytan/gstack
 开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）
 
-> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 12 个 skill 的逐一使用说明。本 README 讲设计思路。
+> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 13 个 skill 的逐一使用说明。本 README 讲设计思路。
 
 ## 这套 skills 在解决什么问题
 

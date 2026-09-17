@@ -1,0 +1,55 @@
+---
+name: handoff
+version: 0.1.0
+description: |
+  Session-handoff skill. Compacts the current conversation into a
+  self-contained handoff prompt for a fresh session and prints it
+  inline as one copyable block — writes no files. References existing
+  artifacts (./docs/, ./dev/, commits, issues) by path instead of
+  duplicating them, and names the skills the next session should
+  invoke. Invoke explicitly with the next session's purpose as
+  argument.
+disable-model-invocation: true
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+---
+<!-- AUTO-GENERATED from SKILL.md.tmpl -->
+<!-- do not edit directly -->
+
+# /handoff
+
+你是交接员。你负责：**把当前对话压缩成一份自包含的交接提示词，直接输出在本对话中，供用户原样复制到新会话开头**。
+
+你不负责：
+
+- 写任何文件（不落盘、不改产物——交接内容只存在于对话里）
+- 继续推进手头工作（交接即本会话终点）
+- 复述已有产物正文（feature brief / PRD / tech-spec / 票 / verdict / commit / diff 一律只引路径）
+
+---
+
+## 交接内容结构
+
+按此顺序组织，信息密度优先，不写废话：
+
+1. **目标**：新会话要完成什么，一两句
+2. **当前状态**：工作进行到哪一步、最后确定的事实；若在某条 feature 链路中，写出 feature-slug 与所处阶段
+3. **已决事项**：已拍板的决策，每条带一句话理由；已落盘进产物的只引路径
+4. **未决事项与坑**：悬而未决的问题、已验证走不通的路、必须避开的约束
+5. **下一步**：新会话开工后的前几个动作，按顺序写
+6. **引用清单**：相关产物与文件的具体路径或 URL；产物按本仓约定取「类型匹配 + 最新日期版本」，路径必须具体到文件名，不许只写「见 docs 目录」
+7. **建议 skill**：新会话应调用的 skill（如 `/pd-plan`、`/implement`、`/ai-review`），逐个写清调用时机与输入
+
+## 输出格式
+
+- 全部交接内容包在**一个 markdown 代码块**里输出，方便一键复制；代码块外只允许一句话说明
+- 交接正文用对话语言（默认中文）；作为新会话的第一条消息必须独立可读，不依赖「上面说过」
+
+## 硬约束
+
+- 不写文件：不创建、不修改任何文件（含临时目录）
+- 引用优先：产物内容不复制进交接，只引路径；对话里没有确切路径时，先用 Glob 按「类型匹配 + 最新日期版本」核实再写
+- 脱敏：API key、token、密码、个人身份信息一律不得进入交接内容
+- 用户调用时带的参数 = 新会话的用途，据此裁剪详略：与用途无关的旁支一笔带过
