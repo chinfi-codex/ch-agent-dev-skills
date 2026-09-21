@@ -35,7 +35,7 @@ allowed-tools:
 
 - 只允许读代码、读文档、写文档
 - 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
-- 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report
+- 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report、decision card
 - 禁止写或改：源码、测试、脚手架、运行配置
 - 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
 - 禁止执行实现导向命令：`python`、`pytest`、`node`、`npm`、`bun`、`cargo`、`go test`、build scripts
@@ -153,6 +153,9 @@ allowed-tools:
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
+  decisions/
+    decision-card-YYYY-MM-DD.md
+    decision-card-YYYY-MM-DD.html
   features/
     <feature-slug>/
       <feature-summary>-feature-brief-YYYY-MM-DD.md
@@ -165,6 +168,7 @@ allowed-tools:
 路径使用规则：
 - `./docs/` 是相对当前项目根目录的 artifact 归档路径
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 均为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
+- `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为可视化渲染，内容必须逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `feature-slug` 归档，文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - `feature-slug` 是需求级稳定标识，默认使用中文；一经建立不因标题调整而改变
 - 文档更新使用“新文件 + 日期后缀”策略，不覆盖旧文件
@@ -309,6 +313,7 @@ allowed-tools:
 - 一个战略判断
 
 只有在信息足够、链路清楚、前提对齐时，才允许输出简洁的 `Project Memo`。
+当输出收敛为 Strategic Judgment 或 Project Memo 时，必须同时产出一张决策卡（Decision Card，见 Step 5）。
 
 ---
 
@@ -488,6 +493,21 @@ allowed-tools:
 输出模板见本 skill 包内 `shared/templates/project-memo.md`（相对本 SKILL.md 为 `../shared/templates/project-memo.md`）。
 产出前必须先读取该文件，严格遵循其章节结构，不自行增删一级章节。
 
+#### 决策卡（Decision Card，伴随产物）
+
+决策卡不是第五种输出类型，而是 Strategic Judgment 与 Project Memo 的伴随产物：Memo 是推理，卡是批条。
+
+- **触发条件**：本轮输出为 Strategic Judgment 或 Project Memo 时，必须同时产出；Continue Discussion / Economic Model Snapshot 不产出
+- **一卡一决策**：一张卡只承载当前最该批的一个 top-level 决策，不堆叠多个决策
+- **内容纪律**：全部字段摘自本轮已有判断（mode、Chain Confidence、依据、最致命的问题、翻案条件、选项），不引入卡外新论证；全文一屏以内
+- **双形态落盘**（目录 `./docs/decisions/`，懒创建）：
+  - Markdown 源：`decision-card-YYYY-MM-DD.md`，产出前必须先读模板 `shared/templates/decision-card.md`（相对本 SKILL.md 为 `../shared/templates/decision-card.md`）
+  - 可视化渲染：同名 `decision-card-YYYY-MM-DD.html`，产出前必须先读模板 `shared/templates/decision-card.html`，按模板注释直接填写占位符，不执行任何命令
+  - md 是源，html 是渲染，两文件内容必须逐字段一致
+- **对话回显**：产出后在对话中内嵌完整卡块，末尾列出选项，等待一词批复（A / B / C 或 批准 / 调整 / 搁置）
+- **状态流转**：状态取值 待批准 / 已批准 / 已调整 / 已搁置；收到批复后原地更新两文件的状态字段——这是 dated-file 约定对决策卡的唯一例外；判断内容本身变化时，新建当日新卡，不改旧卡
+- **可选渲染**：宿主具备浏览器 / 截图能力时，可将 html 截图导出图片用于转发推送；非必需，不阻塞产出
+
 ---
 
 ## 五、执行层拦截器
@@ -512,13 +532,14 @@ allowed-tools:
 
 ## 六、输出要求
 
-结束时回显六项：
+结束时回显七项：
 
 1. **mode**：FOCUS / EXPANSION / HOLD / REDUCTION
 2. **完成状态**：按「完成状态协议」；讨论未收敛时用 `继续讨论中`
 3. **输出类型**：Continue Discussion / Economic Model Snapshot / Strategic Judgment / Project Memo（四选一，同 Step 5）
 4. **Chain Confidence**：High / Medium / Low / Unknown
 5. **本轮链路判断**：Step 3 的七个问题逐条给结论
-6. **下一步**：只能是「继续讨论一个更关键的 top-level 问题」或「前提清楚后进入其他技能」
+6. **决策卡**：落盘路径（md + html），或「本轮不产出」
+7. **下一步**：只能是「继续讨论一个更关键的 top-level 问题」或「前提清楚后进入其他技能」
 
 绝不直接跳到 PRD、需求拆解或执行规划，除非用户明确切换到其他技能，而且 CEO Office 已完成其判断职责。

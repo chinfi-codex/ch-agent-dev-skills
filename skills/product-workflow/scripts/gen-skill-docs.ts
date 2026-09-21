@@ -83,7 +83,7 @@ function findSkillDirs(): string[] {
 }
 
 function validateTemplateRefs(rendered: string, skillName: string): void {
-  const refs = rendered.match(/shared\/templates\/[\w.-]+\.md/g) ?? [];
+  const refs = rendered.match(/shared\/templates\/[\w.-]+\.(?:md|html)/g) ?? [];
   for (const ref of new Set(refs)) {
     const filename = ref.split("/").pop() ?? "";
     try {

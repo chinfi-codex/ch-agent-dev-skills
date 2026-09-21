@@ -66,6 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 
 - `GLOSSARY` -> `./docs/GLOSSARY.md`（项目级唯一术语与数据口径文件，懒创建、原地追加更新）
 - `project memo` -> `./docs/project-memos/project-memo-YYYY-MM-DD.md`
+- `决策卡` -> `./docs/decisions/decision-card-YYYY-MM-DD.md` + 同名 `.html` 可视化渲染（由 `/ceo-office` 产出；md 为源，html 为渲染，状态字段允许原地更新）
 - `feature brief` -> `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
 - `change request` -> `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
 - `PRD` -> `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`

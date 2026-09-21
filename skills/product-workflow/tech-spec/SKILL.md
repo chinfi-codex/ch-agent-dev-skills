@@ -35,7 +35,7 @@ allowed-tools:
 
 - 只允许读代码、读文档、写文档
 - 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
-- 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report
+- 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report、decision card
 - 禁止写或改：源码、测试、脚手架、运行配置
 - 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
 - 禁止执行实现导向命令：`python`、`pytest`、`node`、`npm`、`bun`、`cargo`、`go test`、build scripts
