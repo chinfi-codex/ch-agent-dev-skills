@@ -74,6 +74,7 @@ allowed-tools:
 ### Step 1：开 worktree 隔离
 
 - 基准 `agents-config.main-branch`：`git worktree add .worktrees/<issue-id> -b feat/<feature-slug>-<issue-id>`
+- 宿主自管会话沙箱（如 Codex 的 `~/.codex/worktrees/`）时：以沙箱为隔离，不再嵌套 `.worktrees/<issue-id>`；分支仍按 `feat/<feature-slug>-<issue-id>` 命名，收口清场由主会话按分支名发现
 - 全部工作发生在 worktree 内；主工作区不放任何本票改动
 - 并行多票 = 各自 worktree，互不干扰；本 skill 一次只驱动一张票
 - worktree 已存在（恢复场景）：检查分支状态后续跑，不重复创建
@@ -129,13 +130,13 @@ allowed-tools:
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
-  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID>`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，删除远 / 本地分支并 `git worktree remove .worktrees/<issue-id>`
+  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
+  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发与监督协议」的 worktree 清场序列收尾：按分支名发现 worktree → `git worktree remove`（拒删则 `--force`）→ `git worktree prune` → 删分支 → `rmdir .worktrees 2>/dev/null || true`
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合；仍无法自动解决 → 票置 `needs-human`，停下与人确认，不硬合
 
 ### Step 9：收尾报告
 
-回显：分支 / MR 链接（或草案路径）/ 证据与评审报告路径 / BLOCKER 回修轮次 / 遗留 Medium-Low 清单 / 合并结果（已合并的 commit，或「待主会话合并」+ 结构化回报）。输出完成状态。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下与人确认。
+回显：分支 / worktree 路径 / MR 链接（或草案路径）/ 证据与评审报告路径 / BLOCKER 回修轮次 / 遗留 Medium-Low 清单 / 合并结果（已合并的 commit，或「待主会话合并」+ 结构化回报）。输出完成状态。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下与人确认。
 
 ---
 

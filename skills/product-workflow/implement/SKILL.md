@@ -106,7 +106,7 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 下的票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 沿用日期后缀版本规则，是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放在仓库根 `.worktrees/<issue-id>/`，该目录必须加入 `.gitignore`
+- worktree 统一放在仓库根 `.worktrees/<issue-id>/`，该目录必须加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——收口清场一律按分支名发现（见「派发与监督协议」的 worktree 清场序列），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树的约定：`feature-slug` 目录归档、`feature-summary` 进文件名、日期后缀区分版本、不覆盖旧文件、读取时按日期取最新
 - 需求级 dev 文档读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -141,17 +141,27 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 ### 宿主适配
 
-| 宿主 | 新开独立对话的机制 |
-|---|---|
-| Claude Code | `Task` 工具（subagent） |
-| ZCode | `Agent` 工具（subagent） |
-| Codex | 宿主的新会话 / 子代理能力（以实际版本为准） |
-| WorkBuddy | 宿主的任务派发 / 新对话能力 |
-| 其他通用 agent | 任何「同一宿主内新开独立对话」的等价机制 |
+| 宿主 | 新开独立对话的机制 | worktree 归属 |
+|---|---|---|
+| Claude Code | `Task` 工具（subagent） | 与主会话同一文件系统：实现对话在主工作区建 `.worktrees/<issue-id>`，主会话按清场序列删 |
+| ZCode | `Agent` 工具（subagent） | 同 Claude Code |
+| Codex | 宿主的新会话 / 子代理能力（以实际版本为准） | Codex 自建会话沙箱 `~/.codex/worktrees/<hash>/`，路径不可预知且不随会话正常结束保证回收：实现对话退出前按分支名自清，并把 worktree 路径写进结构化回报；主会话按清场序列以 branch 匹配兜底 |
+| WorkBuddy | 宿主的任务派发 / 新对话能力 | 以实际机制为准；派发环境与主工作区不同文件系统时，实现对话退出前按分支名自清，主会话 `git worktree prune` 校验 |
+| 其他通用 agent | 任何「同一宿主内新开独立对话」的等价机制 | 按 WorkBuddy 行原则处理 |
 
 - skill frontmatter 里 `allowed-tools` 的 `Task` 是 Claude Code 的工具命名；其他宿主安装或运行时按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变
 - 兜底：宿主完全没有自动新开对话能力时，主会话产出自包含派发提示词、请人在新对话窗口启动执行；不得在主会话同一上下文里「顺便自己实现」充数
 - 写查分离不可降级：无论宿主能力如何，**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境中执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评
+
+### worktree 清场序列（收口与对账共用）
+
+按分支名发现，不按路径猜——宿主自管沙箱（如 Codex）会让真实路径偏离 `.worktrees/<issue-id>/` 约定：
+
+1. `git worktree list --porcelain` 找 branch = `feat/<feature-slug>-<issue-id>` 的注册条目
+2. `git worktree remove <path>`；有未跟踪产物被拒删时 `--force`（票已收口，产物不再需要）
+3. `git worktree prune` 清悬空注册
+4. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支，local 模式核对已并入 `main-branch` 后 `git branch -D feat/<feature-slug>-<issue-id>`（存在远端同名再 `git push origin --delete`）
+5. `rmdir .worktrees 2>/dev/null || true` 清空父目录
 
 ### 监督循环（主会话职责，直到完成合并）
 
@@ -159,9 +169,9 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
 2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
-3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
-5. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
+3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按 worktree 清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
+5. **推进**：每轮先做 worktree 对账——`git worktree list --porcelain` 与票状态比对，票已 `done` 但 worktree 仍在的按清场序列补删（回收中断会话的遗留），`in-review` / `needs-human` 票的保留并在总账列出路径；再重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / worktree 已清或保留原因 / 遗留 Medium-Low），输出完成状态
 6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
 
 # /implement
@@ -201,6 +211,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 ### Step 1：开 worktree 隔离
 
 - 基准 `agents-config.main-branch`：`git worktree add .worktrees/<issue-id> -b feat/<feature-slug>-<issue-id>`
+- 宿主自管会话沙箱（如 Codex 的 `~/.codex/worktrees/`）时：以沙箱为隔离，不再嵌套 `.worktrees/<issue-id>`；分支仍按 `feat/<feature-slug>-<issue-id>` 命名，收口清场由主会话按分支名发现
 - 全部工作发生在 worktree 内；主工作区不放任何本票改动
 - 并行多票 = 各自 worktree，互不干扰；本 skill 一次只驱动一张票
 - worktree 已存在（恢复场景）：检查分支状态后续跑，不重复创建
@@ -256,13 +267,13 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
-  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID>`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，删除远 / 本地分支并 `git worktree remove .worktrees/<issue-id>`
+  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
+  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发与监督协议」的 worktree 清场序列收尾：按分支名发现 worktree → `git worktree remove`（拒删则 `--force`）→ `git worktree prune` → 删分支 → `rmdir .worktrees 2>/dev/null || true`
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合；仍无法自动解决 → 票置 `needs-human`，停下与人确认，不硬合
 
 ### Step 9：收尾报告
 
-回显：分支 / MR 链接（或草案路径）/ 证据与评审报告路径 / BLOCKER 回修轮次 / 遗留 Medium-Low 清单 / 合并结果（已合并的 commit，或「待主会话合并」+ 结构化回报）。输出完成状态。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下与人确认。
+回显：分支 / worktree 路径 / MR 链接（或草案路径）/ 证据与评审报告路径 / BLOCKER 回修轮次 / 遗留 Medium-Low 清单 / 合并结果（已合并的 commit，或「待主会话合并」+ 结构化回报）。输出完成状态。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下与人确认。
 
 ---
 
