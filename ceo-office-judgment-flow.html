@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CEO Office · 判断思路</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  body { width:1920px; height:1080px; background:#f6f7fb; padding:46px 64px 34px; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ---------- header ---------- */
+  .header { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:26px; }
+  .title { font-size:46px; font-weight:800; color:#111827; letter-spacing:1px; }
+  .title em { font-style:normal; color:#4f46e5; }
+  .subtitle { font-size:20px; color:#6b7280; margin-top:8px; }
+  .badge { font-size:17px; color:#92400e; background:#fef3c7; border:1px solid #fcd34d; border-radius:999px; padding:10px 22px; font-weight:600; white-space:nowrap; }
+
+  /* ---------- main row ---------- */
+  .main { flex:1; display:flex; align-items:stretch; gap:0; min-height:0; }
+  .col { display:flex; flex-direction:column; }
+  .col-a { width:492px; }
+  .col-b { width:596px; }
+  .col-c { width:560px; }
+  .arrow-gap { width:72px; display:flex; align-items:center; justify-content:center; }
+
+  .stage-label { font-size:19px; font-weight:700; letter-spacing:2px; margin-bottom:14px; display:flex; align-items:center; gap:10px; }
+  .stage-label .dot { width:10px; height:10px; border-radius:50%; }
+  .lab-a { color:#4f46e5; } .lab-a .dot { background:#4f46e5; }
+  .lab-b { color:#b45309; } .lab-b .dot { background:#d97706; }
+  .lab-c { color:#047857; } .lab-c .dot { background:#059669; }
+
+  .col-body { flex:1; display:flex; flex-direction:column; justify-content:center; }
+
+  /* ---------- cards ---------- */
+  .card { background:#ffffff; border-radius:14px; box-shadow:0 2px 10px rgba(15,23,42,.07); padding:20px 24px 20px 22px; border-left:6px solid; }
+  .a .card { border-color:#4f46e5; }
+  .b .card { border-color:#d97706; }
+  .c .card { border-color:#059669; }
+
+  .card-head { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .num { width:36px; height:36px; border-radius:50%; color:#fff; font-size:20px; font-weight:800; display:flex; align-items:center; justify-content:center; flex:none; }
+  .a .num { background:#4f46e5; } .b .num { background:#d97706; } .c .num { background:#059669; }
+  .card-title { font-size:24px; font-weight:800; color:#111827; }
+
+  .card p { font-size:17px; color:#374151; line-height:1.55; }
+  .card p + p { margin-top:4px; }
+  .q { color:#111827; font-weight:600; }
+
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .chip { font-size:16px; font-weight:600; border-radius:8px; padding:6px 12px; }
+  .chip-indigo { background:#eef2ff; color:#4338ca; }
+  .chip-amber  { background:#fef3c7; color:#92400e; }
+  .chip-green  { background:#d1fae5; color:#065f46; }
+  .chip-gray   { background:#f3f4f6; color:#4b5563; }
+
+  .chain { display:flex; align-items:center; gap:8px; margin:10px 0 12px; }
+  .chain .node { font-size:17px; font-weight:700; color:#78350f; background:#fde68a; border-radius:8px; padding:7px 14px; }
+  .chain .arr { color:#d97706; font-size:18px; font-weight:800; }
+
+  .down { display:flex; justify-content:center; padding:6px 0; }
+
+  /* ---------- loop container (col B) ---------- */
+  .loop-box { position:relative; border:2px dashed #d97706; border-radius:18px; background:#fffdf4; padding:18px 78px 18px 18px; }
+  .loop-svg { position:absolute; top:0; right:6px; width:64px; height:100%; }
+  .loop-label { position:absolute; right:26px; top:50%; transform:translateY(-50%); writing-mode:vertical-rl; font-size:16px; font-weight:700; color:#b45309; letter-spacing:3px; }
+
+  /* ---------- verdict card ④ ---------- */
+  .verdict { background:#fffbeb; }
+
+  /* ---------- step ⑧ split ---------- */
+  .fork { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .fork-row { display:flex; align-items:center; gap:10px; font-size:16.5px; font-weight:600; border-radius:10px; padding:9px 14px; }
+  .fork-back { background:#eef2ff; color:#4338ca; }
+  .fork-out  { background:#d1fae5; color:#065f46; }
+
+  /* ---------- footer principles ---------- */
+  .footer { margin-top:24px; background:#111827; border-radius:14px; padding:16px 28px; display:flex; align-items:center; gap:18px; }
+  .footer .tag { color:#fbbf24; font-size:18px; font-weight:800; white-space:nowrap; letter-spacing:1px; }
+  .footer .items { color:#f9fafb; font-size:18px; letter-spacing:.5px; }
+  .footer .items b { color:#fbbf24; font-weight:700; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <div class="title">CEO Office · <em>判断思路</em></div>
+      <div class="subtitle">把「这件事是否值得做」想清楚，而不是把事情做出来 —— 判断不闭环，不进入执行层</div>
+    </div>
+    <div class="badge">只讨论 top-level 的商业问题，绝不下沉执行层</div>
+  </div>
+
+  <div class="main">
+
+    <!-- ============ Column A : 输入 ============ -->
+    <div class="col col-a a">
+      <div class="stage-label lab-a"><span class="dot"></span>输入 ｜ 想清楚对象</div>
+      <div class="col-body">
+        <div class="card">
+          <div class="card-head"><div class="num">1</div><div class="card-title">明确判断对象</div></div>
+          <p class="q">这是哪门生意、哪个方向？</p>
+          <p class="q">当前要做出的 top-level 决策是什么？</p>
+          <p>已知前提与关键缺口，各是什么？</p>
+        </div>
+        <div class="down">
+          <svg width="28" height="20" viewBox="0 0 28 20"><path d="M14 20 L2 4 L26 4 Z" fill="#cbd5e1"/></svg>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="num">2</div><div class="card-title">判断当前阶段</div></div>
+          <div class="chips" style="margin-top:0;margin-bottom:10px;">
+            <span class="chip chip-indigo">想法</span><span class="chip chip-indigo">初步验证</span><span class="chip chip-indigo">首批用户</span><span class="chip chip-indigo">付费用户</span><span class="chip chip-indigo">扩张</span>
+          </div>
+          <p class="q">这个阶段最关键的问题是什么？</p>
+          <p class="q">不澄清就继续推进，最大的风险是什么？</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- arrow A→B -->
+    <div class="arrow-gap">
+      <svg width="56" height="40" viewBox="0 0 56 40"><path d="M2 17 H38" stroke="#94a3b8" stroke-width="5"/><path d="M56 20 L34 6 L34 34 Z" fill="#94a3b8"/></svg>
+    </div>
+
+    <!-- ============ Column B : 判断循环 ============ -->
+    <div class="col col-b b">
+      <div class="stage-label lab-b"><span class="dot"></span>核心 ｜ 判断循环</div>
+      <div class="loop-box">
+        <div class="card">
+          <div class="card-head"><div class="num">3</div><div class="card-title">构建最小商业链路</div></div>
+          <div class="chain">
+            <span class="node">经济模型</span><span class="arr">→</span><span class="node">市场规模</span><span class="arr">→</span><span class="node">增长路径</span>
+          </div>
+          <p>逐环盘清：客户是谁 · 谁付钱 · 为什么现在愿意付</p>
+          <p>今天不用你的人，在用什么替代方案解决</p>
+          <p>单位收入 / 成本 / 毛利 / 回本周期，算得平吗</p>
+          <p>真实切口在哪 · 增长靠什么 · 哪一环一放大就坏</p>
+        </div>
+        <div class="down">
+          <svg width="28" height="20" viewBox="0 0 28 20"><path d="M14 20 L2 4 L26 4 Z" fill="#d97706"/></svg>
+        </div>
+        <div class="card verdict">
+          <div class="card-head"><div class="num">4</div><div class="card-title">链路置信度判断</div></div>
+          <p class="q">这是不是一门生意，还是一个好看的想法？</p>
+          <div class="chips">
+            <span class="chip chip-green">高置信度链路</span>
+            <span class="chip chip-amber">初步成立 · 有重大不确定性</span>
+            <span class="chip chip-amber">存在明显断点</span>
+            <span class="chip chip-gray">不足以判断</span>
+          </div>
+          <p style="margin-top:10px;">当前最脆弱的一环是什么？还值不值得继续投入？</p>
+        </div>
+        <div class="down">
+          <svg width="28" height="20" viewBox="0 0 28 20"><path d="M14 20 L2 4 L26 4 Z" fill="#d97706"/></svg>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="num">5</div><div class="card-title">拷打追问</div></div>
+          <p class="q">追问每个答案：是事实，还是希望？</p>
+          <p>空话不收：「市场很大」「用户会喜欢」「以后变现」</p>
+          <p>分类处置：可假设继续 / 必须提问 / 仅记低风险</p>
+        </div>
+        <svg class="loop-svg" viewBox="0 0 64 100" preserveAspectRatio="none">
+          <defs>
+            <marker id="loopArrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse" viewBox="0 0 10 6">
+              <path d="M0 0 L8 3 L0 6 Z" fill="#b45309"/>
+            </marker>
+          </defs>
+          <path d="M6 82 L48 82 L48 50 L10 50" fill="none" stroke="#b45309" stroke-width="2.5" stroke-dasharray="6 5" vector-effect="non-scaling-stroke" marker-end="url(#loopArrow)"/>
+        </svg>
+        <div class="loop-label">补齐后重判</div>
+      </div>
+    </div>
+
+    <!-- arrow B→C -->
+    <div class="arrow-gap">
+      <svg width="56" height="40" viewBox="0 0 56 40"><path d="M2 17 H38" stroke="#94a3b8" stroke-width="5"/><path d="M56 20 L34 6 L34 34 Z" fill="#94a3b8"/></svg>
+    </div>
+
+    <!-- ============ Column C : 输出 ============ -->
+    <div class="col col-c c">
+      <div class="stage-label lab-c"><span class="dot"></span>收敛 ｜ 形成判断</div>
+      <div class="col-body">
+        <div class="card">
+          <div class="card-head"><div class="num">6</div><div class="card-title">战略判断</div></div>
+          <p>最强的点 · 最致命的问题 · 最脆弱的一环</p>
+          <div class="chips">
+            <span class="chip chip-green">继续</span><span class="chip chip-amber">暂停</span><span class="chip chip-amber">缩小</span><span class="chip chip-gray">转向</span>
+          </div>
+        </div>
+        <div class="down">
+          <svg width="28" height="20" viewBox="0 0 28 20"><path d="M14 20 L2 4 L26 4 Z" fill="#059669"/></svg>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="num">7</div><div class="card-title">一个待批的 top-level 决策</div></div>
+          <p>收敛为「当前最该批的一个决策」，一卡一决策</p>
+          <p class="q">一词批复：批准 / 调整 / 搁置</p>
+        </div>
+        <div class="down">
+          <svg width="28" height="20" viewBox="0 0 28 20"><path d="M14 20 L2 4 L26 4 Z" fill="#059669"/></svg>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="num">8</div><div class="card-title">下一步</div></div>
+          <div class="fork">
+            <div class="fork-row fork-back">前提未清 → 回到 ①，讨论下一个更关键的 top-level 问题</div>
+            <div class="fork-row fork-out">前提已清 → 判断职责完成，移交执行层</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <span class="tag">贯穿原则</span>
+    <span class="items">经济模型优先 · 链路不缺环 · 高置信度优先 · 提问优先于表达 · 一致先于文档 · 替代方案才是真竞争 · 规模化不默认成立</span>
+  </div>
+
+</body>
+</html>
