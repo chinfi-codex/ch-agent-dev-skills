@@ -1,17 +1,21 @@
 ---
 name: implement
-version: 0.3.0
+version: 0.4.0
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally dispatched by the main
   session as a fresh host-agent conversation (host-agnostic: Task in
   Claude Code, Agent in ZCode, or the host's equivalent new-conversation
   mechanism; economy-tier model by default): works in a dedicated git
-  worktree with TDD, records on-disk evidence, invokes /ai-review in an
-  independent conversation (delegate mode by default), fixes BLOCKERs,
-  and submits the merge request. The main session supervises through
-  merge — no human gate. Success is judged by on-disk evidence, never by
-  self-report.
+  worktree with TDD, runs per-round drift checks against the ticket's
+  declared-scope (escalating verify-tier one-way when verify-policy
+  triggers hit), records on-disk evidence for the ticket's tier gate
+  (light = DoD + fast; scoped = plus diff-derived affected tests; full =
+  plus the whole suite; integration tickets always full), invokes
+  /ai-review in an independent conversation (delegate mode by default),
+  fixes BLOCKERs, and submits the merge request. The main session
+  supervises through merge — no human gate. Success is judged by
+  on-disk evidence, never by self-report.
 allowed-tools:
   - Read
   - Write
@@ -82,22 +86,26 @@ allowed-tools:
 ### Step 3：TDD 实现（在预定接缝）
 
 - 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
-- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；`full` 档只在交付前跑（Step 5）
+- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
+- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 
-- 触发：构建 / fast 质量门失败
+- 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
 - 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
 - 达到轮次上限仍未过：票置 `needs-human`，附完整轨迹（命令 + 输出 + 已试路径），**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
 
 - 在 worktree 内**实际执行**票的每条 DoD 验收命令，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出
-- 跑一次 `quality-gate.full` 并记录（**交付前的全量检查，不可跳过**）
-- 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
-- 不信自报：没有 evidence 文件与真实输出，不得宣称完成
-- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 轮次记录
+- **按档位出证据**（档位 = 票 `verify-tier`，发生升档则按升档后档位；规则见 `agents-config.verify-policy`）：
+  - `light`：DoD + fast
+  - `scoped`：DoD + fast + 关联测试——**选择集从最终 diff（merge-base..HEAD）重算**：滤出生产代码文件，按 `verify-policy.selection`（dir-map 目录约定映射 / impact-map coverage 反查）换算受影响测试集；漂移碰到的文件天然进入选择集，无需改票
+  - `full`：DoD + fast + scoped + 完整测试套件（full 档票与集成票必跑）
+- 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
+- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
+- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 轮次记录
 
 ### Step 6：建 draft MR 并触发评审
 
@@ -136,6 +144,7 @@ allowed-tools:
 - 启动前校验不过不动代码；票未 confirmed 不启动
 - 一切改动只在 worktree 分支；红线命中即停
 - 成功只认落盘证据（evidence + commit hash），不认自报
+- 验证档位只升不降：升档必须命中 `verify-policy` 规则并留 evidence / impl-log 记录；light / scoped 票不得虚标跑过 full；不变式（红线 / DoD / 独立评审 / 每 feature 至少一次 full）不因档位缩水
 - `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
 - 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
 - 用词遵循 GLOSSARY 标准术语

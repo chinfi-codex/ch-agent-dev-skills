@@ -29,6 +29,6 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
 2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
 3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
 5. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
 6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人

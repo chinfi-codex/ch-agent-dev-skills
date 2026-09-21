@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -11,8 +11,10 @@ implementation-approval-phrases:
   - 开始实现
 description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
-  into tracer-bullet tickets with blocking edges and auto-checkable DoD
-  commands, gets gate-2 (task list) confirmation, publishes to the
+  into tracer-bullet tickets with blocking edges, auto-checkable DoD
+  commands, and per-ticket verify-tiers (light / scoped / full, computed
+  from agents-config.verify-policy; integration tickets forced to full),
+  gets gate-2 (task list) confirmation, publishes to the
   configured tracker — then the main session auto-dispatches each ticket
   as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
   Agent in ZCode, or the host's equivalent new-conversation mechanism;
@@ -89,13 +91,20 @@ allowed-tools:
 
 **DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。
 
+**计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
+
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
+- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）或预计超 `scoped-max-*` 阈值 → `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`
+- **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`
+- `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
+
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
 
 向用户呈现编号清单，一次审全部：
 
-- 每票一行：编号 / 标题 / 交付什么 / blocked-by / 验收命令
-- 附整体 DAG 与建议执行顺序（frontier 在哪几张）
-- 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定
+- 每票一行：编号 / 标题 / 交付什么 / blocked-by / 验收命令 / **verify-tier（含 declared-scope 要点与定档依据）**
+- 附整体 DAG 与建议执行顺序（frontier 在哪几张；集成票是哪张）
+- 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定、**档位对不对（该 full 的别标 scoped / light）**
 - 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
 
 粒度失败路径：单票改动横跨超过两个模块 → 自动再拆或标记需人工裁决，不硬发。
@@ -120,6 +129,6 @@ allowed-tools:
 - tech-spec 未确认不开拆；拆解不改变方案内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在
-- 票一旦 confirmed，标题与 DoD 不得由本 skill 单方面修改；变更须重新过门②
+- 票一旦 confirmed，标题 / DoD / verify-tier / declared-scope 不得由本 skill 单方面修改；变更须重新过门②（实现期按 `verify-policy` 升档不算改票，由 `/implement` 在 evidence / impl-log 记录）
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

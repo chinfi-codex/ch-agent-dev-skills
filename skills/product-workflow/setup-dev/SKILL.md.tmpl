@@ -1,6 +1,6 @@
 ---
 name: setup-dev
-version: 0.4.0
+version: 0.5.0
 default-mode: IMPLEMENT_MODE
 description: |
   One-time per-repo setup for the dev-stage skills. Detects ocr / glab /
@@ -31,7 +31,7 @@ allowed-tools:
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
 
-默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`；宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制），并监督执行直到完成合并；被派发对话模型默认取宿主可用范围内经济性最高的一档（`dispatch.model: economy`）；评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；质量门日常只跑 fast 档，full 档保留到交付前。
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`；宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制），并监督执行直到完成合并；被派发对话模型默认取宿主可用范围内经济性最高的一档（`dispatch.model: economy`）；评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；质量门日常只跑 fast 档，交付验证按票的 verify-tier 分档（light / scoped / full，集成票强制 full）。
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
@@ -44,6 +44,7 @@ allowed-tools:
 - ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）
 - 规则：`<repo>/.opencodereview/rule.json` 是否已存在
 - 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/`
+- 测试选择基建：pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力是否可用——决定 `verify-policy.selection` 推荐 dir-map 还是 impact-map
 
 探查结果先回显给人，作为后续推荐依据。内网 GitLab 已确认可用（2026-09-09），tracker 默认推荐 `gitlab`；评审与执行默认都在当前 agent 内完成（delegate 评审 + 宿主新开对话派发），CI 接入是可选项而非前提。
 
@@ -56,15 +57,16 @@ allowed-tools:
 3. **ocr 端点**：仅 `local` / `ci` 需要——GLM（bigmodel.cn，境内）为默认推荐，`ocr config set custom_providers.glm.url https://open.bigmodel.cn/api/paas/v4`、`protocol openai`、`model` 与 `api_key` 由人提供；配置后必须 `ocr llm test` 通过。`delegate` 模式跳过本项
 4. **main-branch**：默认取探查结果
 5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
-6. **quality-gate**：fast / full 两档命令，从项目实际测试框架推导后请人确认。默认规则写进配置注释：**日常开发（实现、自修复每一轮）只跑 fast；full 在交付前（MR ready / 证据落盘时）必跑**
-7. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
-8. **max-fix-rounds**：默认 99，可调
+6. **quality-gate**：fast / scoped / full 三档命令，从项目实际测试框架推导后请人确认。默认规则写进配置注释：**日常开发（实现、自修复每一轮）只跑 fast；交付验证按票 `verify-tier` 分档——light = DoD + fast，scoped = 另加按最终 diff 换算的受影响测试集，full = 完整套件（full 档票与集成票必跑）**
+7. **verify-policy**：档位阈值与选择机制——`light-max-files`（默认 3）/ `scoped-max-files`（默认 10）/ `scoped-max-loc`（默认 400）请人按仓库体量调整；`escalate-triggers` 默认五项（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）请人增删；`selection` 按探查结果推荐——无测试选择基建用 `dir-map`（零基建但看不见跨模块影响面），有 testmon / coverage 基建推荐 `impact-map`
+8. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
+9. **max-fix-rounds**：默认 99，可调
 
 ### Step 2：写配置与种子
 
 按模板落盘（写作前必须先读对应模板）：
 
-- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含 `dispatch` 节（宿主新开对话派发 + economy 模型档）与质量门 fast / full 默认规则
+- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含 `dispatch` 节（宿主新开对话派发 + economy 模型档）、三档质量门与 `verify-policy`（档位阈值 / 升档触发器 / 漂移规则 / selection 机制）
 - `.gitignore` 追加 `.worktrees/`（已存在则跳过）
 - **仅当 ocr.mode = ci 时**：
   - 复制 `shared/templates/gitlab-ci-ocr.yml`（相对本 SKILL.md 为 `../shared/templates/gitlab-ci-ocr.yml`）为仓库 `ci/ocr-review.gitlab-ci.yml`，并在项目 `.gitlab-ci.yml` 加 `include: local`；回贴脚本 `ci/ocr-post-review.py` 需人从上游仓库获取放置（模板头部有说明，内网不能现场 curl 外网）
@@ -74,7 +76,7 @@ allowed-tools:
 
 ### Step 3：验证与收尾
 
-- 回读写出的配置，逐项复述关键取值（tracker / ocr.mode / dispatch 默认 / provider+model（仅 local / ci）/ main-branch / repo-level / 质量门 fast+full 及默认规则 / redlines / 轮次上限 / CI 接入状态）请人最终确认
+- 回读写出的配置，逐项复述关键取值（tracker / ocr.mode / dispatch 默认 / provider+model（仅 local / ci）/ main-branch / repo-level / 三档质量门与 verify-policy（阈值 / 触发器 / selection）/ redlines / 轮次上限 / CI 接入状态）请人最终确认
 - `ocr.mode = ci` 时逐条核对 CI 前提：include 已加、post 脚本已放、GitLab 变量已设（后两项须人确认，未确认则 `gitlab-ci: manual` 落配置）；`delegate` 模式无 CI 前提，跳过核对
 - repo-level = A 时显式警示：本仓库不得运行 `/implement`，AI 仅只读辅助
 - 输出完成状态与下一步提示（`/tech-spec`）

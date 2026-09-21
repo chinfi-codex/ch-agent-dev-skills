@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -11,8 +11,10 @@ implementation-approval-phrases:
   - 开始实现
 description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
-  into tracer-bullet tickets with blocking edges and auto-checkable DoD
-  commands, gets gate-2 (task list) confirmation, publishes to the
+  into tracer-bullet tickets with blocking edges, auto-checkable DoD
+  commands, and per-ticket verify-tiers (light / scoped / full, computed
+  from agents-config.verify-policy; integration tickets forced to full),
+  gets gate-2 (task list) confirmation, publishes to the
   configured tracker — then the main session auto-dispatches each ticket
   as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
   Agent in ZCode, or the host's equivalent new-conversation mechanism;
@@ -215,7 +217,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 - `tracker`：`local`（markdown 票文件）或 `gitlab`（glab CLI）
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
-- `quality-gate`：质量门命令，分快速档（fast：秒级，类型 / lint / 单文件测试）与全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；full 在交付前（MR ready / 证据落盘时）必须跑一次并留记录**
+- `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
+- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证
 - `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）、`model: economy`（被派发对话取宿主可用范围内经济性最高的一档，比主会话低一档；高风险 / 复杂票显式升级）
@@ -252,7 +255,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
 2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
 3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
 5. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
 6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
 
@@ -301,13 +304,20 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 **DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。
 
+**计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
+
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
+- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）或预计超 `scoped-max-*` 阈值 → `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`
+- **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`
+- `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
+
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
 
 向用户呈现编号清单，一次审全部：
 
-- 每票一行：编号 / 标题 / 交付什么 / blocked-by / 验收命令
-- 附整体 DAG 与建议执行顺序（frontier 在哪几张）
-- 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定
+- 每票一行：编号 / 标题 / 交付什么 / blocked-by / 验收命令 / **verify-tier（含 declared-scope 要点与定档依据）**
+- 附整体 DAG 与建议执行顺序（frontier 在哪几张；集成票是哪张）
+- 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定、**档位对不对（该 full 的别标 scoped / light）**
 - 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
 
 粒度失败路径：单票改动横跨超过两个模块 → 自动再拆或标记需人工裁决，不硬发。
@@ -332,6 +342,6 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - tech-spec 未确认不开拆；拆解不改变方案内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在
-- 票一旦 confirmed，标题与 DoD 不得由本 skill 单方面修改；变更须重新过门②
+- 票一旦 confirmed，标题 / DoD / verify-tier / declared-scope 不得由本 skill 单方面修改；变更须重新过门②（实现期按 `verify-policy` 升档不算改票，由 `/implement` 在 evidence / impl-log 记录）
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

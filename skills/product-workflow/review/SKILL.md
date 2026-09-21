@@ -1,6 +1,6 @@
 ---
 name: review
-version: 0.1.0
+version: 0.2.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -343,7 +343,8 @@ allowed-tools:
 
 - **阶段时间线**：需求收敛 → PRD → pd-review → tech-spec → 拆票 → 实现与评审 → 合并；每段起止日期与时长，每段标注依据文件
 - **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、评审轮次（`reviews/` 下该票报告文件数）、BLOCKER 回修轮数（MR 文件记录）、是否进过 `needs-human`
-- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 遗留」与各 review report 的 BLOCKER 清单
+- **验证档位统计**：档位分布（各票 `verify-tier` vs evidence 的 `tier-executed`）、升档率（多少票发生升档及原因聚合）、各档验证耗时（evidence 档位门记录）、**逃逸缺陷**（合并后在 main 上才发现的问题，来源 git log 修复提交 / 人反馈；按其原票档位归因）
+- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 遗留」与各 review report 的 BLOCKER 清单
 - 统计口径随数字给出；取不到标「缺失」
 
 ### Step 3：抽取关键点
@@ -361,7 +362,8 @@ allowed-tools:
 - BLOCKER findings 按类别聚合
 - impl-log「假设了什么」中被证伪的假设
 - 轮次 >2 的重复修改热点票
-- 每条按根因分类：需求不清 / 方案缺口 / 实现疏忽 / 环境工具
+- 档位相关根因：升档集中出现在拆票时（declared-scope 报小了）还是实现时（真实需求就大）；scoped 票逃逸缺陷的漏测原因（dir-map 看不见跨模块 / 选择集换算错）→ 若 light / scoped 票存在逃逸缺陷，给出收紧 `verify-policy` 阈值的具体建议（只建议，不代改 agents-config）
+- 每条按根因分类：需求不清 / 方案缺口 / 实现疏忽 / 环境工具 / 验证档位失准
 
 每条关键点必须挂证据（文件 + 节 / issue 号），没有证据不写。
 

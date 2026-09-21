@@ -23,7 +23,34 @@ dispatch:
 # 质量门命令
 quality-gate:
   fast: "pytest -q <相关测试文件>"      # 日常开发默认档：实现 / 自修复每一轮只跑 fast（秒级）
-  full: "pytest -q"                     # 交付前保留档：MR ready 前必须跑一次并留证据
+  scoped: "pytest -q <按最终 diff 换算的受影响测试集>"   # scoped 档票的交付门：选择集从 merge-base..HEAD 的实际 diff 重算
+  full: "pytest -q"                     # full 档票与集成票的交付门：完整测试套件
+
+# 验证档位策略：交付验证按票的 verify-tier 分档，不再每票一刀切跑全量
+# 档位含义（累计向下包含）：
+#   light  = DoD 验收命令 + fast                （单点小改：文案 / 阈值 / 默认值 / 局部样式）
+#   scoped = light + 关联测试选择                （改动集中在 1-2 个模块的常规票）
+#   full   = scoped + 完整测试套件               （高风险票与集成票）
+# 不变式（任何档位不得缩水）：红线检查 / DoD 验收命令 / 独立评审 / 每 feature 至少一次 full（集成票）
+verify-policy:
+  light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
+  scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full
+  scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full
+  escalate-triggers:        # 命中任一（声明或实测）→ 至少 full，无论文件数
+    - "公共接口 / API 签名变更"
+    - "共享模块 / 工具库改动"
+    - "数据迁移 / schema 变更"
+    - "鉴权 / 权限逻辑改动"
+    - "红线邻接（redlines glob 命中文件的同目录）"
+  # 漂移规则（实测 diff 超出票的 declared-scope 时）：
+  #   仍同模块、未触发 escalate-triggers、未超阈值 → 不升档，impl-log「漂移与升档记录」登记漂移文件清单即可
+  #   触发 escalate-triggers 或超 scoped-max-* 阈值 → 升档（只升不降），立即按新档补验证并在 evidence 记录
+  # 集成票：DAG 中无后继（没有其他票 blocked-by 它）的票一律 verify-tier: full
+  # repo-level 平移：C 类仓可在计算结果上再降一档（下限 light）；B 类按规则执行；A 类不进 /implement
+  selection: dir-map        # scoped 档的关联测试选择机制：
+                           #   dir-map    = 目录约定映射（源码路径 → 测试路径，零基建；看不见跨模块影响面，只配低风险 scoped 票）
+                           #   impact-map = coverage / testmon 反查（diff → 执行过这些行的测试，含调用方模块的测试；
+                           #                出现 scoped 漏测反馈后应升级到本档）
 
 # 自修复轮次上限（构建失败或评审 BLOCKER 的回修循环，超出打回人工）
 max-fix-rounds: 99
@@ -67,6 +94,7 @@ gitlab-ci: manual
 
 ## 说明
 
+- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；每 feature 至少一次 full 由集成票（DAG 终点票）保证
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
 - 评审与实现的被派发对话模型默认取 `dispatch.model`（经济性最高档）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护

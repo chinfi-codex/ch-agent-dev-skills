@@ -1,6 +1,6 @@
 ---
 name: ai-review
-version: 0.4.0
+version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
@@ -92,9 +92,16 @@ allowed-tools:
 - 评审对话模型：默认按 `agents-config.dispatch.model`（economy）取当前宿主可用范围内经济性最高的一档；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
 - 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
 
-### Step 3：红线复核（第二双眼睛）
+### Step 3：红线与档位复核（第二双眼睛，确定性检查）
 
-`agents-config.redlines` 的 glob 对实际改动文件清单复核一遍（grep 可解释清单，不靠语义猜测）：命中协议 / 密钥 / 测试判定文件 → 无论 ocr 是否报，一律列 Critical BLOCKER。ocr 的 `exclude`（不送审）不等于红线（不允许改），两者不可互替。
+**红线复核**：`agents-config.redlines` 的 glob 对实际改动文件清单复核一遍（grep 可解释清单，不靠语义猜测）：命中协议 / 密钥 / 测试判定文件 → 无论 ocr 是否报，一律列 Critical BLOCKER。ocr 的 `exclude`（不送审）不等于红线（不允许改），两者不可互替。
+
+**档位复核**：实际 diff（固定点..HEAD）对照票 `verify-tier` / `declared-scope` 与 impl-log「漂移与升档记录」——
+
+- 实测范围命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值，而票标的是低档且无升档记录 → **BLOCKER（critical）**：该升没升
+- evidence 的 `tier-executed` 低于票 `verify-tier`，或 light / scoped 票宣称跑过 full → BLOCKER（critical）：档位虚标
+- 集成票（无后继票）未标 / 未跑 full → BLOCKER（critical）
+- 漂移已登记、未触发升档条件 → 不报，属正常小漂移
 
 ### Step 4：解析与映射
 
@@ -115,6 +122,6 @@ allowed-tools:
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评，必须新开独立对话）
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 红线命中一律 Critical，无论引擎结论
+- 红线命中一律 Critical，无论引擎结论；档位失配（该升没升 / 档位虚标 / 集成票未 full）同列 BLOCKER
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语

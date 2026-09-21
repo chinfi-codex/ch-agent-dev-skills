@@ -4,6 +4,9 @@ issue-id: issue-001
 title: <一句话标题，动词开头>
 status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done
 blocked-by: []          # 例如 [issue-001]；frontier 票此处为空
+verify-tier: scoped     # 交付验证档位：light / scoped / full；由 /issue-split 按 verify-policy 计算并过门②确认，
+                        # 实现期只升不降（升档规则见 agents-config.verify-policy）；集成票（无后继票）一律 full
+declared-scope: []      # 声明将触碰的生产代码路径 / glob 清单；实测漂移按 verify-policy 漂移规则处理
 tracker-iid:            # tracker: gitlab 时回写 GitLab issue IID
 tracker-url:
 created: YYYY-MM-DD

@@ -22,11 +22,12 @@
 ```
 /prd → /pd-review → /setup-dev（每仓库一次：agents-config + rule.json 种子；CI 种子仅 ci 模式落盘）
                   → /tech-spec   PRD / change-request（小变更）→ 技术方案（约束/假设分栏，预定 TDD 接缝）
-                  → /issue-split 方案 → tracer-bullet 票（阻塞边 DAG + 可自动判定 DoD）
-                                      → 门②：人审任务清单 → 票 confirmed
+                  → /issue-split 方案 → tracer-bullet 票（阻塞边 DAG + 可自动判定 DoD
+                                      + 每票 verify-tier：light/scoped/full，集成票强制 full）
+                                      → 门②：人审任务清单（含档位）→ 票 confirmed
                   → 主会话派发   逐票由宿主 agent 新开独立对话跑 /implement（低一档经济模型）：
-                                      worktree 隔离 + TDD（日常只跑 fast 质量门）
-                                      → 证据落盘（交付前跑 full 质量门）→ draft MR
+                                      worktree 隔离 + TDD（日常只跑 fast 质量门，每轮漂移检查）
+                                      → 证据落盘（按票 verify-tier 出档位门证据）→ draft MR
                                       → /ai-review 独立评审（默认 delegate：ocr 筛文件 +
                                         规则解析，新开独立对话评审；可选 local / ci 接 GLM 端点）
                                       → BLOCKER 回修 → MR ready
@@ -35,15 +36,15 @@
                                       只有 needs-human / 阻塞 / 无法裁决时才停下找人
 ```
 
-- `/setup-dev`: 每仓库一次。探查 ocr / glab / GitLab CI 就绪度，收集 tracker（gitlab 首选 / local fallback）、主分支、质量门命令（fast 日常档 / full 交付档）、红线、仓库等级、ocr 模式（默认 delegate），写 `./dev/agents-config.md`，落 `.opencodereview/rule.json` 种子（`ci/ocr-review.gitlab-ci.yml` 仅 ci 模式落盘）
+- `/setup-dev`: 每仓库一次。探查 ocr / glab / GitLab CI 就绪度，收集 tracker（gitlab 首选 / local fallback）、主分支、质量门三档命令与 verify-policy（fast 日常 / scoped 关联 / full 全量；档位阈值、升档触发器、selection 机制）、红线、仓库等级、ocr 模式（默认 delegate），写 `./dev/agents-config.md`，落 `.opencodereview/rule.json` 种子（`ci/ocr-review.gitlab-ci.yml` 仅 ci 模式落盘）
 - `/tech-spec`: 把可交付 PRD 或 change-request（`/issue` 小变更路径）变成技术方案；约束与假设分栏；预定 TDD 接缝
-- `/issue-split`: 拆垂直切片票（tracer bullet，纵向打通、独立可演示、声明阻塞边），DoD 写成「命令 + 期望输出」；门②人确认清单后发布，随后主会话按「派发与监督协议」自动按 DAG 逐票派发、监督到合并
+- `/issue-split`: 拆垂直切片票（tracer bullet，纵向打通、独立可演示、声明阻塞边），DoD 写成「命令 + 期望输出」；按 verify-policy 给每票定 verify-tier 与 declared-scope（DAG 终点集成票强制 full）；门②人确认清单（含档位）后发布，随后主会话按「派发与监督协议」自动按 DAG 逐票派发、监督到合并
 - `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
 - `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 = BLOCKER
 
 GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shared/templates/gitlab-ci-ocr.yml` 与 `shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
 
-关键纪律：写查分离（评审必须独立实例——delegate / local 由宿主新开独立对话执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，full 档留在交付前；A 类仓库（飞行软件 / 涉密）不进 `/implement`。派发只要求宿主具备「新开独立对话」能力（Claude Code `Task` / ZCode `Agent` / Codex / WorkBuddy 等），宿主完全没有该能力时按协议兜底：主会话产出自包含提示词请人在新对话启动，评审独立性不降级。
+关键纪律：写查分离（评审必须独立实例——delegate / local 由宿主新开独立对话执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，交付验证按票 verify-tier 分档（档位只升不降，不变式——红线 / DoD / 独立评审 / 每 feature 至少一次 full——不缩水）；A 类仓库（飞行软件 / 涉密）不进 `/implement`。派发只要求宿主具备「新开独立对话」能力（Claude Code `Task` / ZCode `Agent` / Codex / WorkBuddy 等），宿主完全没有该能力时按协议兜底：主会话产出自包含提示词请人在新对话启动，评审独立性不降级。
 
 ## 发布之后：复盘与经验沉淀
 

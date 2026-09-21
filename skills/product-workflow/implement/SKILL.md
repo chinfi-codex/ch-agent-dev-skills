@@ -1,17 +1,21 @@
 ---
 name: implement
-version: 0.3.0
+version: 0.4.0
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally dispatched by the main
   session as a fresh host-agent conversation (host-agnostic: Task in
   Claude Code, Agent in ZCode, or the host's equivalent new-conversation
   mechanism; economy-tier model by default): works in a dedicated git
-  worktree with TDD, records on-disk evidence, invokes /ai-review in an
-  independent conversation (delegate mode by default), fixes BLOCKERs,
-  and submits the merge request. The main session supervises through
-  merge — no human gate. Success is judged by on-disk evidence, never by
-  self-report.
+  worktree with TDD, runs per-round drift checks against the ticket's
+  declared-scope (escalating verify-tier one-way when verify-policy
+  triggers hit), records on-disk evidence for the ticket's tier gate
+  (light = DoD + fast; scoped = plus diff-derived affected tests; full =
+  plus the whole suite; integration tickets always full), invokes
+  /ai-review in an independent conversation (delegate mode by default),
+  fixes BLOCKERs, and submits the merge request. The main session
+  supervises through merge — no human gate. Success is judged by
+  on-disk evidence, never by self-report.
 allowed-tools:
   - Read
   - Write
@@ -118,7 +122,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
 - `tracker`：`local`（markdown 票文件）或 `gitlab`（glab CLI）
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
-- `quality-gate`：质量门命令，分快速档（fast：秒级，类型 / lint / 单文件测试）与全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；full 在交付前（MR ready / 证据落盘时）必须跑一次并留记录**
+- `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
+- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证
 - `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）、`model: economy`（被派发对话取宿主可用范围内经济性最高的一档，比主会话低一档；高风险 / 复杂票显式升级）
@@ -155,7 +160,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
 2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
 3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true`、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID>`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，删远 / 本地分支并清理 worktree；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
 5. **推进**：重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / 遗留 Medium-Low），输出完成状态
 6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
 
@@ -208,22 +213,26 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 ### Step 3：TDD 实现（在预定接缝）
 
 - 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
-- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；`full` 档只在交付前跑（Step 5）
+- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
+- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 
-- 触发：构建 / fast 质量门失败
+- 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
 - 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
 - 达到轮次上限仍未过：票置 `needs-human`，附完整轨迹（命令 + 输出 + 已试路径），**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
 
 - 在 worktree 内**实际执行**票的每条 DoD 验收命令，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出
-- 跑一次 `quality-gate.full` 并记录（**交付前的全量检查，不可跳过**）
-- 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
-- 不信自报：没有 evidence 文件与真实输出，不得宣称完成
-- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 轮次记录
+- **按档位出证据**（档位 = 票 `verify-tier`，发生升档则按升档后档位；规则见 `agents-config.verify-policy`）：
+  - `light`：DoD + fast
+  - `scoped`：DoD + fast + 关联测试——**选择集从最终 diff（merge-base..HEAD）重算**：滤出生产代码文件，按 `verify-policy.selection`（dir-map 目录约定映射 / impact-map coverage 反查）换算受影响测试集；漂移碰到的文件天然进入选择集，无需改票
+  - `full`：DoD + fast + scoped + 完整测试套件（full 档票与集成票必跑）
+- 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
+- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
+- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 轮次记录
 
 ### Step 6：建 draft MR 并触发评审
 
@@ -262,6 +271,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 启动前校验不过不动代码；票未 confirmed 不启动
 - 一切改动只在 worktree 分支；红线命中即停
 - 成功只认落盘证据（evidence + commit hash），不认自报
+- 验证档位只升不降：升档必须命中 `verify-policy` 规则并留 evidence / impl-log 记录；light / scoped 票不得虚标跑过 full；不变式（红线 / DoD / 独立评审 / 每 feature 至少一次 full）不因档位缩水
 - `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
 - 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
 - 用词遵循 GLOSSARY 标准术语
