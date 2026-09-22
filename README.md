@@ -1,4 +1,4 @@
-# ch-pd-workflow
+# ch-agent-dev-skills
 
 实施思路参考借鉴：https://github.com/garrytan/gstack
 开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）

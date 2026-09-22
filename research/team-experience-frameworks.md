@@ -244,9 +244,9 @@ AWS/Kiro 官方的两句方法论定调（[Kiro 博客](https://kiro.dev/blog/de
 
 ---
 
-## 8. 对本仓库（ch-pd-workflow）的对标启示
+## 8. 对本仓库（ch-agent-dev-skills，原名 ch-pd-workflow）的对标启示
 
-ch-pd-workflow 已有设计与主流方法论高度对齐的部分：角色五件套（ceo-office/pd-plan/prd/implement/ai-review）、阶段门（门②人审票清单）、写查分离（评审必须独立实例）、证据落盘（只认 evidence + commit hash）、worktree 隔离、模型分层（派发用低一档经济模型）、术语表 GLOSSARY。
+ch-agent-dev-skills（原名 ch-pd-workflow）已有设计与主流方法论高度对齐的部分：角色五件套（ceo-office/pd-plan/prd/implement/ai-review）、阶段门（门②人审票清单）、写查分离（评审必须独立实例）、证据落盘（只认 evidence + commit hash）、worktree 隔离、模型分层（派发用低一档经济模型）、术语表 GLOSSARY。
 
 从本次调研可借鉴的增量：
 
