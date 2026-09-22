@@ -12,15 +12,11 @@ implementation-approval-phrases:
 description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
   into tracer-bullet tickets with blocking edges, auto-checkable DoD
-  commands, and per-ticket verify-tiers (light / scoped / full, computed
-  from agents-config.verify-policy; integration tickets forced to full),
-  gets gate-2 (task list) confirmation, publishes to the
-  configured tracker — then the main session auto-dispatches each ticket
-  as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
-  Agent in ZCode, or the host's equivalent new-conversation mechanism;
-  economy-tier model by default), supervises execution until each ticket
-  is merged, and advances through the DAG without further human gates.
-  Default mode is DOC_MODE.
+  commands, and per-ticket verify-tiers from agents-config.verify-policy
+  (integration tickets forced to full), gets gate-2 human confirmation,
+  publishes — then the main session auto-dispatches each ticket as a fresh
+  host-agent conversation and supervises until merge with no further human
+  gates. Default mode is DOC_MODE.
 allowed-tools:
   - Read
   - Write

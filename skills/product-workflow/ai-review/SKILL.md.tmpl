@@ -4,13 +4,11 @@ version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
-  Independent code review powered by open-code-review (ocr). Three modes:
-  delegate (default: ocr filters files and resolves rules, a fresh
-  independent conversation in the host agent reviews — host-agnostic,
-  no LLM endpoint needed), local (run ocr against main...HEAD with the
-  ticket file as background), ci (GitLab CI auto-review on MR push,
-  findings posted as inline discussions).
-  Review-only: never modifies code, writes the review report only.
+  Independent code review powered by open-code-review (ocr). Modes:
+  delegate (default — ocr filters files and resolves rules, a fresh
+  independent conversation reviews; no LLM endpoint needed), local, ci
+  (GitLab CI auto-review on MR push). Review-only: never modifies code,
+  writes the review report only.
 allowed-tools:
   - Read
   - Write

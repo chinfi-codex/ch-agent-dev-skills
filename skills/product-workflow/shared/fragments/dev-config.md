@@ -1,9 +1,6 @@
 ## Dev 配置（agents-config）
 
-dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
-
-- 配置不存在时：`/issue-split`、`/implement`、`/ai-review` 应提示先运行 `/setup-dev`，不得静默假设配置继续
-- 配置存在时：按配置执行，不自行改配置放宽约束；发现配置与现实不符，报告给人裁决
+dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存在时（`/issue-split`、`/implement`、`/ai-review`）提示先运行 `/setup-dev`，不得静默假设配置继续；存在时按配置执行，不自行改配置放宽约束，发现配置与现实不符报告给人裁决。
 
 必要字段（结构见 `shared/templates/agents-config.md`）：
 

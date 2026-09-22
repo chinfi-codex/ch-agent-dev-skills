@@ -12,15 +12,11 @@ implementation-approval-phrases:
 description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
   into tracer-bullet tickets with blocking edges, auto-checkable DoD
-  commands, and per-ticket verify-tiers (light / scoped / full, computed
-  from agents-config.verify-policy; integration tickets forced to full),
-  gets gate-2 (task list) confirmation, publishes to the
-  configured tracker — then the main session auto-dispatches each ticket
-  as a fresh host-agent conversation (host-agnostic: Task in Claude Code,
-  Agent in ZCode, or the host's equivalent new-conversation mechanism;
-  economy-tier model by default), supervises execution until each ticket
-  is merged, and advances through the DAG without further human gates.
-  Default mode is DOC_MODE.
+  commands, and per-ticket verify-tiers from agents-config.verify-policy
+  (integration tickets forced to full), gets gate-2 human confirmation,
+  publishes — then the main session auto-dispatches each ticket as a fresh
+  host-agent conversation and supervises until merge with no further human
+  gates. Default mode is DOC_MODE.
 allowed-tools:
   - Read
   - Write
@@ -36,139 +32,65 @@ allowed-tools:
 
 ## 文档模式
 
-- 默认进入 `DOC_MODE`
-- 只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`
-- “顺手改一下”“直接做了吧”这类表述，不算批准，仍视为 `DOC_MODE`
+- 默认进入 `DOC_MODE`；只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`；「顺手改一下」「直接做了吧」不算批准
+- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
 
 ### `DOC_MODE`
 
-- 只允许读代码、读文档、写文档
-- 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
+- 只允许读代码、读文档、写文档；只允许写入 `./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
 - 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report、decision card
-- 禁止写或改：源码、测试、脚手架、运行配置
-- 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
+- 禁止写或改：源码、测试、脚手架、运行配置（`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`）
 - 禁止执行实现导向命令：`python`、`pytest`、`node`、`npm`、`bun`、`cargo`、`go test`、build scripts
 
-### 停止条件
+### 停止与批准
 
-1. 读取相关代码与文档
-2. 产出 design/spec/doc
-3. 总结“若获批将实现什么”，但不实现
-4. 明确请求批准
-5. 立即停止并等待
-
-### 批准规则
-
-- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
-- 未获批准，不得写任何源码、测试、脚手架、配置变更
-
-### 宿主边界
-
-- 这套规则主要是流程约束
-- 若宿主支持 hook、ACL、wrapper，应由宿主做硬拦截
-- 在 Codex-compatible host 中，如无宿主级拦截，本 skill 仅为 advisory，不保证技术隔离
+产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
 ## 术语与数据口径（GLOSSARY）
 
-项目级唯一术语文件：`./docs/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
-
-### 读取纪律
-
-- 在开始任何判断、提问或写作前，先读 `./docs/GLOSSARY.md`（存在才读，不存在不阻塞）。
-- 读取顺序上，GLOSSARY 先于 project memo 与需求级文档。
+项目级唯一术语文件：`./docs/GLOSSARY.md`（结构见 skill 包内 `shared/templates/glossary.md`；懒创建：第一个术语确定时按该结构创建；存在才读，不存在不阻塞，先于其他文档读）。
 
 ### 使用纪律
 
 - 输出文档与对话中必须使用表内**标准术语**；用户使用别名或口语说法时，回显标准词后继续。
-- 定义按「它是什么」写，不按「它做什么」写——GLOSSARY 是词汇表，不是设计文档。
 - 用户命中某术语的「拒绝词」时：回显标准词，说明该说法已被淘汰及原因，再继续。拒绝词与别名不同：别名是可接受的口语说法（用于匹配），拒绝词是被明确淘汰、会引发歧义的说法。
-- 用户的用法与表内定义冲突时，必须立即指出并要求裁决，例如：「术语表中 X 定义为 A，你刚才的用法是 B，以哪个为准？」
-- 文档中引用任何指标，必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
+- 用户用法与表内定义冲突时，立即指出并要求裁决（「术语表中 X 定义为 A，你的用法是 B，以哪个为准？」）。
+- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
 
 ### 回写纪律
 
-- 讨论中确定的新术语或新口径，**立即写入** GLOSSARY，不批量积压到文档产出时。
-- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收（即便项目内高频出现）。
-- 讨论中明确淘汰的说法，立即记入对应术语的「拒绝词」列，防止同一批词汇反复回潮。
-- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./docs/GLOSSARY.md`。
-- GLOSSARY 原地追加更新，不加日期后缀，不新建版本文件。
-- 表内只放定义与口径；方案、决策理由、实现细节一律不进 GLOSSARY。
-
-### 与 `feature-slug` 匹配的关系
-
-- 术语表的「别名/口语说法」列是 `feature-slug` 匹配的可解释输入来源之一。
-- 口语化需求描述命中某个术语的别名时，可沿「关联 feature-slug」定位需求目录；命中多个时按 `AMBIGUOUS_MATCH` 处理。
+- 讨论中确定的新术语或新口径**立即写入**，不批量积压；明确淘汰的说法立即记入「拒绝词」列，防止回潮。
+- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
+- 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
+- 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
+- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 提问格式
 
-提问分两种形态：
+提问分两种形态：**拷打轮次**（需求澄清，按「拷打规则（Grilling）」，一轮可问多个相互独立的 frontier 问题）与**阻塞型单点确认**（`feature-slug` 歧义裁决、模式 / 方向批准、术语冲突裁决、是否进入下一阶段等，一次只问一个）。本节规则对两种形态都适用。
 
-- **拷打轮次**：需求澄清阶段按「拷打规则（Grilling）」执行，一轮可问多个相互独立的 frontier 问题
-- **阻塞型单点确认**：`feature-slug` 歧义裁决、模式 / 方向批准、术语冲突裁决、是否进入下一阶段等，一次只问一个
+先把未决问题归类为三种之一：
 
-本节规则对两种形态的每一道题都适用。
+- `可假设继续`：对当前判断影响较小——带默认假设继续，并在输出中显式写出假设
+- `必须提问后继续`：影响核心判断、关键前提、模式选择、优先级、规则边界或最终结论，不能绕过——先发问再继续，不用「可以先假设」绕过，也不沉入「待确认项」；提问用 `AskUserQuestion`，不自行脑补答案
+- `仅记录为低优先级风险`：不影响当前判断——暂记为风险或待确认项
 
-## 通用提问原则
+每次提问遵循：
 
-先把当前未决问题归类为三种之一：
+1. **Re-ground**：用 2-4 句重述当前讨论对象、当前阶段、当前要解决的问题
+2. **说明为什么必须问**：指出影响哪一个核心判断，不问清会导致什么判断失真
+3. **给推荐方向**：先给 recommendation，显式说明仍依赖用户确认，不伪装成结论
+4. **分叉题再给 A / B / C**：A 推荐、B 保守或替代、C 激进 / 延后 / 不同路径；非分叉题不强行给选项
+5. **单点确认一次只问一个**，不合并多个决策点（拷打轮次不受此限）
 
-- `可假设继续`：对当前判断影响较小，带着默认假设继续，并在输出中显式写出假设
-- `必须提问后继续`：影响核心判断、关键前提、模式选择、优先级、规则边界或最终结论，不能绕过
-- `仅记录为低优先级风险`：不影响当前判断，暂记为风险或待确认项
-
-判为 `必须提问后继续` 的典型情形（会改变以下任一项）：
-
-- 核心判断是否成立；当前讨论对象到底是什么；用户真正要做出的决策是什么
-- 目标、范围或优先级是否变化
-- 关键规则、边界、约束或成功标准如何定义；谁是目标用户 / 购买者 / 决策者
-- 商业模型中的关键变量；市场切口或增长路径；当前阶段的判断口径
-- 最终输出是否可能误导用户
-
-判为必须提问后，必须先发问再继续——不要用「可以先假设」绕过高影响问题，也不要把高影响问题沉入「待确认项」。提问用 `AskUserQuestion`，不自行脑补答案。
-
-## 每次提问必须遵循以下格式
-
-1. Re-ground 当前上下文
-   - 用 2-4 句重述当前讨论对象、当前阶段、当前要解决的问题
-
-2. 说明为什么必须问
-   - 明确指出这个问题会影响哪一个核心判断
-   - 如果不问清，会导致什么判断失真
-
-3. 给出当前最推荐的判断方向
-   - 先给 recommendation，但要显式说明它仍依赖用户确认
-   - recommendation 不能伪装成结论
-
-4. 在适合做决策分叉时，再给 A / B / C options
-   - `A` 为推荐选项
-   - `B` 为保守或替代选项
-   - `C` 为激进、延后或不同路径选项
-   - 如果当前问题不是“选项分叉题”，不要强行给 A / B / C
-
-5. 阻塞型单点确认一次只问一个
-   - 单点确认不合并多个决策点
-   - 拷打轮次不受此限：相互独立的 frontier 问题一轮问完
-
-## 提问风格要求
-
-- 问题短、具体、直击判断核心，不为礼貌加缓冲
-- 关键变量缺失时先提问，不输出大段结论
-- 回答仍抽象就继续追问，直到足以支撑判断
+风格：问题短、具体、直击判断核心，不为礼貌加缓冲；关键变量缺失先提问，不输出大段结论；回答仍抽象就继续追问，直到足以支撑判断。
 
 ## 完成状态协议
 
-### `已完成`
-- 产物可进入下一阶段，不存在阻塞性交付缺口。
-
-### `已完成但有风险`
-- 已产出可用文档，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题。
-
-### `阻塞`
-- 当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）。
-- 必须明确指出阻塞点和解除阻塞所需条件。
-
-### `需补充上下文`
-- 上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档。
+- `已完成`：产物可进入下一阶段，不存在阻塞性交付缺口
+- `已完成但有风险`：可用产物已产出，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题
+- `阻塞`：当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）；必须指出阻塞点和解除阻塞所需条件
+- `需补充上下文`：上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档
 
 ## Dev Artifact 路径约定
 
@@ -199,18 +121,14 @@ allowed-tools:
 路径使用规则：
 
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
-- `issues/` 下的票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
-- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 沿用日期后缀版本规则，是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放在仓库根 `.worktrees/<issue-id>/`，该目录必须加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——收口清场一律按分支名发现（见「派发与监督协议」的 worktree 清场序列），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树的约定：`feature-slug` 目录归档、`feature-summary` 进文件名、日期后缀区分版本、不覆盖旧文件、读取时按日期取最新
-- 需求级 dev 文档读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
+- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## Dev 配置（agents-config）
 
-dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
-
-- 配置不存在时：`/issue-split`、`/implement`、`/ai-review` 应提示先运行 `/setup-dev`，不得静默假设配置继续
-- 配置存在时：按配置执行，不自行改配置放宽约束；发现配置与现实不符，报告给人裁决
+dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存在时（`/issue-split`、`/implement`、`/ai-review`）提示先运行 `/setup-dev`，不得静默假设配置继续；存在时按配置执行，不自行改配置放宽约束，发现配置与现实不符报告给人裁决。
 
 必要字段（结构见 `shared/templates/agents-config.md`）：
 
@@ -232,30 +150,30 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
 - 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——被派发方全靠落盘文件工作
-- 模型档位：被派发对话默认取当前宿主可用模型范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时显式升级
+- 模型档位：被派发对话默认取宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时显式升级
 
 ### 宿主适配
 
 | 宿主 | 新开独立对话的机制 | worktree 归属 |
 |---|---|---|
-| Claude Code | `Task` 工具（subagent） | 与主会话同一文件系统：实现对话在主工作区建 `.worktrees/<issue-id>`，主会话按清场序列删 |
+| Claude Code | `Task` 工具（subagent） | 同主会话文件系统：实现对话在主工作区建 `.worktrees/<issue-id>`，主会话按清场序列删 |
 | ZCode | `Agent` 工具（subagent） | 同 Claude Code |
-| Codex | 宿主的新会话 / 子代理能力（以实际版本为准） | Codex 自建会话沙箱 `~/.codex/worktrees/<hash>/`，路径不可预知且不随会话正常结束保证回收：实现对话退出前按分支名自清，并把 worktree 路径写进结构化回报；主会话按清场序列以 branch 匹配兜底 |
+| Codex | 宿主的新会话 / 子代理能力（以实际版本为准） | 自建沙箱 `~/.codex/worktrees/<hash>/`，路径不可预知且不保证回收：实现对话退出前按分支名自清并把路径写进结构化回报；主会话按清场序列以 branch 匹配兜底 |
 | WorkBuddy | 宿主的任务派发 / 新对话能力 | 以实际机制为准；派发环境与主工作区不同文件系统时，实现对话退出前按分支名自清，主会话 `git worktree prune` 校验 |
-| 其他通用 agent | 任何「同一宿主内新开独立对话」的等价机制 | 按 WorkBuddy 行原则处理 |
+| 其他通用 agent | 「同一宿主内新开独立对话」的等价机制 | 按 WorkBuddy 行原则处理 |
 
-- skill frontmatter 里 `allowed-tools` 的 `Task` 是 Claude Code 的工具命名；其他宿主安装或运行时按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变
-- 兜底：宿主完全没有自动新开对话能力时，主会话产出自包含派发提示词、请人在新对话窗口启动执行；不得在主会话同一上下文里「顺便自己实现」充数
-- 写查分离不可降级：无论宿主能力如何，**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境中执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评
+- frontmatter `allowed-tools` 里的 `Task` 是 Claude Code 命名；其他宿主按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变
+- 兜底：宿主完全没有该能力时，主会话产出自包含派发提示词请人在新对话启动；不得在主会话同一上下文里「顺便自己实现」充数
+- 写查分离不可降级：**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评
 
 ### worktree 清场序列（收口与对账共用）
 
-按分支名发现，不按路径猜——宿主自管沙箱（如 Codex）会让真实路径偏离 `.worktrees/<issue-id>/` 约定：
+按分支名发现，不按路径猜——宿主自管沙箱（如 Codex）会让真实路径偏离约定：
 
 1. `git worktree list --porcelain` 找 branch = `feat/<feature-slug>-<issue-id>` 的注册条目
-2. `git worktree remove <path>`；有未跟踪产物被拒删时 `--force`（票已收口，产物不再需要）
+2. `git worktree remove <path>`；未跟踪产物拒删时 `--force`（票已收口，产物不再需要）
 3. `git worktree prune` 清悬空注册
-4. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支，local 模式核对已并入 `main-branch` 后 `git branch -D feat/<feature-slug>-<issue-id>`（存在远端同名再 `git push origin --delete`）
+4. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支；local 模式核对已并入 `main-branch` 后 `git branch -D feat/<feature-slug>-<issue-id>`（有远端同名再 `git push origin --delete`）
 5. `rmdir .worktrees 2>/dev/null || true` 清空父目录
 
 ### 监督循环（主会话职责，直到完成合并）
@@ -263,11 +181,11 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 门②（票清单确认）通过后，主会话自动进入监督循环，**派出后不停手，监督到每张票合并完成**：
 
 1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
-2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行（一张收口再派下一张），人明确要求并行时才同时派多张
-3. **跟踪**：等待被派发对话返回；其结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low 清单）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审结论 pass / pass-with-notes、MR ready——然后执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按 worktree 清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合
-5. **推进**：每轮先做 worktree 对账——`git worktree list --porcelain` 与票状态比对，票已 `done` 但 worktree 仍在的按清场序列补删（回收中断会话的遗留），`in-review` / `needs-human` 票的保留并在总账列出路径；再重算 frontier，回到第 1 步；全部票 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / worktree 已清或保留原因 / 遗留 Medium-Low），输出完成状态
-6. **唯一暂停条件**：被派发对话回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、或其他无法自行裁决的问题——与人单点确认后再继续；其余情况（含评审 BLOCKER 回修、fast 质量门自修复）一律不问人
+2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行，人明确要求并行才同时派多张
+3. **跟踪**：被派发对话的结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）只是线索，不作为成功依据
+4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审 pass / pass-with-notes、MR ready——执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 再合
+5. **推进**：每轮先做 worktree 对账（`git worktree list --porcelain` 与票状态比对，票已 `done` 但 worktree 仍在的按清场序列补删；`in-review` / `needs-human` 票的保留并列入总账），再重算 frontier 回到第 1 步；全部 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / worktree 已清或保留原因 / 遗留 Medium-Low），输出完成状态
+6. **唯一暂停条件**：回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、其他无法自行裁决的问题——与人单点确认后再继续；其余（含 BLOCKER 回修、fast 自修复）一律不问人
 
 # /issue-split
 

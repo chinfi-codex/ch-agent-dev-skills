@@ -3,19 +3,13 @@ name: implement
 version: 0.4.0
 default-mode: IMPLEMENT_MODE
 description: |
-  Execution skill for one confirmed issue. Normally dispatched by the main
-  session as a fresh host-agent conversation (host-agnostic: Task in
-  Claude Code, Agent in ZCode, or the host's equivalent new-conversation
-  mechanism; economy-tier model by default): works in a dedicated git
-  worktree with TDD, runs per-round drift checks against the ticket's
-  declared-scope (escalating verify-tier one-way when verify-policy
-  triggers hit), records on-disk evidence for the ticket's tier gate
-  (light = DoD + fast; scoped = plus diff-derived affected tests; full =
-  plus the whole suite; integration tickets always full), invokes
-  /ai-review in an independent conversation (delegate mode by default),
-  fixes BLOCKERs, and submits the merge request. The main session
-  supervises through merge — no human gate. Success is judged by
-  on-disk evidence, never by self-report.
+  Execution skill for one confirmed issue. Normally auto-dispatched by the
+  main session as a fresh host-agent conversation (economy-tier model):
+  TDD in a dedicated worktree, per-round scope-drift checks with one-way
+  verify-tier escalation, on-disk evidence for the ticket's tier gate,
+  then independent /ai-review, BLOCKER fixes, and the merge request made
+  ready. Main session supervises through merge — no human gate. Success
+  is judged by on-disk evidence, never by self-report.
 allowed-tools:
   - Read
   - Write

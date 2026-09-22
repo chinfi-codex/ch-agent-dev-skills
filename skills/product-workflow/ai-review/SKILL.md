@@ -4,13 +4,11 @@ version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
-  Independent code review powered by open-code-review (ocr). Three modes:
-  delegate (default: ocr filters files and resolves rules, a fresh
-  independent conversation in the host agent reviews — host-agnostic,
-  no LLM endpoint needed), local (run ocr against main...HEAD with the
-  ticket file as background), ci (GitLab CI auto-review on MR push,
-  findings posted as inline discussions).
-  Review-only: never modifies code, writes the review report only.
+  Independent code review powered by open-code-review (ocr). Modes:
+  delegate (default — ocr filters files and resolves rules, a fresh
+  independent conversation reviews; no LLM endpoint needed), local, ci
+  (GitLab CI auto-review on MR push). Review-only: never modifies code,
+  writes the review report only.
 allowed-tools:
   - Read
   - Write
@@ -25,83 +23,45 @@ allowed-tools:
 
 ## 文档模式
 
-- 默认进入 `DOC_MODE`
-- 只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`
-- “顺手改一下”“直接做了吧”这类表述，不算批准，仍视为 `DOC_MODE`
+- 默认进入 `DOC_MODE`；只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`；「顺手改一下」「直接做了吧」不算批准
+- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
 
 ### `DOC_MODE`
 
-- 只允许读代码、读文档、写文档
-- 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
+- 只允许读代码、读文档、写文档；只允许写入 `./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
 - 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report、decision card
-- 禁止写或改：源码、测试、脚手架、运行配置
-- 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
+- 禁止写或改：源码、测试、脚手架、运行配置（`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`）
 - 禁止执行实现导向命令：`python`、`pytest`、`node`、`npm`、`bun`、`cargo`、`go test`、build scripts
 
-### 停止条件
+### 停止与批准
 
-1. 读取相关代码与文档
-2. 产出 design/spec/doc
-3. 总结“若获批将实现什么”，但不实现
-4. 明确请求批准
-5. 立即停止并等待
-
-### 批准规则
-
-- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
-- 未获批准，不得写任何源码、测试、脚手架、配置变更
-
-### 宿主边界
-
-- 这套规则主要是流程约束
-- 若宿主支持 hook、ACL、wrapper，应由宿主做硬拦截
-- 在 Codex-compatible host 中，如无宿主级拦截，本 skill 仅为 advisory，不保证技术隔离
+产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
 ## 术语与数据口径（GLOSSARY）
 
-项目级唯一术语文件：`./docs/GLOSSARY.md`（初始结构见 skill 包内 `shared/templates/glossary.md`）。
-
-### 读取纪律
-
-- 在开始任何判断、提问或写作前，先读 `./docs/GLOSSARY.md`（存在才读，不存在不阻塞）。
-- 读取顺序上，GLOSSARY 先于 project memo 与需求级文档。
+项目级唯一术语文件：`./docs/GLOSSARY.md`（结构见 skill 包内 `shared/templates/glossary.md`；懒创建：第一个术语确定时按该结构创建；存在才读，不存在不阻塞，先于其他文档读）。
 
 ### 使用纪律
 
 - 输出文档与对话中必须使用表内**标准术语**；用户使用别名或口语说法时，回显标准词后继续。
-- 定义按「它是什么」写，不按「它做什么」写——GLOSSARY 是词汇表，不是设计文档。
 - 用户命中某术语的「拒绝词」时：回显标准词，说明该说法已被淘汰及原因，再继续。拒绝词与别名不同：别名是可接受的口语说法（用于匹配），拒绝词是被明确淘汰、会引发歧义的说法。
-- 用户的用法与表内定义冲突时，必须立即指出并要求裁决，例如：「术语表中 X 定义为 A，你刚才的用法是 B，以哪个为准？」
-- 文档中引用任何指标，必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
+- 用户用法与表内定义冲突时，立即指出并要求裁决（「术语表中 X 定义为 A，你的用法是 B，以哪个为准？」）。
+- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
 
 ### 回写纪律
 
-- 讨论中确定的新术语或新口径，**立即写入** GLOSSARY，不批量积压到文档产出时。
-- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收（即便项目内高频出现）。
-- 讨论中明确淘汰的说法，立即记入对应术语的「拒绝词」列，防止同一批词汇反复回潮。
-- 懒创建：第一个术语或口径确定时，按 `shared/templates/glossary.md` 的结构创建 `./docs/GLOSSARY.md`。
-- GLOSSARY 原地追加更新，不加日期后缀，不新建版本文件。
-- 表内只放定义与口径；方案、决策理由、实现细节一律不进 GLOSSARY。
-
-### 与 `feature-slug` 匹配的关系
-
-- 术语表的「别名/口语说法」列是 `feature-slug` 匹配的可解释输入来源之一。
-- 口语化需求描述命中某个术语的别名时，可沿「关联 feature-slug」定位需求目录；命中多个时按 `AMBIGUOUS_MATCH` 处理。
+- 讨论中确定的新术语或新口径**立即写入**，不批量积压；明确淘汰的说法立即记入「拒绝词」列，防止回潮。
+- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
+- 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
+- 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
+- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 完成状态协议
 
-### `已完成`
-- 产物可进入下一阶段，不存在阻塞性交付缺口。
-
-### `已完成但有风险`
-- 已产出可用文档，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题。
-
-### `阻塞`
-- 当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）。
-- 必须明确指出阻塞点和解除阻塞所需条件。
-
-### `需补充上下文`
-- 上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档。
+- `已完成`：产物可进入下一阶段，不存在阻塞性交付缺口
+- `已完成但有风险`：可用产物已产出，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题
+- `阻塞`：当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）；必须指出阻塞点和解除阻塞所需条件
+- `需补充上下文`：上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档
 
 ## Dev Artifact 路径约定
 
@@ -132,18 +92,14 @@ allowed-tools:
 路径使用规则：
 
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
-- `issues/` 下的票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
-- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 沿用日期后缀版本规则，是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放在仓库根 `.worktrees/<issue-id>/`，该目录必须加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——收口清场一律按分支名发现（见「派发与监督协议」的 worktree 清场序列），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树的约定：`feature-slug` 目录归档、`feature-summary` 进文件名、日期后缀区分版本、不覆盖旧文件、读取时按日期取最新
-- 需求级 dev 文档读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
+- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## Dev 配置（agents-config）
 
-dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`。
-
-- 配置不存在时：`/issue-split`、`/implement`、`/ai-review` 应提示先运行 `/setup-dev`，不得静默假设配置继续
-- 配置存在时：按配置执行，不自行改配置放宽约束；发现配置与现实不符，报告给人裁决
+dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存在时（`/issue-split`、`/implement`、`/ai-review`）提示先运行 `/setup-dev`，不得静默假设配置继续；存在时按配置执行，不自行改配置放宽约束，发现配置与现实不符报告给人裁决。
 
 必要字段（结构见 `shared/templates/agents-config.md`）：
 

@@ -30,125 +30,49 @@ allowed-tools:
 
 ## 文档模式
 
-- 默认进入 `DOC_MODE`
-- 只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`
-- “顺手改一下”“直接做了吧”这类表述，不算批准，仍视为 `DOC_MODE`
+- 默认进入 `DOC_MODE`；只有用户明确说出 `批准写代码`、`go implement`、`开始实现`，才能切到 `IMPLEMENT_MODE`；「顺手改一下」「直接做了吧」不算批准
+- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
 
 ### `DOC_MODE`
 
-- 只允许读代码、读文档、写文档
-- 只允许写入：`./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
+- 只允许读代码、读文档、写文档；只允许写入 `./docs/**`、`specs/**`、`ADR/**`、`*.md`、`*.mdx`
 - 可产出：design、spec、ADR、TODO、checklist、change request、PRD、review report、decision card
-- 禁止写或改：源码、测试、脚手架、运行配置
-- 禁止触碰：`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`
+- 禁止写或改：源码、测试、脚手架、运行配置（`*.py`、`*.js`、`*.ts`、`*.tsx`、`tests/**`、`src/**`、`app/**`、`package.json`、`pyproject.toml`、`requirements.txt`）
 - 禁止执行实现导向命令：`python`、`pytest`、`node`、`npm`、`bun`、`cargo`、`go test`、build scripts
 
-### 停止条件
+### 停止与批准
 
-1. 读取相关代码与文档
-2. 产出 design/spec/doc
-3. 总结“若获批将实现什么”，但不实现
-4. 明确请求批准
-5. 立即停止并等待
-
-### 批准规则
-
-- 用户未使用明确批准词时，必须重申仍在 `DOC_MODE`
-- 未获批准，不得写任何源码、测试、脚手架、配置变更
-
-### 宿主边界
-
-- 这套规则主要是流程约束
-- 若宿主支持 hook、ACL、wrapper，应由宿主做硬拦截
-- 在 Codex-compatible host 中，如无宿主级拦截，本 skill 仅为 advisory，不保证技术隔离
+产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
 ## 前置说明
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
-- 在开始任何判断或文档产出前，先读取现有上下文文档，再进入提问或写作
-- 读取上游文档时，区分项目级文档与需求级文档：
-  - 项目级文档：读取最新的 `project memo`
-  - 需求级文档：先确定唯一 `feature-slug`，再读取该目录下的相关上游文档
-- 优先读取顺序：
-  0. `./docs/GLOSSARY.md`（如存在；术语与数据口径的项目级唯一来源）
-  1. 最新的 `project memo`
-  2. 与当前 `feature-slug` 对应的最新 `feature brief`
-  3. 与当前 `feature-slug` 对应的最新 `PRD`
-  4. 与当前 `feature-slug` 对应的最新 `pd-review-report` 或已有评审结论
+- 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
-- 统一行为边界：
-  - 只做产品工作流内的判断、提问、整理与写作
-  - 不输出技术实现方案、数据库设计、API 设计、任务拆解
-  - 若上下文不足，先显式说明缺口，再进入单问题补充
-  - 若发现已有文档与当前结论冲突，必须指出并在新产物中统一口径
+- 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
 ## `feature-slug` 识别规则
 
-- `feature-slug` 是需求级唯一稳定标识，用于定位 `./docs/features/<feature-slug>/`，默认使用中文
-- 当用户直接提供 `feature-slug` 时，优先按该 slug 定位
-- 当用户提供中文需求名或口语化需求描述时，先在 `./docs/features/` 下做匹配，再决定是否继续
-- 匹配时只使用可解释规则，不使用不可解释的模糊猜测
+`feature-slug` 是需求级唯一稳定标识（默认中文），定位 `./docs/features/<feature-slug>/`；一经建立不因标题调整而改变。用户直接给出 slug 时优先按其定位；否则先在 `./docs/features/` 下做可解释匹配，只用可解释规则，不模糊猜测。输入来源：
 
-匹配输入来源：
-- `./docs/GLOSSARY.md` 术语表的「别名/口语说法」与「关联 feature-slug」列
-- 目录名 `feature-slug`
-- 文档头部的 `feature_slug`
-- 文档头部的 `feature_name`
-- 文档标题
+- `./docs/GLOSSARY.md` 的「别名/口语说法」与「关联 feature-slug」列
+- 目录名 `feature-slug`；文档头部 `feature_slug` / `feature_name`；文档标题
 
-匹配结果分为三类：
-- `EXACT_MATCH`
-  - 唯一高置信命中
-  - 可直接继续，但必须回显：`当前需求已匹配到 <feature-slug>（<feature_name>）`
-- `AMBIGUOUS_MATCH`
-  - 存在多个合理候选
-  - 必须提一个单问题确认，不能自行选择
-- `NO_MATCH`
-  - 没有可接受候选
-  - `/pd-plan` 可作为新需求处理，但必须先确认新的 `feature-slug`
-- `/prd` 与 `/pd-review` 不得擅自新建需求目录，应返回 `需补充上下文` 或 `阻塞`
+匹配结果三类：
+
+- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-slug>（<feature_name>）」后继续
+- `AMBIGUOUS_MATCH`：多个合理候选——单问题确认，不自行选择
+- `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建需求目录，返回 `需补充上下文` 或 `阻塞`
 
 ## `feature-summary` 使用规则
 
-- `feature-summary` 是需求级文档文件名中的中文摘要名，用于标识大功能下的具体子功能或本次子范围
-- `feature-summary` 必须使用中文，保持简短、可搜索，推荐 4-12 个汉字
-- `feature-summary` 不进入目录名，不替代 `feature-slug`
-- 同一 `feature-slug` 下允许存在多个不同的 `feature-summary`
-- 写需求级文档前，必须同时确定：
-  - 唯一 `feature-slug`
-  - 当前文档对应的 `feature-summary`
-- 若用户只给了大功能名但未给子功能名，且当前场景无法从上下文唯一推断，应先提问确认
-- 回显当前文档归档信息时，必须同时回显 `feature-slug` 与 `feature-summary`
-
-## 按命令读取上游的规则
-
-- `/ceo-office`
-  - 默认读取最新 `project memo`
-  - 仅当用户明确点名某个需求方向时，才进入 `feature-slug` 匹配流程
-- `/pd-plan`
-  - 先读取最新 `project memo`
-  - 若命中已有 `feature-slug`，继续读取该目录下已有需求文档
-  - 若是新需求，先确认 `feature_name`、`feature-slug` 与本次 `feature-summary`，再产出文档
-- `/prd`
-  - 必须先确定唯一 `feature-slug`
-  - 必须先确定本次 `feature-summary`
-  - 再按类型匹配读取该目录下最新 `feature brief`
-  - 若 `feature brief` 不存在，或其状态不是 `待写PRD`，则直接 `阻塞`
-- `/pd-review`
-  - 必须先确定唯一 `feature-slug`
-  - 必须先确定本次 `feature-summary`
-  - 再按类型匹配读取该目录下最新 `PRD`
-  - 再补读该目录下最新 `feature brief` 与最新 `project memo`
-  - 若 `PRD` 不存在，则直接 `阻塞`
-- `/review`
-  - 必须先确定唯一 `feature-slug` 与本次 `feature-summary`
-  - 读取该 slug 下 `./docs/features/<feature-slug>/` 全部版本的需求文档（计数版本数）
-  - 再读取 `./dev/features/<feature-slug>/` 全部 dev 产物（tech-spec / 票 / impl-log / evidence / review report / MR）
-  - 若票未全部 `done`，直接 `阻塞`（用户明确要求部分复盘除外）
+- `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
+- 写需求级文档前必须同时确定唯一 `feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时两者同时回显
 
 ## Artifact 路径约定
 
-统一根目录：
+统一根目录（`./docs/` 相对当前项目根目录）：
 
 ```text
 ./docs/
@@ -169,20 +93,12 @@ allowed-tools:
 ```
 
 路径使用规则：
-- `./docs/` 是相对当前项目根目录的 artifact 归档路径
-- `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 均为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为可视化渲染，内容必须逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
-- 需求级文档统一按 `feature-slug` 归档，文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
-- `feature-slug` 是需求级稳定标识，默认使用中文；一经建立不因标题调整而改变
-- 文档更新使用“新文件 + 日期后缀”策略，不覆盖旧文件
-- 读取上游时，先按文档类型过滤，再按日期选择最新版本
-- 需求级文档读取不依赖固定旧文件名，应按以下模式匹配：
-  - `*-feature-brief-*`
-  - `*-prd-*`
-  - `*-change-request-*`
-  - `*-pd-review-report-*`
-  - `*-retro-*`
-- 文件命名保持稳定、可搜索、可比较，避免使用含糊名称如 `final-v2-latest`
+
+- `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
+- `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
+- 需求级文档统一按 `feature-slug` 归档（稳定标识，默认中文，一经建立不因标题调整而改变），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
+- 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
+- 文件命名保持稳定、可搜索、可比较，不用 `final-v2-latest` 类含糊名称
 
 ## Dev Artifact 路径约定
 
@@ -213,82 +129,37 @@ allowed-tools:
 路径使用规则：
 
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
-- `issues/` 下的票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
-- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 沿用日期后缀版本规则，是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放在仓库根 `.worktrees/<issue-id>/`，该目录必须加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——收口清场一律按分支名发现（见「派发与监督协议」的 worktree 清场序列），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树的约定：`feature-slug` 目录归档、`feature-summary` 进文件名、日期后缀区分版本、不覆盖旧文件、读取时按日期取最新
-- 需求级 dev 文档读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
+- `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## 完成状态协议
 
-### `已完成`
-- 产物可进入下一阶段，不存在阻塞性交付缺口。
-
-### `已完成但有风险`
-- 已产出可用文档，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题。
-
-### `阻塞`
-- 当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）。
-- 必须明确指出阻塞点和解除阻塞所需条件。
-
-### `需补充上下文`
-- 上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档。
+- `已完成`：产物可进入下一阶段，不存在阻塞性交付缺口
+- `已完成但有风险`：可用产物已产出，仍存在须显式记录的风险、依赖或信息缺口；可进入下一阶段，但不得隐藏问题
+- `阻塞`：当前目标不能继续推进（缺必须前置文档 / 关键输入未批准 / 存在无法自行裁决的冲突）；必须指出阻塞点和解除阻塞所需条件
+- `需补充上下文`：上下文不足以做出可靠产品判断；先进入单问题补充流程，不强行产出正式文档
 
 ## 提问格式
 
-提问分两种形态：
+提问分两种形态：**拷打轮次**（需求澄清，按「拷打规则（Grilling）」，一轮可问多个相互独立的 frontier 问题）与**阻塞型单点确认**（`feature-slug` 歧义裁决、模式 / 方向批准、术语冲突裁决、是否进入下一阶段等，一次只问一个）。本节规则对两种形态都适用。
 
-- **拷打轮次**：需求澄清阶段按「拷打规则（Grilling）」执行，一轮可问多个相互独立的 frontier 问题
-- **阻塞型单点确认**：`feature-slug` 歧义裁决、模式 / 方向批准、术语冲突裁决、是否进入下一阶段等，一次只问一个
+先把未决问题归类为三种之一：
 
-本节规则对两种形态的每一道题都适用。
+- `可假设继续`：对当前判断影响较小——带默认假设继续，并在输出中显式写出假设
+- `必须提问后继续`：影响核心判断、关键前提、模式选择、优先级、规则边界或最终结论，不能绕过——先发问再继续，不用「可以先假设」绕过，也不沉入「待确认项」；提问用 `AskUserQuestion`，不自行脑补答案
+- `仅记录为低优先级风险`：不影响当前判断——暂记为风险或待确认项
 
-## 通用提问原则
+每次提问遵循：
 
-先把当前未决问题归类为三种之一：
+1. **Re-ground**：用 2-4 句重述当前讨论对象、当前阶段、当前要解决的问题
+2. **说明为什么必须问**：指出影响哪一个核心判断，不问清会导致什么判断失真
+3. **给推荐方向**：先给 recommendation，显式说明仍依赖用户确认，不伪装成结论
+4. **分叉题再给 A / B / C**：A 推荐、B 保守或替代、C 激进 / 延后 / 不同路径；非分叉题不强行给选项
+5. **单点确认一次只问一个**，不合并多个决策点（拷打轮次不受此限）
 
-- `可假设继续`：对当前判断影响较小，带着默认假设继续，并在输出中显式写出假设
-- `必须提问后继续`：影响核心判断、关键前提、模式选择、优先级、规则边界或最终结论，不能绕过
-- `仅记录为低优先级风险`：不影响当前判断，暂记为风险或待确认项
-
-判为 `必须提问后继续` 的典型情形（会改变以下任一项）：
-
-- 核心判断是否成立；当前讨论对象到底是什么；用户真正要做出的决策是什么
-- 目标、范围或优先级是否变化
-- 关键规则、边界、约束或成功标准如何定义；谁是目标用户 / 购买者 / 决策者
-- 商业模型中的关键变量；市场切口或增长路径；当前阶段的判断口径
-- 最终输出是否可能误导用户
-
-判为必须提问后，必须先发问再继续——不要用「可以先假设」绕过高影响问题，也不要把高影响问题沉入「待确认项」。提问用 `AskUserQuestion`，不自行脑补答案。
-
-## 每次提问必须遵循以下格式
-
-1. Re-ground 当前上下文
-   - 用 2-4 句重述当前讨论对象、当前阶段、当前要解决的问题
-
-2. 说明为什么必须问
-   - 明确指出这个问题会影响哪一个核心判断
-   - 如果不问清，会导致什么判断失真
-
-3. 给出当前最推荐的判断方向
-   - 先给 recommendation，但要显式说明它仍依赖用户确认
-   - recommendation 不能伪装成结论
-
-4. 在适合做决策分叉时，再给 A / B / C options
-   - `A` 为推荐选项
-   - `B` 为保守或替代选项
-   - `C` 为激进、延后或不同路径选项
-   - 如果当前问题不是“选项分叉题”，不要强行给 A / B / C
-
-5. 阻塞型单点确认一次只问一个
-   - 单点确认不合并多个决策点
-   - 拷打轮次不受此限：相互独立的 frontier 问题一轮问完
-
-## 提问风格要求
-
-- 问题短、具体、直击判断核心，不为礼貌加缓冲
-- 关键变量缺失时先提问，不输出大段结论
-- 回答仍抽象就继续追问，直到足以支撑判断
+风格：问题短、具体、直击判断核心，不为礼貌加缓冲；关键变量缺失先提问，不输出大段结论；回答仍抽象就继续追问，直到足以支撑判断。
 
 ## 文档写作规则
 
