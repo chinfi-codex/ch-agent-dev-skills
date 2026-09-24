@@ -49,23 +49,32 @@ allowed-tools:
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
+## `feature-module` 归档规则
+
+`feature-module` 是大功能块级分组标识（默认中文，如「交易链路」「性能优化」），命名与 `feature-slug` 同规：项目内唯一、稳定、一经建立不因标题调整而改变。需求级文档一律按 `./docs/features/<feature-module>/<feature-slug>/` 两级归档；一个 `feature-slug` 恰好归属一个 `feature-module`，先有模块、后有 slug。模块划分与归属登记在 `./docs/GLOSSARY.md` 的「feature-module 归档」节，模块发现 = 读该节 + `./docs/features/` 目录一层。
+
+- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录
+- 归属判据是主价值归属：砍掉该需求，哪块业务能力受损最大就归哪个模块；跨模块大需求在 issue 层拆，不动模块归属
+
 ## `feature-slug` 识别规则
 
-`feature-slug` 是需求级唯一稳定标识（默认中文），定位 `./docs/features/<feature-slug>/`；一经建立不因标题调整而改变。用户直接给出 slug 时优先按其定位；否则先在 `./docs/features/` 下做可解释匹配，只用可解释规则，不模糊猜测。输入来源：
+`feature-slug` 是需求级唯一稳定标识（默认中文），定位 `./docs/features/<feature-module>/<feature-slug>/`；一经建立不因标题调整而改变。用户直接给出 slug 时优先按其定位；否则在 `./docs/features/` 下做最多两层（模块层 / slug 层）的可解释匹配，只用可解释规则，不模糊猜测。输入来源：
 
-- `./docs/GLOSSARY.md` 的「别名/口语说法」与「关联 feature-slug」列
-- 目录名 `feature-slug`；文档头部 `feature_slug` / `feature_name`；文档标题
+- `./docs/GLOSSARY.md` 的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节的成员列
+- 目录名（模块层 + slug 层）；文档头部 `feature_slug` / `feature_name`；文档标题
 
 匹配结果三类：
 
-- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-slug>（<feature_name>）」后继续
+- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-module>/<feature-slug>（<feature_name>）」后继续
 - `AMBIGUOUS_MATCH`：多个合理候选——单问题确认，不自行选择
-- `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建需求目录，返回 `需补充上下文` 或 `阻塞`
+- `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认 `feature-module` 归属，用户最终确认后再确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建模块或需求目录，返回 `需补充上下文` 或 `阻塞`
+
+匹配到存量平铺目录（`features/` 直下一级 slug 目录、无模块层）时：可读可用，回显迁移建议（GLOSSARY 登记 + `git mv` 移入模块目录），不自动迁移；新需求一律落两级结构。
 
 ## `feature-summary` 使用规则
 
 - `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
-- 写需求级文档前必须同时确定唯一 `feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时两者同时回显
+- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时三者同时回显
 
 ## Artifact 路径约定
 
@@ -81,19 +90,20 @@ allowed-tools:
     decision-card-YYYY-MM-DD.md
     decision-card-YYYY-MM-DD.html
   features/
-    <feature-slug>/
-      <feature-summary>-feature-brief-YYYY-MM-DD.md
-      <feature-summary>-prd-YYYY-MM-DD.md
-      <feature-summary>-change-request-YYYY-MM-DD.md
-      <feature-summary>-pd-review-report-YYYY-MM-DD.md
-      <feature-summary>-retro-YYYY-MM-DD.md
+    <feature-module>/
+      <feature-slug>/
+        <feature-summary>-feature-brief-YYYY-MM-DD.md
+        <feature-summary>-prd-YYYY-MM-DD.md
+        <feature-summary>-change-request-YYYY-MM-DD.md
+        <feature-summary>-pd-review-report-YYYY-MM-DD.md
+        <feature-summary>-retro-YYYY-MM-DD.md
 ```
 
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
-- 需求级文档统一按 `feature-slug` 归档（稳定标识，默认中文，一经建立不因标题调整而改变），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
+- 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
 - 文件命名保持稳定、可搜索、可比较，不用 `final-v2-latest` 类含糊名称
 
@@ -114,7 +124,8 @@ allowed-tools:
 - 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
 - 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
 - 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
+- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 完成状态协议
 

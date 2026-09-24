@@ -1,6 +1,6 @@
 ---
 name: ai-review
-version: 0.5.0
+version: 0.6.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
@@ -54,7 +54,8 @@ allowed-tools:
 - 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
 - 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
 - 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
+- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 完成状态协议
 
@@ -65,13 +66,14 @@ allowed-tools:
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
@@ -145,7 +147,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 
 ### Step 1：定位 Spec（需求背景）
 
-按优先级：commit 消息中的票引用（`issue-NNN`）→ `./dev/features/<feature-slug>/issues/` 模式匹配 → 用户显式给出 → 问用户。同时读 tech-spec 约束/假设栏与 PRD 相关节。
+按优先级：commit 消息中的票引用（`issue-NNN`）→ `./dev/features/` 下两层模式匹配（`*/*/issues/`，含存量平铺 `*/issues/`）→ 用户显式给出 → 问用户。同时读 tech-spec 约束/假设栏与 PRD 相关节。
 
 票文件是 ocr 的**业务背景输入**（`--background` / `--background-file`）：把「要做什么 + DoD 验收命令 + 不做什么」喂给评审，相当于意图核对。注意 background 文件上限（原始 ≤1 MiB、净化后 ≤8000 字符），超限先摘要再传，不得静默截断。
 
@@ -174,7 +176,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 评审对话模型：默认按 `agents-config.dispatch.model`（economy）取当前宿主可用范围内经济性最高的一档；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
 - 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
 
-### Step 3：红线与档位复核（第二双眼睛，确定性检查）
+### Step 3：红线、档位与清理复核（第二双眼睛，确定性检查）
 
 **红线复核**：`agents-config.redlines` 的 glob 对实际改动文件清单复核一遍（grep 可解释清单，不靠语义猜测）：命中协议 / 密钥 / 测试判定文件 → 无论 ocr 是否报，一律列 Critical BLOCKER。ocr 的 `exclude`（不送审）不等于红线（不允许改），两者不可互替。
 
@@ -185,11 +187,13 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 集成票（无后继票）未标 / 未跑 full → BLOCKER（critical）
 - 漂移已登记、未触发升档条件 → 不报，属正常小漂移
 
+**清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存。
+
 ### Step 4：解析与映射
 
 - findings 按严重度映射：**critical / high = BLOCKER**（回修依据）；medium 记遗留；low 仅明显有价值时报
 - 覆盖统计：total / reviewed / skipped（含原因）写进报告；skipped 占比异常（如大面积 exclude）显式提示
-- 按模板 `shared/templates/dev-review-report.md`（相对本 SKILL.md 为 `../shared/templates/dev-review-report.md`）产出报告，写入 `./dev/features/<feature-slug>/reviews/<feature-summary>-review-<issue-id>-YYYY-MM-DD.md`
+- 按模板 `shared/templates/dev-review-report.md`（相对本 SKILL.md 为 `../shared/templates/dev-review-report.md`）产出报告，写入 `./dev/features/<feature-module>/<feature-slug>/reviews/<feature-summary>-review-<issue-id>-YYYY-MM-DD.md`
 
 ### Step 5：结论、返回与校准
 
@@ -204,6 +208,6 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评，必须新开独立对话）
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 红线命中一律 Critical，无论引擎结论；档位失配（该升没升 / 档位虚标 / 集成票未 full）同列 BLOCKER
+- 红线命中一律 Critical，无论引擎结论；档位失配（该升没升 / 档位虚标 / 集成票未 full）与旧实现该删没删（替代落地而旧代码留存、无约束依据）同列 BLOCKER
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语

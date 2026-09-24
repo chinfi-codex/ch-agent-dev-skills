@@ -6,7 +6,7 @@
 
 ```yaml
 # issue 发布面：gitlab = glab CLI 建 issue / draft MR（内网 GitLab 已确认，首选）
-#              local  = ./dev/features/<feature-slug>/issues/ 票文件（无 glab 环境的 fallback）
+#              local  = ./dev/features/<feature-module>/<feature-slug>/issues/ 票文件（无 glab 环境的 fallback）
 tracker: gitlab
 
 # 主分支名：worktree 与 MR 的基准分支

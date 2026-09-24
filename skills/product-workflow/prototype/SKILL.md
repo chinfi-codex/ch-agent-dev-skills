@@ -40,7 +40,8 @@ allowed-tools:
 - 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
 - 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
 - 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
+- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 完成状态协议
 
@@ -51,13 +52,14 @@ allowed-tools:
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
@@ -102,7 +104,7 @@ allowed-tools:
 
 ## 启动前校验
 
-1. 确定唯一 `feature-slug`（沿用 `./docs/features/` 的匹配规则）；产物归档到 `./dev/features/<feature-slug>/prototypes/<短名>/`
+1. 确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；产物归档到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/`
 2. 把本次要回答的**那一个问题**逐字写下来——它将放在原型与 verdict 的顶部；答错问题 = 纯浪费
 3. 补读触发来源（哪份文档的哪一节 / 哪一轮拷打的哪一题）与该 slug 下既有 verdict，避免重复验证
 
@@ -138,13 +140,13 @@ allowed-tools:
 ## 捕获（收口）
 
 1. 请用户上手操作，收集裁决（一句话结论 +「不应该可能」类发现逐条）
-2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-slug>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
+2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
 3. 若裁决产出了比散文更精确编码决策的片段（状态机 / reducer / schema / type shape），裁剪到决策相关部分收入 verdict「决策性片段」节——这是 tech-spec「3.5」节唯一允许内联的代码来源
 4. 回显：问题 / 裁决一句话 / 原型路径 / verdict 路径 / 建议回写到哪份文档
 
 ## 硬约束
 
-- 只写 `./dev/features/<feature-slug>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
+- 只写 `./dev/features/<feature-module>/<feature-slug>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
 - 一个原型只回答一个问题；问题没逐字写清不动手
 - 原型代码只存在于 `prototypes/` 目录；决策回收以 verdict 为准，原型文件留档作证据
 - 用词遵循 GLOSSARY 标准术语；状态面板、按钮、场景描述一律用领域语言

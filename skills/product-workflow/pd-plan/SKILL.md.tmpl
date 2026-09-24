@@ -90,10 +90,35 @@ allowed-tools:
 
 ---
 
+## feature-module 归档（模块新建与归属确认）
+
+新需求（`NO_MATCH`）在确认 `feature-slug` 之前，先完成模块归属确认；命中既有需求（`EXACT_MATCH` / `AMBIGUOUS_MATCH`）时沿用其模块目录，不重复确认。
+
+### 归属确认流程
+
+1. **发现**：读 `./docs/GLOSSARY.md` 的「feature-module 归档」节 + `./docs/features/` 目录一层，列出既有模块
+2. **匹配**：有合适既有模块 → 按「提问格式」单问题向用户确认归属；无合适模块 → 进入模块提议
+3. **提议**（新模块 / 绿地项目初始划分）：
+   - 推导三来源：自上而下读产品领域语言（README / AGENTS.md、project memo、roadmap、已有 PRD 的「模块拆解」、产品菜单与信息架构）按业务能力域定框架；自下而上对存量 `feature-slug` 目录做亲和度聚类校准；代码一级目录 / 服务边界只做佐证，不照抄技术分层
+   - 输出提议表：`feature-module | 一句话说明 | 预期成员`
+   - **用户最终确认后才建目录、登记 GLOSSARY**；用户推翻任一条，回到推导重提
+4. **登记**：确认后把模块名、说明、成员 `feature-slug` 写入 GLOSSARY「feature-module 归档」节，再建两级目录
+
+### 划分原则
+
+- 按业务能力域分，不按技术层 / 迭代阶段 / 人
+- 域型模块（如「交易链路」「风控」）是默认形态；专项型模块（如「性能优化」「国际化」）允许，但提议时必须写明存续理由与生命周期预期，防止退化为垃圾抽屉
+- 互斥归属：判据是主价值归属——砍掉该需求，哪块业务能力受损最大就归哪；跨模块大需求在 issue 层拆，不动模块归属
+- 粒度预算 4-10 个：预期沉淀 ≥3 个需求才单列；绿地项目初始划分宁少勿多，可从当前需求所在域的 1 个模块起步
+- 复用优先：新需求永远先匹配既有模块，装不下才提议新模块，并说明既有模块为什么装不下；禁止「杂项 / 其他」模块
+- 命名用业务语言：不看代码也能猜对归属
+
+---
+
 ## 工作流
 
 ### Step 0：读取上下文
-先读最新 `project memo`；命中已有 `feature-slug` 则续读该目录下已有需求文档；新需求先确认 `feature_name`、`feature-slug` 与本次 `feature-summary`，再产出文档。再看：
+先读最新 `project memo`；命中已有 `feature-slug` 则续读该目录下已有需求文档；新需求先按「feature-module 归档」完成模块归属确认（用户最终确认），再确认 `feature_name`、`feature-slug` 与本次 `feature-summary`，然后产出文档。再看：
 - feature / brief / issue / todo
 - 已有 PRD、roadmap、约束材料
 - README / CLAUDE / AGENTS.md

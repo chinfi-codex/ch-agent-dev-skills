@@ -7,7 +7,7 @@
 | 版本 | YYYY-MM-DD |
 | 触发来源 | 哪个 skill 的哪一轮拷打 / 哪份文档的哪一节 |
 | 原型类型 | `LOGIC` / `UI` |
-| 原型路径 | `./dev/features/<feature-slug>/prototypes/<短名>/` |
+| 原型路径 | `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/` |
 
 ## 1. 要回答的问题
 

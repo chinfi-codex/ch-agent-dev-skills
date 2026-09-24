@@ -52,23 +52,32 @@ allowed-tools:
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
+## `feature-module` 归档规则
+
+`feature-module` 是大功能块级分组标识（默认中文，如「交易链路」「性能优化」），命名与 `feature-slug` 同规：项目内唯一、稳定、一经建立不因标题调整而改变。需求级文档一律按 `./docs/features/<feature-module>/<feature-slug>/` 两级归档；一个 `feature-slug` 恰好归属一个 `feature-module`，先有模块、后有 slug。模块划分与归属登记在 `./docs/GLOSSARY.md` 的「feature-module 归档」节，模块发现 = 读该节 + `./docs/features/` 目录一层。
+
+- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录
+- 归属判据是主价值归属：砍掉该需求，哪块业务能力受损最大就归哪个模块；跨模块大需求在 issue 层拆，不动模块归属
+
 ## `feature-slug` 识别规则
 
-`feature-slug` 是需求级唯一稳定标识（默认中文），定位 `./docs/features/<feature-slug>/`；一经建立不因标题调整而改变。用户直接给出 slug 时优先按其定位；否则先在 `./docs/features/` 下做可解释匹配，只用可解释规则，不模糊猜测。输入来源：
+`feature-slug` 是需求级唯一稳定标识（默认中文），定位 `./docs/features/<feature-module>/<feature-slug>/`；一经建立不因标题调整而改变。用户直接给出 slug 时优先按其定位；否则在 `./docs/features/` 下做最多两层（模块层 / slug 层）的可解释匹配，只用可解释规则，不模糊猜测。输入来源：
 
-- `./docs/GLOSSARY.md` 的「别名/口语说法」与「关联 feature-slug」列
-- 目录名 `feature-slug`；文档头部 `feature_slug` / `feature_name`；文档标题
+- `./docs/GLOSSARY.md` 的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节的成员列
+- 目录名（模块层 + slug 层）；文档头部 `feature_slug` / `feature_name`；文档标题
 
 匹配结果三类：
 
-- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-slug>（<feature_name>）」后继续
+- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-module>/<feature-slug>（<feature_name>）」后继续
 - `AMBIGUOUS_MATCH`：多个合理候选——单问题确认，不自行选择
-- `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建需求目录，返回 `需补充上下文` 或 `阻塞`
+- `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认 `feature-module` 归属，用户最终确认后再确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建模块或需求目录，返回 `需补充上下文` 或 `阻塞`
+
+匹配到存量平铺目录（`features/` 直下一级 slug 目录、无模块层）时：可读可用，回显迁移建议（GLOSSARY 登记 + `git mv` 移入模块目录），不自动迁移；新需求一律落两级结构。
 
 ## `feature-summary` 使用规则
 
 - `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
-- 写需求级文档前必须同时确定唯一 `feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时两者同时回显
+- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时三者同时回显
 
 ## Artifact 路径约定
 
@@ -84,31 +93,33 @@ allowed-tools:
     decision-card-YYYY-MM-DD.md
     decision-card-YYYY-MM-DD.html
   features/
-    <feature-slug>/
-      <feature-summary>-feature-brief-YYYY-MM-DD.md
-      <feature-summary>-prd-YYYY-MM-DD.md
-      <feature-summary>-change-request-YYYY-MM-DD.md
-      <feature-summary>-pd-review-report-YYYY-MM-DD.md
-      <feature-summary>-retro-YYYY-MM-DD.md
+    <feature-module>/
+      <feature-slug>/
+        <feature-summary>-feature-brief-YYYY-MM-DD.md
+        <feature-summary>-prd-YYYY-MM-DD.md
+        <feature-summary>-change-request-YYYY-MM-DD.md
+        <feature-summary>-pd-review-report-YYYY-MM-DD.md
+        <feature-summary>-retro-YYYY-MM-DD.md
 ```
 
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
-- 需求级文档统一按 `feature-slug` 归档（稳定标识，默认中文，一经建立不因标题调整而改变），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
+- 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
 - 文件命名保持稳定、可搜索、可比较，不用 `final-v2-latest` 类含糊名称
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
@@ -190,8 +201,8 @@ allowed-tools:
 
 按顺序执行，任一项不过即停：
 
-1. 确定唯一 `feature-slug`（沿用匹配规则）与本次 `feature-summary`；`NO_MATCH` 返回 `需补充上下文`
-2. 读取 `./dev/features/<feature-slug>/issues/` 下全部票的 frontmatter：
+1. 确定唯一 `feature-module`、`feature-slug`（沿用匹配规则）与本次 `feature-summary`；`NO_MATCH` 返回 `需补充上下文`
+2. 读取 `./dev/features/<feature-module>/<feature-slug>/issues/` 下全部票的 frontmatter：
    - 全部 `status: done` → 继续
    - 存在未完成票 → 列出未完成票清单，状态 `阻塞`；仅当用户明确要求「部分复盘」时继续，并在报告「复盘对象」节显式标注
    - `issues/` 目录不存在 → 该 feature 未走 dev 阶段，状态 `阻塞`
@@ -203,8 +214,8 @@ allowed-tools:
 
 ### Step 1：全量读取
 
-- `./docs/features/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
-- `./dev/features/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
+- `./docs/features/<feature-module>/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
+- `./dev/features/<feature-module>/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
 - `./docs/EXPERIENCE.md` 与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重合并要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞
@@ -248,8 +259,8 @@ allowed-tools:
 
 ### Step 5：落盘与交付
 
-- 复盘报告写入 `./docs/features/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付格式：先完成状态 → 回显 `feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
+- 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
+- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
 
 ## 硬约束
 

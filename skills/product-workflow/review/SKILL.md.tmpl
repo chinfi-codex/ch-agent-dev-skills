@@ -60,8 +60,8 @@ allowed-tools:
 
 按顺序执行，任一项不过即停：
 
-1. 确定唯一 `feature-slug`（沿用匹配规则）与本次 `feature-summary`；`NO_MATCH` 返回 `需补充上下文`
-2. 读取 `./dev/features/<feature-slug>/issues/` 下全部票的 frontmatter：
+1. 确定唯一 `feature-module`、`feature-slug`（沿用匹配规则）与本次 `feature-summary`；`NO_MATCH` 返回 `需补充上下文`
+2. 读取 `./dev/features/<feature-module>/<feature-slug>/issues/` 下全部票的 frontmatter：
    - 全部 `status: done` → 继续
    - 存在未完成票 → 列出未完成票清单，状态 `阻塞`；仅当用户明确要求「部分复盘」时继续，并在报告「复盘对象」节显式标注
    - `issues/` 目录不存在 → 该 feature 未走 dev 阶段，状态 `阻塞`
@@ -73,8 +73,8 @@ allowed-tools:
 
 ### Step 1：全量读取
 
-- `./docs/features/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
-- `./dev/features/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
+- `./docs/features/<feature-module>/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
+- `./dev/features/<feature-module>/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
 - `./docs/EXPERIENCE.md` 与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重合并要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞
@@ -118,8 +118,8 @@ allowed-tools:
 
 ### Step 5：落盘与交付
 
-- 复盘报告写入 `./docs/features/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付格式：先完成状态 → 回显 `feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
+- 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
+- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
 
 ## 硬约束
 

@@ -1,6 +1,6 @@
 ---
 name: tech-spec
-version: 0.1.0
+version: 0.2.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -58,7 +58,8 @@ allowed-tools:
 - 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
 - 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
 - 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
+- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 提问格式
 
@@ -134,13 +135,14 @@ allowed-tools:
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
@@ -202,11 +204,11 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 ## 上游读取规则
 
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
-- 必须先确定唯一 `feature-slug`（沿用 `./docs/features/` 的匹配规则）与本次 `feature-summary`
+- 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
 - 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
 - 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
 - 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
-- 两条路径均补读 `./dev/features/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
+- 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
 ---
@@ -231,6 +233,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - **约束**：数据不出域、协议向后兼容、判读 yaml 结构不变等不可违背项，逐条注明依据
 - **假设**：架构选型、性能预估等可随运行反馈调整项，逐条写明「若被证伪，方案如何调整」
 
+**旧实现清理属方案范围**：新实现替代旧实现时，被替代的旧代码、旧文件及其失效引用的删除一并进方案与影响面——版本回溯由 Git 承担，不留注释残留、兼容开关或双路径并存；确需保留的（如协议向后兼容）必须落约束栏并注明依据。
+
 **测试策略 = 预先约定 TDD 接缝**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案。这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。
 
 **原型 verdict 的消化**：若 `prototypes/` 下存在 verdict，已裁决结论作为方案输入边界；其中的决策性片段按模板「3.5 决策性片段」收录——裁剪到决策相关部分、逐片标注来源（原型路径 + verdict 日期）。片段是决策的精确化记录，不是实现，不得以片段替代方案文字。
@@ -243,7 +247,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
-3. 写入 `./dev/features/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
+3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
 4. 本轮确定的新术语立即回写 GLOSSARY
 5. 文档头部状态置 `已确认（待拆解）`，衔接 `/issue-split`
 

@@ -37,10 +37,10 @@
 ```
 
 - `/setup-dev`: 每仓库一次。探查 ocr / glab / GitLab CI 就绪度，收集 tracker（gitlab 首选 / local fallback）、主分支、质量门三档命令与 verify-policy（fast 日常 / scoped 关联 / full 全量；档位阈值、升档触发器、selection 机制）、红线、仓库等级、ocr 模式（默认 delegate），写 `./dev/agents-config.md`，落 `.opencodereview/rule.json` 种子（`ci/ocr-review.gitlab-ci.yml` 仅 ci 模式落盘）
-- `/tech-spec`: 把可交付 PRD 或 change-request（`/issue` 小变更路径）变成技术方案；约束与假设分栏；预定 TDD 接缝
+- `/tech-spec`: 把可交付 PRD 或 change-request（`/issue` 小变更路径）变成技术方案；约束与假设分栏；旧实现清理属方案范围（替代即删、不留兼容残留，版本回溯靠 Git）；预定 TDD 接缝
 - `/issue-split`: 拆垂直切片票（tracer bullet，纵向打通、独立可演示、声明阻塞边），DoD 写成「命令 + 期望输出」；按 verify-policy 给每票定 verify-tier 与 declared-scope（DAG 终点集成票强制 full）；门②人确认清单（含档位）后发布，随后主会话按「派发与监督协议」自动按 DAG 逐票派发、监督到合并
-- `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
-- `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 = BLOCKER
+- `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；替代即删除（被替代旧实现同票清理，不留兼容残留，版本回溯靠 Git）；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
+- `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 + 旧实现该删没删（无 tech-spec 约束依据）= BLOCKER
 
 GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shared/templates/gitlab-ci-ocr.yml` 与 `shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
 
@@ -111,7 +111,7 @@ GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shar
 
 - **GLOSSARY（术语与数据口径）**：所有 skill 共用项目级 `./docs/GLOSSARY.md`，统一专业术语和指标口径。文档用词必须与之一致；讨论中确定的新术语会立即写入，跨文档、跨会话保持一致。被明确淘汰的说法记入术语的「拒绝词」列，命中时回显标准词并说明已拒绝，防止词汇反复回潮。
 - **Grilling（轮次制拷打）**：`/pd-plan`、`/issue`、`/ceo-office` 在澄清阶段按「决策树 + frontier 轮次」反复拷打需求——一轮问完当前可问的独立问题，逐项覆盖需求意义、范围边界、异常、权限、数据口径、验收标准等 11 个维度，全部有归属并经你确认后才产出正式文档，减少遗漏。
-- **Prototype（不可拷打问题的出口）**：有一类问题靠对话拷问不出答案——「这个交互应该是什么感觉」「这套状态机在尴尬路径下走得通吗」。拷打判定某题不可拷打后挂 `待确认（需原型）`，不阻塞其余问题；调 `/prototype` 做一次性原型（LOGIC：纯逻辑核 + 非开发者可点的单文件 HTML，guided walkthrough 覆盖快乐路径 / 尴尬边界 / 应非法操作；UI：3 个结构迥异变体），人上手裁决后 verdict 落盘到 `./dev/features/<slug>/prototypes/`，拷打以一行答案继续。裁决产出的状态机 / schema 等**决策性片段**是 tech-spec 唯一允许内联的代码（模板 3.5 节，标注来源）。
+- **Prototype（不可拷打问题的出口）**：有一类问题靠对话拷问不出答案——「这个交互应该是什么感觉」「这套状态机在尴尬路径下走得通吗」。拷打判定某题不可拷打后挂 `待确认（需原型）`，不阻塞其余问题；调 `/prototype` 做一次性原型（LOGIC：纯逻辑核 + 非开发者可点的单文件 HTML，guided walkthrough 覆盖快乐路径 / 尴尬边界 / 应非法操作；UI：3 个结构迥异变体），人上手裁决后 verdict 落盘到 `./dev/features/<模块>/<slug>/prototypes/`，拷打以一行答案继续。裁决产出的状态机 / schema 等**决策性片段**是 tech-spec 唯一允许内联的代码（模板 3.5 节，标注来源）。
 
 如果不是新功能，而是对一个已存在、通常已上线的功能做局部优化，比如入口调整、规则修订、文案更新、阈值变化或轻量流程修补，用 `/issue`。
 

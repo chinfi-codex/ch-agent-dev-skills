@@ -50,13 +50,14 @@ allowed-tools:
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md

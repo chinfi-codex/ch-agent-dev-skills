@@ -67,13 +67,14 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 - `GLOSSARY` -> `./docs/GLOSSARY.md`（项目级唯一术语与数据口径文件，懒创建、原地追加更新）
 - `project memo` -> `./docs/project-memos/project-memo-YYYY-MM-DD.md`
 - `决策卡` -> `./docs/decisions/decision-card-YYYY-MM-DD.md` + 同名 `.html` 可视化渲染（由 `/ceo-office` 产出；md 为源，html 为渲染，状态字段允许原地更新）
-- `feature brief` -> `./docs/features/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
-- `change request` -> `./docs/features/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
-- `PRD` -> `./docs/features/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
-- `pd-review-report` -> `./docs/features/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
+- `feature brief` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
+- `change request` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
+- `PRD` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
+- `pd-review-report` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
 
 命名分工：
-- `feature-slug`：稳定、中文、目录级标识，用于归档同一需求
+- `feature-module`：稳定、中文、模块级标识，按业务能力域给需求分组（如「交易链路」「性能优化」）；划分与归属由 `/pd-plan` 提议、用户最终确认后登记进 GLOSSARY「feature-module 归档」节
+- `feature-slug`：稳定、中文、目录级标识，用于归档同一需求；一个 `feature-slug` 恰好归属一个 `feature-module`
 - `feature-summary`：中文、文件级摘要名，用于表达大功能下的具体子功能或本次子范围
 
 补充规则：

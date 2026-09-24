@@ -61,7 +61,7 @@ allowed-tools:
 ## 上游读取规则
 
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
-- 必须先确定唯一 `feature-slug`；读取该目录下最新 `*-tech-spec-*` 文档
+- 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在或状态仍为 `草稿`（未确认）→ 直接 `阻塞`
 - 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
 
@@ -109,7 +109,7 @@ allowed-tools:
 
 确认后按 `agents-config.tracker` 发布：
 
-- **local 模式**（默认）：按模板 `shared/templates/issue.md`（相对本 SKILL.md 为 `../shared/templates/issue.md`）在 `./dev/features/<feature-slug>/issues/` 下每票一个文件，依赖序编号（issue-001 起），frontmatter `status: confirmed`
+- **local 模式**（默认）：按模板 `shared/templates/issue.md`（相对本 SKILL.md 为 `../shared/templates/issue.md`）在 `./dev/features/<feature-module>/<feature-slug>/issues/` 下每票一个文件，依赖序编号（issue-001 起），frontmatter `status: confirmed`
 - **gitlab 模式**：本地票文件照写（本地真源），另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
 - 修改父级 issue / tech-spec / PRD：禁止
 

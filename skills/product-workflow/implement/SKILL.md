@@ -1,6 +1,6 @@
 ---
 name: implement
-version: 0.4.0
+version: 0.5.0
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally auto-dispatched by the
@@ -40,7 +40,8 @@ allowed-tools:
 - 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
 - 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
 - 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 术语表的「别名/口语说法」「关联 feature-slug」列是 feature-slug 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
+- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
 
 ## 完成状态协议
 
@@ -51,13 +52,14 @@ allowed-tools:
 
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
 
 ```text
 ./dev/
   agents-config.md
   features/
-    <feature-slug>/
+    <feature-module>/
+      <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
@@ -106,7 +108,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 ### 派发原语
 
 - 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
-- 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-slug`——被派发方全靠落盘文件工作
+- 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-module` 与 `feature-slug`——被派发方全靠落盘文件工作
 - 模型档位：被派发对话默认取宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时显式升级
 
 ### 宿主适配
@@ -137,7 +139,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 门②（票清单确认）通过后，主会话自动进入监督循环，**派出后不停手，监督到每张票合并完成**：
 
-1. **取票**：读 `./dev/features/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
+1. **取票**：读 `./dev/features/<feature-module>/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
 2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行，人明确要求并行才同时派多张
 3. **跟踪**：被派发对话的结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）只是线索，不作为成功依据
 4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审 pass / pass-with-notes、MR ready——执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 再合
@@ -194,6 +196,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 ### Step 3：TDD 实现（在预定接缝）
 
 - 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
+- **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
 - 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
 - **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现
@@ -252,6 +255,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 启动前校验不过不动代码；票未 confirmed 不启动
 - 一切改动只在 worktree 分支；红线命中即停
 - 成功只认落盘证据（evidence + commit hash），不认自报
+- 替代即删除：不留注释残留、兼容开关、双路径并存；历史回溯靠 Git，不靠仓库留旧代码
 - 验证档位只升不降：升档必须命中 `verify-policy` 规则并留 evidence / impl-log 记录；light / scoped 票不得虚标跑过 full；不变式（红线 / DoD / 独立评审 / 每 feature 至少一次 full）不因档位缩水
 - `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
 - 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围

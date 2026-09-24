@@ -46,7 +46,7 @@ allowed-tools:
 
 ## 启动前校验
 
-1. 确定唯一 `feature-slug`（沿用 `./docs/features/` 的匹配规则）；产物归档到 `./dev/features/<feature-slug>/prototypes/<短名>/`
+1. 确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；产物归档到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/`
 2. 把本次要回答的**那一个问题**逐字写下来——它将放在原型与 verdict 的顶部；答错问题 = 纯浪费
 3. 补读触发来源（哪份文档的哪一节 / 哪一轮拷打的哪一题）与该 slug 下既有 verdict，避免重复验证
 
@@ -82,13 +82,13 @@ allowed-tools:
 ## 捕获（收口）
 
 1. 请用户上手操作，收集裁决（一句话结论 +「不应该可能」类发现逐条）
-2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-slug>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
+2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
 3. 若裁决产出了比散文更精确编码决策的片段（状态机 / reducer / schema / type shape），裁剪到决策相关部分收入 verdict「决策性片段」节——这是 tech-spec「3.5」节唯一允许内联的代码来源
 4. 回显：问题 / 裁决一句话 / 原型路径 / verdict 路径 / 建议回写到哪份文档
 
 ## 硬约束
 
-- 只写 `./dev/features/<feature-slug>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
+- 只写 `./dev/features/<feature-module>/<feature-slug>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
 - 一个原型只回答一个问题；问题没逐字写清不动手
 - 原型代码只存在于 `prototypes/` 目录；决策回收以 verdict 为准，原型文件留档作证据
 - 用词遵循 GLOSSARY 标准术语；状态面板、按钮、场景描述一律用领域语言
