@@ -1,4 +1,4 @@
-# `product-workflow` Skill Pack
+# Skills 源码目录
 
 这是仓库里的技能源码目录，面向维护者。
 如果你只是想安装并使用这些 skills，请先看仓库根目录的 `README.md`。
@@ -31,15 +31,15 @@
 在仓库根目录执行任一方式：
 
 ```bash
-node --experimental-strip-types skills/product-workflow/scripts/gen-skill-docs.ts
+node --experimental-strip-types skills/scripts/gen-skill-docs.ts
 ```
 
 ```bash
-bash skills/product-workflow/scripts/build-all.sh
+bash skills/scripts/build-all.sh
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File skills/product-workflow/scripts/build-all.ps1
+powershell -ExecutionPolicy Bypass -File skills/scripts/build-all.ps1
 ```
 
 ## 同步到 Codex
@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 
 同步脚本会自动做两件事：
 1. 重新生成各个 `SKILL.md`
-2. 把最新的 `skills/product-workflow` 复制到你的 Codex skills 目录
+2. 把最新的各 skill 目录与 `shared/` 复制到你的 Codex skills 目录
 
 ## 产物约定
 

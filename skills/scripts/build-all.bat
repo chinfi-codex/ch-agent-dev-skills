@@ -13,7 +13,7 @@ if not exist "%BUILD_SCRIPT%" (
   exit /b 1
 )
 
-echo Rebuilding product-workflow SKILL.md files...
+echo Rebuilding SKILL.md files...
 echo.
 "%POWERSHELL_EXE%" -ExecutionPolicy Bypass -File "%BUILD_SCRIPT%"
 set "EXIT_CODE=%ERRORLEVEL%"
