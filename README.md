@@ -1,9 +1,49 @@
 # ch-agent-dev-skills
 
+<video src="ch-agent-dev-skills-intro.mp4" controls muted playsinline width="100%"></video>
+
+> 🎬 宣传视频一分钟讲完全流程；宿主不内嵌渲染时[点此直接观看](ch-agent-dev-skills-intro.mp4)。
+
 实施思路参考借鉴：https://github.com/garrytan/gstack
 开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）
 
 > **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 13 个 skill 的逐一使用说明。本 README 讲设计思路。
+
+## 13 个 skill 总览
+
+三个阶段加三个横切 skill，一条流水线从「值不值得做」走到「发布后沉淀」：
+
+| 阶段 | skill | 定位 |
+| --- | --- | --- |
+| 产品判断 | `/ceo-office` | CEO 视角审查方向当前值不值得做，文档优先 |
+| 产品规划 | `/pd-plan` | 拷打式澄清，收敛问题与范围，产出 feature brief |
+| 小变更入口 | `/issue` | 已上线功能的小范围需求更新，产出 change-request |
+| 需求文档 | `/prd` | 把已确认的规划产物写成正式 PRD |
+| 交接审查 | `/pd-review` | 审查并补齐 PRD，给出可交付结论 |
+| 开发初始化 | `/setup-dev` | 每仓库一次：写 `./dev/agents-config.md` 与评审规则 / CI 种子 |
+| 技术方案 | `/tech-spec` | PRD 或 change-request（小变更）→ 技术方案，预定 TDD 接缝 |
+| 拆票 | `/issue-split` | 方案 → tracer-bullet 票：阻塞 DAG + 可判定 DoD + verify-tier |
+| 实现 | `/implement` | 一票一 worktree：TDD、落盘证据、draft MR，主会话派发监督到合并 |
+| 独立评审 | `/ai-review` | open-code-review 驱动（delegate / local / ci 三模式），只评不改 |
+| 原型出口 | `/prototype` | 不可拷打问题做一次性原型，verdict 落盘回填方案 |
+| 复盘沉淀 | `/review` | feature 发布后读全量过程产物，复盘并沉淀两级经验 |
+| 会话交接 | `/handoff` | 当前会话压缩成自包含交接提示词，输出在对话里，不落盘 |
+
+所有正式产物按 `./docs/features/<feature-module>/<feature-slug>/` 归档，同一需求沿用同一 `feature-slug`，模块级分组由 `/pd-plan` 提议、用户确认后登记进 GLOSSARY。
+
+## 仓库结构与同步
+
+```
+skills/
+├── <skill-name>/      每个 skill 一个目录：SKILL.md.tmpl 是源码，SKILL.md 是生成产物
+├── shared/fragments/  多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
+├── shared/templates/  输出格式模板（agent 运行时按指针读取）
+└── scripts/           构建脚本（gen-skill-docs.ts 等）
+sync.sh / sync.ps1     重新生成全部 SKILL.md，平铺分发到 Claude Code / ZCode / Kimi Code / Codex
+tools/run-sync.cjs     跨平台调用入口
+```
+
+改了 `SKILL.md.tmpl` 或 `shared/` 后跑 `bash ./sync.sh` 即完成重建与分发；直接安装使用见 [使用指南.md](使用指南.md) 2.5 节。
 
 ## 这套 skills 在解决什么问题
 
@@ -42,7 +82,7 @@
 - `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；替代即删除（被替代旧实现同票清理，不留兼容残留，版本回溯靠 Git）；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
 - `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 + 旧实现该删没删（无 tech-spec 约束依据）= BLOCKER
 
-GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shared/templates/gitlab-ci-ocr.yml` 与 `shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
+GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `skills/shared/templates/gitlab-ci-ocr.yml` 与 `skills/shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
 
 关键纪律：写查分离（评审必须独立实例——delegate / local 由宿主新开独立对话执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，交付验证按票 verify-tier 分档（档位只升不降，不变式——红线 / DoD / 独立评审 / 每 feature 至少一次 full——不缩水）；A 类仓库（飞行软件 / 涉密）不进 `/implement`。派发只要求宿主具备「新开独立对话」能力（Claude Code `Task` / ZCode `Agent` / Codex / WorkBuddy 等），宿主完全没有该能力时按协议兜底：主会话产出自包含提示词请人在新对话启动，评审独立性不降级。
 
@@ -55,6 +95,11 @@ GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `shar
 - **开发侧关键点**：导致重复修改的坑，按根因分类（需求不清 / 方案缺口 / 实现疏忽 / 环境工具）
 
 经验分两级沉淀：项目级追加到 `./docs/EXPERIENCE.md`（与仓库技术栈 / 业务强相关），通用级追加到 `~/.pd-workflow/general-experience.md`（跨项目的流程方法类）；相似条目自动合并计数，项目级条目复现 ≥2 个 feature 后晋升通用级。统计只认落盘文件，取不到标「缺失」，不信自报。
+
+## 全程横切：原型出口与会话交接
+
+- `/prototype`：拷打判定某题「不可拷打」后的一次性原型出口，细节见下文哲学第 3 节；verdict 落盘到 `./dev/features/<feature-module>/<feature-slug>/prototypes/`，其中已裁决的决策性片段是 `/tech-spec` 唯一允许内联的代码。
+- `/handoff`：会话交接——把当前会话压缩成自包含的交接提示词，直接输出在对话里供复制到新会话（不落盘）。提示词引用既有产物（`./docs/`、`./dev/`、commits、issues）的路径而非复制内容，并指名下一会话应调用的 skill；显式调用时带上下一会话的目的，效果最好。
 
 
 ## 这套方法背后的哲学
