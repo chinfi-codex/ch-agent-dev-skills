@@ -2,12 +2,11 @@
 
 <video src="ch-agent-dev-skills-intro.mp4" controls muted playsinline width="100%"></video>
 
-> 🎬 宣传视频一分钟讲完全流程；宿主不内嵌渲染时[点此直接观看](ch-agent-dev-skills-intro.mp4)。
+> 🎬 一分钟流程视频；打不开就[点此观看](ch-agent-dev-skills-intro.mp4)。
 
-实施思路参考借鉴：https://github.com/garrytan/gstack
-开发阶段（tech-spec → 拆票 → 实现 → 评审 → MR）的 skill 设计参考借鉴：https://github.com/mattpocock/skills（MIT）
+实施思路参考 [gstack](https://github.com/garrytan/gstack)；开发阶段 skill 设计参考 [mattpocock/skills](https://github.com/mattpocock/skills)（MIT）。
 
-> **上手请读 [使用指南.md](使用指南.md)**：工具与环境配置（GLM 端点 / glab / ocr / GitLab CI）+ 13 个 skill 的逐一使用说明。本 README 讲设计思路。
+> **上手请读 [使用指南.md](使用指南.md)**：环境配置 + 13 个 skill 逐一说明。本 README 讲设计思路。
 
 ## 13 个 skill 总览
 
@@ -15,21 +14,21 @@
 
 | 阶段 | skill | 定位 |
 | --- | --- | --- |
-| 产品判断 | `/ceo-office` | CEO 视角审查方向当前值不值得做，文档优先 |
-| 产品规划 | `/pd-plan` | 拷打式澄清，收敛问题与范围，产出 feature brief |
-| 小变更入口 | `/issue` | 已上线功能的小范围需求更新，产出 change-request |
-| 需求文档 | `/prd` | 把已确认的规划产物写成正式 PRD |
-| 交接审查 | `/pd-review` | 审查并补齐 PRD，给出可交付结论 |
-| 开发初始化 | `/setup-dev` | 每仓库一次：写 `./dev/agents-config.md` 与评审规则 / CI 种子 |
-| 技术方案 | `/tech-spec` | PRD 或 change-request（小变更）→ 技术方案，预定 TDD 接缝 |
+| 产品判断 | `/ceo-office` | CEO 视角判断方向值不值得做 |
+| 产品规划 | `/pd-plan` | 拷打式澄清，产出 feature brief |
+| 小变更入口 | `/issue` | 已上线功能的小范围变更（change-request） |
+| 需求文档 | `/prd` | 把确认的规划产物写成正式 PRD |
+| 交接审查 | `/pd-review` | 审查补齐 PRD，给出可交付结论 |
+| 开发初始化 | `/setup-dev` | 每仓库一次：agents-config 与评审规则种子 |
+| 技术方案 | `/tech-spec` | PRD / change-request → 技术方案，预定 TDD 接缝 |
 | 拆票 | `/issue-split` | 方案 → tracer-bullet 票：阻塞 DAG + 可判定 DoD + verify-tier |
-| 实现 | `/implement` | 一票一 worktree：TDD、落盘证据、draft MR，主会话派发监督到合并 |
-| 独立评审 | `/ai-review` | open-code-review 驱动（delegate / local / ci 三模式），只评不改 |
-| 原型出口 | `/prototype` | 不可拷打问题做一次性原型，verdict 落盘回填方案 |
-| 复盘沉淀 | `/review` | feature 发布后读全量过程产物，复盘并沉淀两级经验 |
-| 会话交接 | `/handoff` | 当前会话压缩成自包含交接提示词，输出在对话里，不落盘 |
+| 实现 | `/implement` | 一票一 worktree：TDD、落盘证据、draft MR |
+| 独立评审 | `/ai-review` | open-code-review 驱动（delegate / local / ci），只评不改 |
+| 原型出口 | `/prototype` | 不可拷打问题做一次性原型，verdict 回填方案 |
+| 复盘沉淀 | `/review` | 发布后读全量过程产物，复盘并沉淀两级经验 |
+| 会话交接 | `/handoff` | 当前会话压缩成自包含交接提示词，不落盘 |
 
-所有正式产物按 `./docs/features/<feature-module>/<feature-slug>/` 归档，同一需求沿用同一 `feature-slug`，模块级分组由 `/pd-plan` 提议、用户确认后登记进 GLOSSARY。
+正式产物按 `./docs/features/<feature-module>/<feature-slug>/` 归档，同一需求沿用同一 `feature-slug`。
 
 ## 仓库结构与同步
 
@@ -57,7 +56,7 @@ tools/run-sync.cjs     跨平台调用入口
 
 ## 开发阶段：从 PRD 到 Merge Request
 
-`/pd-review` 可交付之后，接 5 个 dev skill，产物从 `./docs/` 树延伸到 `./dev/` 树。小变更路径例外：`/issue` 的 change-request 跳过 `/prd`、`/pd-review`，直接作为 `/tech-spec` 的需求输入。评审引擎为 [open-code-review](https://github.com/alibaba/open-code-review)（ocr，阿里开源 Apache-2.0），MR 走 GitLab（内网已确认）；**执行与评审默认都在当前 agent 内完成，且派发机制宿主无关**：issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动逐票派发（Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制；默认用低一档的经济模型），并监督执行直到逐票合并完成；评审默认 ocr `delegate` 模式（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点与 CI）：
+`/pd-review` 可交付后接 5 个 dev skill，产物从 `./docs/` 延伸到 `./dev/`；小变更例外：`/issue` 的 change-request 跳过 `/prd`、`/pd-review`，直接作为 `/tech-spec` 输入。评审引擎为 [open-code-review](https://github.com/alibaba/open-code-review)（ocr），MR 走 GitLab。执行与评审默认都在当前 agent 内完成、派发宿主无关：主会话用宿主的「新开独立对话」能力自动逐票派发 `/implement`（默认低一档经济模型）并监督到逐票合并；评审默认 `delegate`——新开独立对话评审，无需 LLM 端点与 CI：
 
 ```
 /prd → /pd-review → /setup-dev（每仓库一次：agents-config + rule.json 种子；CI 种子仅 ci 模式落盘）
@@ -69,7 +68,7 @@ tools/run-sync.cjs     跨平台调用入口
                                       worktree 隔离 + TDD（日常只跑 fast 质量门，每轮漂移检查）
                                       → 证据落盘（按票 verify-tier 出档位门证据）→ draft MR
                                       → /ai-review 独立评审（默认 delegate：ocr 筛文件 +
-                                        规则解析，新开独立对话评审；可选 local / ci 接 GLM 端点）
+                                        规则解析，新开独立对话评审；可选 local / ci 接 LLM 端点）
                                       → BLOCKER 回修 → MR ready
                   → 主会话收口   核对落盘产物后合并 MR、票置 done、推进下一张——
                                       派发后不停手，监督到逐票合并完成；无需人审，
@@ -82,13 +81,13 @@ tools/run-sync.cjs     跨平台调用入口
 - `/implement`: 一张票一个 worktree；通常由主会话以宿主新开独立对话派发（低一档经济模型）；TDD；替代即删除（被替代旧实现同票清理，不留兼容残留，版本回溯靠 Git）；自修复循环有轮次上限（默认 99）；成功只认落盘证据（evidence + commit hash），不信自报；收尾建 draft MR 触发独立评审并回修 BLOCKER；评审通过后**主会话直接合并**（被派发对话只到 MR ready）
 - `/ai-review`: 驱动 / 解析 open-code-review 结果——delegate（默认）：ocr 筛文件 / 解析规则、宿主 agent 内新开独立对话评审；local：worktree 内跑 `ocr review --background-file <票文件>`；ci：取 CI artifacts 与 MR discussions。只评不改；critical/high + 红线命中 + 旧实现该删没删（无 tech-spec 约束依据）= BLOCKER
 
-GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `skills/shared/templates/gitlab-ci-ocr.yml` 与 `skills/shared/templates/agents-config.md`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）；GLM 端点走 bigmodel.cn（境内，满足数据不出境）。
+GitLab CI 接入要点（可选，仅 `ocr.mode: ci` 需要，详见 `skills/shared/templates/gitlab-ci-ocr.yml`）：MR push 触发、同 MR 串行（resource_group）、结果内联回贴 MR discussions、artifacts 留 `.ocr/ocr-result.json`；必需 CI 变量 `OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN`（掩码）/ `OCR_LLM_MODEL`，可选 `GITLAB_API_TOKEN`（api scope）。
 
-关键纪律：写查分离（评审必须独立实例——delegate / local 由宿主新开独立对话执行，ci 天然独立，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并、推进全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，交付验证按票 verify-tier 分档（档位只升不降，不变式——红线 / DoD / 独立评审 / 每 feature 至少一次 full——不缩水）；A 类仓库（飞行软件 / 涉密）不进 `/implement`。派发只要求宿主具备「新开独立对话」能力（Claude Code `Task` / ZCode `Agent` / Codex / WorkBuddy 等），宿主完全没有该能力时按协议兜底：主会话产出自包含提示词请人在新对话启动，评审独立性不降级。
+关键纪律：写查分离（评审必须独立实例，实现会话不得自评）；执行段唯一人工门是门②（票清单确认），之后派发、实现、评审、合并全自动，仅 `needs-human` / 阻塞 / 无法裁决时找人；质量门日常只跑 fast，交付验证按票 verify-tier 分档、只升不降，不变式（红线 / DoD / 独立评审 / 每 feature 至少一次 full）不缩水；A 类（最高风险）仓库不进 `/implement`。宿主没有「新开独立对话」能力时按兜底执行：主会话产出自包含提示词请人在新对话启动，评审独立性不降级。
 
 ## 发布之后：复盘与经验沉淀
 
-`/review` 是全链末端的一环：一个 feature 的票全部 done、通过验收并确认发布后，把这个 feature-slug 在 `./docs/` 与 `./dev/` 两棵树里留下的全部过程产物读成一份复盘——
+`/review` 是全链末端：feature 的票全部 done、验收并确认发布后，把它在 `./docs/` 与 `./dev/` 两棵树里的全部过程产物读成一份复盘——
 
 - **过程全景**：阶段时间线（每段时长与依据文件）、每票的开发轮次（自修复 / 评审回修 / needs-human）、全量问题清单
 - **需求侧关键点**：从产品经理视角，需求文档阶段应加深思考的点（低分维度、爆雷的假设、返工次数），每条挂证据
@@ -98,8 +97,8 @@ GitLab CI 接入要点（可选增强，仅 `ocr.mode: ci` 需要；详见 `skil
 
 ## 全程横切：原型出口与会话交接
 
-- `/prototype`：拷打判定某题「不可拷打」后的一次性原型出口，细节见下文哲学第 3 节；verdict 落盘到 `./dev/features/<feature-module>/<feature-slug>/prototypes/`，其中已裁决的决策性片段是 `/tech-spec` 唯一允许内联的代码。
-- `/handoff`：会话交接——把当前会话压缩成自包含的交接提示词，直接输出在对话里供复制到新会话（不落盘）。提示词引用既有产物（`./docs/`、`./dev/`、commits、issues）的路径而非复制内容，并指名下一会话应调用的 skill；显式调用时带上下一会话的目的，效果最好。
+- `/prototype`：拷打判定某题「不可拷打」后的一次性原型出口（详见哲学第 3 节）；verdict 落盘到 `./dev/features/<feature-module>/<feature-slug>/prototypes/`，已裁决的决策性片段是 `/tech-spec` 唯一允许内联的代码。
+- `/handoff`：会话交接——把当前会话压缩成自包含提示词，输出在对话里供复制到新会话（不落盘）；提示词按路径引用既有产物（`./docs/`、`./dev/`、commits、issues）并指名下一会话应调用的 skill，显式调用时带上下一会话的目的。
 
 
 ## 这套方法背后的哲学
