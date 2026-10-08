@@ -1,7 +1,7 @@
 ---
 name: pd-plan
 preamble-tier: 1
-version: 0.1.0
+version: 0.2.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -22,6 +22,7 @@ allowed-tools:
   - Glob
   - WebSearch
   - AskUserQuestion
+  - Skill
 ---
 
 {{MODE_GUARD}}
@@ -183,8 +184,16 @@ allowed-tools:
 ### Step 5：共识确认与衔接下一步
 frontier 为空且覆盖维度均有归属后：
 
-1. 先输出共识摘要（关键决策清单 + 各维度归属），请用户确认
-2. 用户确认后才产出 Feature Brief；用户推翻任一条，回到对应分支继续拷打
+1. 先输出共识摘要（关键决策清单 + 各维度归属）与**产品逻辑结构图**，请用户确认
+2. 用户确认后才产出 Feature Brief，结构图随文档落盘；用户推翻任一条，回到对应分支继续拷打
+
+#### 产品逻辑结构图（共识确认必附）
+
+- 形式（按宿主能力自适应）：先查当前宿主的可视化能力——可用技能中的可视化 / 绘图类技能（`visualize`、`diagram-builder` 等）、或宿主自带的 visualize MCP 工具（如 `read_me` + `show_widget`）——有则优先调用它内联渲染结构图；没有则退化为 Mermaid `flowchart` 代码块随共识摘要输出，宿主不渲染时源码本身可读。不引入额外工具链，任一形态都不阻塞确认；调用可视化能力只做渲染，不写代码、不改配置，不违反 `DOC_MODE`
+- 内容：模块拆解为节点 / 子图，主流程为边；权限或状态差异只在影响结构判断时进图，11 个覆盖维度不全部入图
+- 规模：节点 ≤12、边 ≤20；装不下说明方案未收敛，先按 DECOMPOSE 拆再画
+- 口径：节点命名用 GLOSSARY 标准术语；`假设` / `待确认` 的节点与边用虚线并在标签后缀标注，禁止把未确认项画成既定事实
+- 落盘：用户确认后把该图的 Mermaid 源码写入 Feature Brief「模块拆解」节开头（文档内嵌统一用 Mermaid，可嵌入、可版本对比），节点、边与标注与对话确认版逐一对应
 
 然后判断：
 - 若范围仍大，先输出拆解后的需求 list
