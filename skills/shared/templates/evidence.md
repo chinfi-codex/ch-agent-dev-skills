@@ -34,6 +34,7 @@ generated: YYYY-MM-DD HH:MM
 
 - 票标注档位 / 实际执行档位：`<light|scoped|full>` / `<light|scoped|full>`
 - fast 档命令：`<quality-gate.fast>` → 退出码 / 耗时
-- scoped 档（scoped 及以上必填）：选择集来源（`selection: dir-map | impact-map`）+ 换算自哪些 diff 文件 + 命令与退出码 / 耗时
+- scoped 档（scoped 及以上必填）：选择集来源（`selection: dir-map | impact-map`）+ 换算自哪些 diff 文件 + 命令与退出码 / 耗时；选择集占全套 ≥ 50% 时另记占比（评审信号，不升档）
 - full 档（full 档票与集成票必填）：`<quality-gate.full>` → 退出码 / 耗时
-- 升档记录（如有）：触发原因（escalate-triggers 命中项 / 超 scoped-max-* 阈值）+ 升档时间点
+- 先在失败归因（套件存在与本票无关的既有失败时必填）：归因方式（`known-failures` / `two-sided`）；known-failures 模式下记录清单版本或路径、命中清单的先在失败项（测试名 + 签名一致判定）、清单外补跑 base 侧的单项清单与对照结果；two-sided 模式逐条记录 branch / base 退出码与原始日志名。先在失败显式列出但不进 `all-passed` 分母
+- 升档记录（如有）：触发原因（escalate-triggers 命中项及其级别 / 超 scoped-max-* 阈值；scoped+ 级另记可枚举性判定依据）+ 升档时间点

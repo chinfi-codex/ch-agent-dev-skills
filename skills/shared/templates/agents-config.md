@@ -36,12 +36,20 @@ verify-policy:
   light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
   scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full；拆票时预估 > 此值 → 票必须再拆（/issue-split 粒度红线）
   scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full
-  escalate-triggers:        # 命中任一（声明或实测）→ 至少 full，无论文件数
-    - "公共接口 / API 签名变更"
-    - "共享模块 / 工具库改动"
-    - "数据迁移 / schema 变更"
-    - "鉴权 / 权限逻辑改动"
-    - "红线邻接（redlines glob 命中文件的同目录）"
+  escalate-triggers:        # 命中任一（声明或实测）→ 升级验证；按两级分别处理，不一律全量
+    # —— full 级：影响面难以静态枚举、或错误代价高的变更，直接 full
+    - "公共接口 / API 签名变更"                     # full 级
+    - "数据迁移 / schema 兼容变更"                  # full 级
+    - "鉴权 / 权限逻辑改动"                         # full 级
+    # —— scoped+ 级：影响面通常可静态枚举的变更，先判可枚举性，不盲目全量
+    - "共享模块 / 工具库改动"                       # scoped+ 级
+    - "红线邻接（redlines glob 命中文件的同目录）"   # scoped+ 级
+  # scoped+ 级处理：按 selection 反查变更文件的反向依赖闭包（含调用方测试）——
+  #   闭包完整可枚举（无动态加载 / 反射 / subprocess 间接调用变更模块）→ scoped，选择集 = 全闭包；
+  #   闭包不可枚举（存在上述动态依赖）→ full。
+  # 选择集大小不是升档理由：闭包即精确选择集，大闭包跑大闭包；占比 ≥ 50% 时在 evidence 记录
+  # （作为「本票影响面广」的评审信号），不升 full——动态依赖与跨模块交互风险由集成票
+  # （DAG 终点票）的 full 统一兜底，不由每票重复全量。
   # 漂移规则（实测 diff 超出票的 declared-scope 时）：
   #   仍同模块、未触发 escalate-triggers、未超阈值 → 不升档，impl-log「漂移与升档记录」登记漂移文件清单即可
   #   触发 escalate-triggers 或超 scoped-max-* 阈值 → 升档（只升不降），立即按新档补验证并在 evidence 记录
@@ -49,8 +57,21 @@ verify-policy:
   # repo-level 平移：C 类仓可在计算结果上再降一档（下限 light）；B 类按规则执行；A 类不进 /implement
   selection: dir-map        # scoped 档的关联测试选择机制：
                            #   dir-map    = 目录约定映射（源码路径 → 测试路径，零基建；看不见跨模块影响面，只配低风险 scoped 票）
-                           #   impact-map = coverage / testmon 反查（diff → 执行过这些行的测试，含调用方模块的测试；
-                           #                出现 scoped 漏测反馈后应升级到本档）
+                           #   impact-map = coverage / 静态导入闭包反查（diff → 依赖这些模块的测试，含调用方模块的测试；
+                           #                hub 形态仓库必选本档——dir-map 会漏掉沿 import 链传导的影响面，给出全绿假信号；
+                           #                scoped+ 级触发器处理也依赖本档的闭包）
+  # 先在失败归因：套件基线长期存在与本票无关的失败时，档位门只对可归因于本票 diff 的失败判红
+  attribution: known-failures
+    # known-failures（推荐默认）：维护落盘的既有失败清单（测试名 + 失败签名 + 首录日期 + 来源 evidence）；
+    #   失败先比对清单——在清单且签名一致 = 先在失败，evidence 显式列出但不进 all-passed 分母；
+    #   不在清单或签名不符 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑；
+    #   清单由 full 档执行顺带刷新（全量结果即新基线），条目修复后销记
+    # two-sided（保守档）：每条失败 branch / base 同命令各跑一遍对照——归因成本翻倍（全套 ×2），
+    #   仅套件小或清单机制未建时使用
+  # 执行形态（耗时契约，档位语义不因此缩水）：
+  #   - 独立用例型套件应并行执行（并发度按机器自定；共享端口 / 文件等资源的用例标记 serial 除外）
+  #   - 单项超时分层：默认上限 + slow 白名单（实测头部慢项登记）——避免个别卡死项烧满统一上限
+  #   - full 档仍全量跑（slow 项不剔），慢项排前起跑压墙钟；同 tree 已跑过 full 的证据可复用，不重复执行
 
 # 自修复轮次上限（构建失败或评审 BLOCKER 的回修循环，超出打回人工）
 max-fix-rounds: 99
@@ -94,7 +115,7 @@ gitlab-ci: manual
 
 ## 说明
 
-- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；每 feature 至少一次 full 由集成票（DAG 终点票）保证
+- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
 - 评审与实现的被派发对话模型默认取 `dispatch.model`（经济性最高档）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护
