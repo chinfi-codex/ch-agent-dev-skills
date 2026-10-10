@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.4.0
+version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -125,7 +125,7 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## Dev 配置（agents-config）
@@ -138,13 +138,13 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
 - `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
-- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证
+- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档 full
 - `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）、`model: economy`（被派发对话取宿主可用范围内经济性最高的一档，比主会话低一档；高风险 / 复杂票显式升级）
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
 
-## 派发与监督协议（宿主无关）
+## 派发协议（宿主无关）
 
 dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自动新开一个独立对话执行派发提示词**。不绑定任何具体工具名，不依赖外部 CI 或人工触发。
 
@@ -167,6 +167,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - frontmatter `allowed-tools` 里的 `Task` 是 Claude Code 命名；其他宿主按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变
 - 兜底：宿主完全没有该能力时，主会话产出自包含派发提示词请人在新对话启动；不得在主会话同一上下文里「顺便自己实现」充数
 - 写查分离不可降级：**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评
+- 同票复审续接：宿主支持子对话续接（如 ZCode `SendMessage` 按 agentId 续接已完成对话）时，BLOCKER 回修后的复审发回**同一评审对话**（喂回修 commit 范围 + 上轮报告路径），不每轮新开实例、不重载评审上下文；写查分离不变式不受影响（评审实例始终独立于实现），跨票仍一律新开；宿主不支持续接时退回现状：每轮新开独立对话全量复审
 
 ### worktree 清场序列（收口与对账共用）
 
@@ -178,14 +179,14 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 4. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支；local 模式核对已并入 `main-branch` 后 `git branch -D feat/<feature-slug>-<issue-id>`（有远端同名再 `git push origin --delete`）
 5. `rmdir .worktrees 2>/dev/null || true` 清空父目录
 
-### 监督循环（主会话职责，直到完成合并）
+## 监督循环（主会话职责，直到完成合并）
 
 门②（票清单确认）通过后，主会话自动进入监督循环，**派出后不停手，监督到每张票合并完成**：
 
-1. **取票**：读 `./dev/features/<feature-module>/<feature-slug>/issues/` 票文件，重算 frontier（blocked-by 全部 `done` 的票）
-2. **派发**：按宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行，人明确要求并行才同时派多张
+1. **取票**：只读 `./dev/features/<feature-module>/<feature-slug>/issues/` 票文件的 frontmatter（`status` / `blocked-by`），重算 frontier（blocked-by 全部 `done` 的票）；票正文由被派发的实现对话自读，主会话不读
+2. **派发**：按「派发协议」宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；默认按依赖序逐张串行，人明确要求并行才同时派多张
 3. **跟踪**：被派发对话的结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）只是线索，不作为成功依据
-4. **收口**：主会话亲自核对落盘产物——evidence `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审 pass / pass-with-notes、MR ready——执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 再合
+4. **收口**：主会话亲自核对落盘产物的**结构化头部**——evidence yaml 头 `all-passed: true` 且 `tier-executed` 达到票 `verify-tier`（或已按 `verify-policy` 升档并留记录）、评审报告头部结论 `pass` / `pass-with-notes`、MR ready——执行合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`），票置 `done`，按「派发协议」清场序列收尾；头部字段缺失或相互矛盾时才展开全文核对；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 再合
 5. **推进**：每轮先做 worktree 对账（`git worktree list --porcelain` 与票状态比对，票已 `done` 但 worktree 仍在的按清场序列补删；`in-review` / `needs-human` 票的保留并列入总账），再重算 frontier 回到第 1 步；全部 `done` 后回显总账（每票：合并 commit / 证据与评审报告路径 / worktree 已清或保留原因 / 遗留 Medium-Low），输出完成状态
 6. **唯一暂停条件**：回报 `needs-human` / `阻塞`、合并冲突自动 rebase 后仍无法解决、其他无法自行裁决的问题——与人单点确认后再继续；其余（含 BLOCKER 回修、fast 自修复）一律不问人
 
@@ -209,7 +210,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
-- tech-spec 不存在或状态仍为 `草稿`（未确认）→ 直接 `阻塞`
+- tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
 - 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
 
 ---
@@ -227,7 +228,9 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **纵向切穿所有相关层**（数据 / 逻辑 / 界面 / 测试），不是按层横切
 - 独立可演示：完成后能演示一个完整的行为，不是半截基础设施
 - 一张票的上下文能装进一个实现会话；装不下就再拆
+- **粒度取向取少不取多**：每票有固定执行成本（独立实现对话 + 独立评审对话 + 监督收口），票数是成本乘数；无独立 DoD、与邻票同接缝同目录的切片合并为一票——粒度红线是上限，不是目标
 - **声明阻塞边**（blocked-by）：以 DAG 表达依赖，编号按依赖序
+- **标注上游节锚点**：备注节写明本票涉及的 tech-spec 节（如 `#3.2 接口变更`、`#5 测试策略`，可多个）与 PRD 相关节——`/implement` 按锚点选读，不全量读 spec
 - 首张票应是最细的端到端贯通（先打穿，再加厚）
 
 例外——宽改造（大范围重构）：按 expand–contract 序列拆（加新形 → 分批迁移 → 删旧形），每批独立成票、可独立验收，不得拆出「中间态不可用」的票。
@@ -237,7 +240,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 **计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
 
 - 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
-- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）或预计超 `scoped-max-*` 阈值 → `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`
+- **粒度红线（拆票时判定，先于定档）**：`declared-scope` 预计生产代码文件数 > `verify-policy.scoped-max-files`，或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆，不得以 `full` 档放行——`full` 是验证深度，不是粒度豁免
+- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）→ `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`（`scoped-max-loc` 只用于实现期实测升档，不参与拆票预估判定）
 - **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`
 - `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
 
@@ -250,7 +254,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定、**档位对不对（该 full 的别标 scoped / light）**
 - 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
 
-粒度失败路径：单票改动横跨超过两个模块 → 自动再拆或标记需人工裁决，不硬发。
+粒度失败路径：单票改动横跨超过两个模块，或预计文件数超 `scoped-max-files` / scope 不可枚举 → 自动再拆或标记需人工裁决，不硬发。
 
 ### Step 3：发布
 
@@ -263,7 +267,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）
 
 - 回显：票数、DAG、frontier 票清单（blocked-by 为空的票）
-- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发与监督协议（宿主无关）」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发协议」与「监督循环」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
 
 ---
 

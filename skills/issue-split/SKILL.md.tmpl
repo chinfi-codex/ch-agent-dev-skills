@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.4.0
+version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -42,6 +42,8 @@ allowed-tools:
 
 {{DISPATCH_PROTOCOL}}
 
+{{SUPERVISION_LOOP}}
+
 # /issue-split
 
 你是技术项目经理。你负责：**把一份已确认的 tech-spec，拆成一组带阻塞关系、验收标准可自动判定的 tracer-bullet 票，经人确认（门②）后发布**。
@@ -62,7 +64,7 @@ allowed-tools:
 
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
-- tech-spec 不存在或状态仍为 `草稿`（未确认）→ 直接 `阻塞`
+- tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
 - 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
 
 ---
@@ -80,7 +82,9 @@ allowed-tools:
 - **纵向切穿所有相关层**（数据 / 逻辑 / 界面 / 测试），不是按层横切
 - 独立可演示：完成后能演示一个完整的行为，不是半截基础设施
 - 一张票的上下文能装进一个实现会话；装不下就再拆
+- **粒度取向取少不取多**：每票有固定执行成本（独立实现对话 + 独立评审对话 + 监督收口），票数是成本乘数；无独立 DoD、与邻票同接缝同目录的切片合并为一票——粒度红线是上限，不是目标
 - **声明阻塞边**（blocked-by）：以 DAG 表达依赖，编号按依赖序
+- **标注上游节锚点**：备注节写明本票涉及的 tech-spec 节（如 `#3.2 接口变更`、`#5 测试策略`，可多个）与 PRD 相关节——`/implement` 按锚点选读，不全量读 spec
 - 首张票应是最细的端到端贯通（先打穿，再加厚）
 
 例外——宽改造（大范围重构）：按 expand–contract 序列拆（加新形 → 分批迁移 → 删旧形），每批独立成票、可独立验收，不得拆出「中间态不可用」的票。
@@ -90,7 +94,8 @@ allowed-tools:
 **计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
 
 - 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
-- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）或预计超 `scoped-max-*` 阈值 → `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`
+- **粒度红线（拆票时判定，先于定档）**：`declared-scope` 预计生产代码文件数 > `verify-policy.scoped-max-files`，或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆，不得以 `full` 档放行——`full` 是验证深度，不是粒度豁免
+- 命中 escalate-triggers（公共接口 / 共享模块 / 数据迁移 / 鉴权 / 红线邻接）→ `full`；`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`（`scoped-max-loc` 只用于实现期实测升档，不参与拆票预估判定）
 - **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`
 - `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
 
@@ -103,7 +108,7 @@ allowed-tools:
 - 按「提问格式」确认：粒度对不对、阻塞边对不对、验收命令能不能判定、**档位对不对（该 full 的别标 scoped / light）**
 - 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
 
-粒度失败路径：单票改动横跨超过两个模块 → 自动再拆或标记需人工裁决，不硬发。
+粒度失败路径：单票改动横跨超过两个模块，或预计文件数超 `scoped-max-files` / scope 不可枚举 → 自动再拆或标记需人工裁决，不硬发。
 
 ### Step 3：发布
 
@@ -116,7 +121,7 @@ allowed-tools:
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）
 
 - 回显：票数、DAG、frontier 票清单（blocked-by 为空的票）
-- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发与监督协议（宿主无关）」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发协议」与「监督循环」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
 
 ---
 

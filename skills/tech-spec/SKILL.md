@@ -1,6 +1,6 @@
 ---
 name: tech-spec
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -91,7 +91,7 @@ allowed-tools:
 - 一轮把 frontier 上的问题**一次问完**：编号 Q1 / Q2 / …，每题给推荐答案；分叉题给 A / B / C（A 推荐），非分叉题不强行给选项。
 - 用户回答后，已确认的决策把 frontier 向外推，重算 frontier 再进入下一轮；答案依赖本轮仍未决问题的，归入后面的轮次。
 - 每轮开头用 2-4 句 re-ground：当前讨论对象、当前阶段、本轮要收敛什么。
-- 阻塞型单点确认（`feature-slug` 歧义裁决、模式 / 方向批准、术语冲突裁决、是否进入下一阶段）一次只问一个；一轮多个仅限拷打轮次中相互独立的 frontier 问题。
+- 阻塞型单点确认（定义与示例见「提问格式」）一次只问一个；一轮多个仅限拷打轮次中相互独立的 frontier 问题。
 
 ### 事实自查
 
@@ -165,7 +165,7 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## Dev 配置（agents-config）
@@ -178,7 +178,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
 - `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
-- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证
+- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档 full
 - `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）、`model: economy`（被派发对话取宿主可用范围内经济性最高的一档，比主会话低一档；高风险 / 复杂票显式升级）
@@ -206,7 +206,9 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
 - 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
-- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
+- 存量文档缺 frontmatter：先从正文对应字段（PRD「文档信息」/ 报告「交付结论」）誊抄补全表头——只加 frontmatter 不动正文，再执行门禁判定；正文与誊抄值冲突时报用户裁决
+- 补读 `./docs/EXPERIENCE.md` 开发阶段经验（如有）：与本次方案同模块 / 同分类的条目作为「已知坑」，进入约束与假设清单或失败路径检查，不重复设计已踩过的坑
 - 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
 - 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
@@ -249,7 +251,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
 3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
 4. 本轮确定的新术语立即回写 GLOSSARY
-5. 文档头部状态置 `已确认（待拆解）`，衔接 `/issue-split`
+5. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。
 

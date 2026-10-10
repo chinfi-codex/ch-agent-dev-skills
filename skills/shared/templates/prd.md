@@ -21,12 +21,22 @@
 - 每条 FR 必须带至少一条**可测试后果**（可验证条件或可度量结果）；写不出可测试后果的条目，降级移入「待确认问题」，不留在正式要求中。
 - FR 编号是下游（tech-spec / issue-split / pd-review）的稳定引用锚点：定稿后不复用、不重排；作废条目保留编号并标注「已作废」。
 
+```yaml
+---
+doc_type: prd
+feature_module: <feature-module>
+feature_slug: <feature-slug>
+feature_summary: <feature-summary>
+version: YYYY-MM-DD
+status: 草稿        # 草稿 | 定稿 —— /pd-review 修订完成且结论非阻塞时置「定稿」；定稿后 FR 编号不复用、不重排
+upstream:
+  feature-brief: <feature brief 文件名>
+---
+```
+
 # PRD **需求名称**
 
 ## 文档信息
-- **对应 Feature BR**：
-- **文档版本**：
-- **当前状态**：
 - **面向对象**：产品 / 设计 / 前端 / 后端 / 测试 / 项目管理
 
 ## 背景与目标

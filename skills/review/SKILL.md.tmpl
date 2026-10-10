@@ -1,6 +1,6 @@
 ---
 name: review
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -52,7 +52,7 @@ allowed-tools:
 
 你的位置是：
 
-**全部票 done + 人确认发布 → 复盘（你）→ 复盘报告 + 两级经验库 → 下一个 feature 的人带着经验库去做 /pd-plan、/tech-spec**
+**全部票 done + 人确认发布 → 复盘（你）→ 复盘报告 + 两级经验库 + 规则级改进建议 → 下一个 feature：经验库经前置读取自动回流 /pd-plan、/prd、/tech-spec**
 
 ---
 
@@ -110,16 +110,18 @@ allowed-tools:
 
 ### Step 4：经验分级沉淀
 
+- **规则级（先判，不进经验库）**：一条经验若靠「下次注意」无法根治、根治方式是改流水线规则本身——模板缺章节（如 PRD 反复漏同一类边界）、fragment 纪律有漏洞（如拆票粒度反复失准）、`verify-policy` 阈值失准——写入复盘报告「流水线改进建议」节：逐条写明建议改动的 template / fragment / 配置项路径与具体改法。在 ch-agent-dev-skills 仓库自身运行时建议转 `/issue` 小变更；在用户仓库只建议，不代改
 - **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 `./docs/EXPERIENCE.md`（懒创建）
 - **通用级**（与具体仓库无关的流程方法类）→ 追加 `~/.pd-workflow/general-experience.md`（懒创建）
-- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增
+- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增，同步更新「最后命中」为本次复盘日期
 - 项目级条目在 ≥2 个 feature 复现后晋升通用级，并在项目级条目备注「已晋升」
+- **老化**：既有条目「最后命中」距本次复盘超过 90 天 → 整行移入经验库「已归档」节（不删除）；归档条目再次命中则移回原节并复现次数 +1
 - 条目格式见 `../shared/templates/experience.md`
 
 ### Step 5：落盘与交付
 
 - 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
+- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升 / 归档各几条）+ 规则级改进建议条数
 
 ## 硬约束
 

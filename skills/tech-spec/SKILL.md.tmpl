@@ -1,6 +1,6 @@
 ---
 name: tech-spec
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -59,7 +59,9 @@ allowed-tools:
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
 - 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
-- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；PRD 不存在，或最新 pd-review-report 结论为阻塞：直接 `阻塞`，不写 tech-spec
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
+- 存量文档缺 frontmatter：先从正文对应字段（PRD「文档信息」/ 报告「交付结论」）誊抄补全表头——只加 frontmatter 不动正文，再执行门禁判定；正文与誊抄值冲突时报用户裁决
+- 补读 `./docs/EXPERIENCE.md` 开发阶段经验（如有）：与本次方案同模块 / 同分类的条目作为「已知坑」，进入约束与假设清单或失败路径检查，不重复设计已踩过的坑
 - 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
 - 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
@@ -102,7 +104,7 @@ allowed-tools:
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
 3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
 4. 本轮确定的新术语立即回写 GLOSSARY
-5. 文档头部状态置 `已确认（待拆解）`，衔接 `/issue-split`
+5. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。
 

@@ -1,7 +1,7 @@
 ---
 name: prd
 preamble-tier: 1
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -113,7 +113,7 @@ allowed-tools:
 - Feature BR 中的 `待确认` 项是否已闭环（未闭环的不得写入正式要求）
 - 涉及术语与指标是否已入 GLOSSARY，口径是否一致
 
-如果输入不足以支撑正式 PRD，应明确指出缺口，而不是伪造完整性。`feature brief` 不存在，或其状态不是 `待写PRD` → 直接 `阻塞`。
+如果输入不足以支撑正式 PRD，应明确指出缺口，而不是伪造完整性。`feature brief` 不存在，或其 frontmatter `status` ≠ `待写PRD` → 直接 `阻塞`；存量 brief 缺 frontmatter：先按正文「衔接建议」誊抄补全表头（只加 frontmatter 不动正文）再判定。
 
 ### Step 2：建立 PRD 骨架
 先形成清晰的 PRD 结构，一级章节严格对齐 `shared/templates/prd.md`：

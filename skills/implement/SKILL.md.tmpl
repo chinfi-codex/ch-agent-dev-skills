@@ -21,7 +21,7 @@ allowed-tools:
   - Task
 ---
 
-{{GLOSSARY}}
+{{GLOSSARY_DEV}}
 
 {{COMPLETION_STATUS}}
 
@@ -48,7 +48,7 @@ allowed-tools:
 
 运行身份：
 
-- 标准形态：issue 生成后，由主会话按「派发与监督协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
+- 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
 - 被派发对话的模型取 `agents-config.dispatch.model`（默认 economy，比主会话低一档）
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
@@ -59,7 +59,7 @@ allowed-tools:
 1. `./dev/agents-config.md` 存在；`repo-level = A` → 拒绝执行（A 类仓只读辅助），显式警示
 2. 票定位：`/implement issue-NNN`（或 GitLab IID 反查票文件）；票文件 `status = confirmed` 才可启动——`proposed` 提示先过门②（`/issue-split`），其余状态按现状恢复或提示
 3. `blocked-by` 中的票全部 `done`；否则列出未完成阻塞项后停止
-4. 读入：票全文（含 DoD）、tech-spec（方案与约束）、PRD 相关节（意图）、GLOSSARY
+4. 读入：票全文（含 DoD）；tech-spec「4. 约束与假设」全节必读，其余按票备注标注的节锚点选读（未标注的节不读）；PRD 相关节（意图）；GLOSSARY
 
 ---
 
@@ -90,6 +90,7 @@ allowed-tools:
 
 - 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
 - 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
+- **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
 - 达到轮次上限仍未过：票置 `needs-human`，附完整轨迹（命令 + 输出 + 已试路径），**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
@@ -108,14 +109,14 @@ allowed-tools:
 - 票置 `in-review`；push 分支
 - **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
 - 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审对话模型默认取 `dispatch.model` 的 economy 档）：
-  - `delegate`（默认）：按「派发与监督协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec
+  - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec；保留评审对话句柄（如 agentId），供 Step 7 复审续接
   - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
   - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
 - 评审报告落 `reviews/`；不指示、不引导评审结论
 
 ### Step 7：BLOCKER 回修（同一上下文，计入轮次预算）
 
-- Critical / High（BLOCKER）：在当前 worktree 修复 → 新 commit → push（接 CI 时自动复审本轮改动）→ 重新走 Step 6 的评审解析，直至无 BLOCKER 或轮次耗尽（耗尽 → `needs-human` + 完整轨迹）
+- Critical / High（BLOCKER）：在当前 worktree 修复 → 新 commit → push（接 CI 时自动复审本轮改动）→ 复审：宿主支持对话续接时把「回修 commit 范围 + 上轮报告路径」发回**同一评审对话**（不新开实例、不重载评审上下文，见「派发协议」同票复审续接）；宿主不支持时重新走 Step 6 新开评审对话全量复审；直至无 BLOCKER 或轮次耗尽（耗尽 → `needs-human` + 完整轨迹）
 - Medium / Low：记入 impl-log「遗留」，不阻塞
 
 ### Step 8：MR 转正式（ready）与合并
@@ -126,7 +127,7 @@ allowed-tools:
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
   - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发与监督协议」的 worktree 清场序列收尾：按分支名发现 worktree → `git worktree remove`（拒删则 `--force`）→ `git worktree prune` → 删分支 → `rmdir .worktrees 2>/dev/null || true`
+  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列收尾：按分支名发现 worktree → `git worktree remove`（拒删则 `--force`）→ `git worktree prune` → 删分支 → `rmdir .worktrees 2>/dev/null || true`
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合；仍无法自动解决 → 票置 `needs-human`，停下与人确认，不硬合
 
 ### Step 9：收尾报告

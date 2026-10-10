@@ -18,10 +18,12 @@ const fragmentMap: Record<string, string> = {
   DOC_WRITING_RULES: "doc-writing-rules.md",
   REVIEW_METHOD: "review-method.md",
   GLOSSARY: "glossary.md",
+  GLOSSARY_DEV: "glossary-dev.md",
   GRILLING: "grilling.md",
   DEV_ARTIFACT_PATHS: "dev-artifact-paths.md",
   DEV_CONFIG: "dev-config.md",
   DISPATCH_PROTOCOL: "dispatch-protocol.md",
+  SUPERVISION_LOOP: "supervision-loop.md",
 };
 
 const templatesDir = join(rootDir, "shared", "templates");

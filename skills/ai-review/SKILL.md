@@ -37,25 +37,12 @@ allowed-tools:
 
 产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
-## 术语与数据口径（GLOSSARY）
+## 术语与数据口径（GLOSSARY，dev 阶段）
 
-项目级唯一术语文件：`./docs/GLOSSARY.md`（结构见 skill 包内 `shared/templates/glossary.md`；懒创建：第一个术语确定时按该结构创建；存在才读，不存在不阻塞，先于其他文档读）。
+项目级唯一术语文件：`./docs/GLOSSARY.md`（存在才读，不存在不阻塞）。
 
-### 使用纪律
-
-- 输出文档与对话中必须使用表内**标准术语**；用户使用别名或口语说法时，回显标准词后继续。
-- 用户命中某术语的「拒绝词」时：回显标准词，说明该说法已被淘汰及原因，再继续。拒绝词与别名不同：别名是可接受的口语说法（用于匹配），拒绝词是被明确淘汰、会引发歧义的说法。
-- 用户用法与表内定义冲突时，立即指出并要求裁决（「术语表中 X 定义为 A，你的用法是 B，以哪个为准？」）。
-- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致；不一致时先裁决再写。
-
-### 回写纪律
-
-- 讨论中确定的新术语或新口径**立即写入**，不批量积压；明确淘汰的说法立即记入「拒绝词」列，防止回潮。
-- 准入测试：只收项目专属术语与数据口径；通用编程概念、行业通行词不收。
-- 原地追加更新，不加日期后缀，不新建版本文件；表内只放定义与口径，方案、决策理由、实现细节一律不进。
-- 定义按「它是什么」写，不按「它做什么」写——词汇表，不是设计文档。
-- 「feature-module 归档」节由 `/pd-plan` 在用户确认模块新建或归属后立即登记（模块名、一句话说明、成员 `feature-slug`），成员列与 `./docs/features/` 实际目录保持一致；其他技能只读该节，不擅自增改。
-- 术语表的「别名/口语说法」「关联 feature-slug」列与「feature-module 归档」节是 `feature-module` / `feature-slug` 匹配的输入之一；命中多个别名时按 `AMBIGUOUS_MATCH` 单问题裁决。
+- 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
+- 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
 
 ## 完成状态协议
 
@@ -96,7 +83,7 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## Dev 配置（agents-config）
@@ -109,7 +96,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
 - `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
-- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证
+- `verify-policy`：验证档位策略（阈值 / 升档触发器 / 漂移规则 / 选择机制）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。DAG 无后继的集成票一律 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档 full
 - `max-fix-rounds`：自修复轮次上限，默认 99
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）、`model: economy`（被派发对话取宿主可用范围内经济性最高的一档，比主会话低一档；高风险 / 复杂票显式升级）
@@ -178,6 +165,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 
 ### Step 3：红线、档位与清理复核（第二双眼睛，确定性检查）
 
+三项复核共用同一份 diff 文件清单（由 Step 0 的 diff 统计换算，只生成一次，不重复执行 `git diff`）；复核输出只保留命中项与结论，全量清单不进报告、不堆进对话。
+
 **红线复核**：`agents-config.redlines` 的 glob 对实际改动文件清单复核一遍（grep 可解释清单，不靠语义猜测）：命中协议 / 密钥 / 测试判定文件 → 无论 ocr 是否报，一律列 Critical BLOCKER。ocr 的 `exclude`（不送审）不等于红线（不允许改），两者不可互替。
 
 **档位复核**：实际 diff（固定点..HEAD）对照票 `verify-tier` / `declared-scope` 与 impl-log「漂移与升档记录」——
@@ -198,6 +187,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 ### Step 5：结论、返回与校准
 
 - 结论：无 BLOCKER → `pass`；仅 medium / low → `pass-with-notes`；任一 BLOCKER → `blocked`
+- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：仍按原固定点取全量 diff 复核、聚焦回修增量，Step 3 确定性复核重跑；同日同票报告原地追加「复审记录」节并把头部「结论」更新为最新一轮（轮次日志属原地更新，不适用新文件规则），收口方以头部结论为准
 - 报告路径与结论返回调用方（`/implement` 被派发对话或主会话），供回修或主会话合并判断
 - 标准失配校准：若连续多轮首轮全 PASS / 全 BLOCK，提示人用已合并 MR 回测误报漏报，再修订 `.opencodereview/rule.json` 的 `rules`；反复出现的判据沉淀进仓库 `REVIEW.md`（无则提示人创建）
 
@@ -206,7 +196,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 ## 硬约束
 
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
-- 评审必须由独立实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评，必须新开独立对话）
+- 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
 - 红线命中一律 Critical，无论引擎结论；档位失配（该升没升 / 档位虚标 / 集成票未 full）与旧实现该删没删（替代落地而旧代码留存、无约束依据）同列 BLOCKER
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文

@@ -1,7 +1,7 @@
 ---
 name: prd
 preamble-tier: 1
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -46,7 +46,10 @@ allowed-tools:
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
 - 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 经验库读法：`EXPERIENCE.md` ≤50 行全读；超过则按本模块 slug 清单（GLOSSARY「feature-module 归档」节）与相关分类关键词 grep 滤行，只带命中行进上下文（「已归档」节不参与筛选），不全读
+- 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
+- 经验库回流：`./docs/EXPERIENCE.md`（项目级经验库，由 `/review` 维护）中与本需求同模块 / 同分类的条目，作为「已知坑」进入本轮提问与写作——需求阶段条目进拷打维度与假设清单，不重复踩过的坑；条目与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
@@ -161,8 +164,7 @@ allowed-tools:
 - 关键规则当场裁决并写进文档，不留给“开发时再决定”或“实现时再说”
 - 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里
 - 若存在 tradeoff，必须明确说明选择、放弃项与原因
-- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现
-- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
+- 术语用法与指标口径遵循「术语与数据口径（GLOSSARY）」使用纪律，本节不重复
 
 # /prd
 
@@ -239,7 +241,7 @@ allowed-tools:
 - Feature BR 中的 `待确认` 项是否已闭环（未闭环的不得写入正式要求）
 - 涉及术语与指标是否已入 GLOSSARY，口径是否一致
 
-如果输入不足以支撑正式 PRD，应明确指出缺口，而不是伪造完整性。`feature brief` 不存在，或其状态不是 `待写PRD` → 直接 `阻塞`。
+如果输入不足以支撑正式 PRD，应明确指出缺口，而不是伪造完整性。`feature brief` 不存在，或其 frontmatter `status` ≠ `待写PRD` → 直接 `阻塞`；存量 brief 缺 frontmatter：先按正文「衔接建议」誊抄补全表头（只加 frontmatter 不动正文）再判定。
 
 ### Step 2：建立 PRD 骨架
 先形成清晰的 PRD 结构，一级章节严格对齐 `shared/templates/prd.md`：

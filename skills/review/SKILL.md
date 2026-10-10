@@ -1,6 +1,6 @@
 ---
 name: review
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -48,7 +48,10 @@ allowed-tools:
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
 - 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 经验库读法：`EXPERIENCE.md` ≤50 行全读；超过则按本模块 slug 清单（GLOSSARY「feature-module 归档」节）与相关分类关键词 grep 滤行，只带命中行进上下文（「已归档」节不参与筛选），不全读
+- 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
+- 经验库回流：`./docs/EXPERIENCE.md`（项目级经验库，由 `/review` 维护）中与本需求同模块 / 同分类的条目，作为「已知坑」进入本轮提问与写作——需求阶段条目进拷打维度与假设清单，不重复踩过的坑；条目与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
@@ -142,7 +145,7 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发与监督协议」），不按路径猜
+- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
 ## 完成状态协议
@@ -178,8 +181,7 @@ allowed-tools:
 - 关键规则当场裁决并写进文档，不留给“开发时再决定”或“实现时再说”
 - 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里
 - 若存在 tradeoff，必须明确说明选择、放弃项与原因
-- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现
-- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
+- 术语用法与指标口径遵循「术语与数据口径（GLOSSARY）」使用纪律，本节不重复
 
 # /review
 
@@ -193,7 +195,7 @@ allowed-tools:
 
 你的位置是：
 
-**全部票 done + 人确认发布 → 复盘（你）→ 复盘报告 + 两级经验库 → 下一个 feature 的人带着经验库去做 /pd-plan、/tech-spec**
+**全部票 done + 人确认发布 → 复盘（你）→ 复盘报告 + 两级经验库 + 规则级改进建议 → 下一个 feature：经验库经前置读取自动回流 /pd-plan、/prd、/tech-spec**
 
 ---
 
@@ -251,16 +253,18 @@ allowed-tools:
 
 ### Step 4：经验分级沉淀
 
+- **规则级（先判，不进经验库）**：一条经验若靠「下次注意」无法根治、根治方式是改流水线规则本身——模板缺章节（如 PRD 反复漏同一类边界）、fragment 纪律有漏洞（如拆票粒度反复失准）、`verify-policy` 阈值失准——写入复盘报告「流水线改进建议」节：逐条写明建议改动的 template / fragment / 配置项路径与具体改法。在 ch-agent-dev-skills 仓库自身运行时建议转 `/issue` 小变更；在用户仓库只建议，不代改
 - **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 `./docs/EXPERIENCE.md`（懒创建）
 - **通用级**（与具体仓库无关的流程方法类）→ 追加 `~/.pd-workflow/general-experience.md`（懒创建）
-- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增
+- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增，同步更新「最后命中」为本次复盘日期
 - 项目级条目在 ≥2 个 feature 复现后晋升通用级，并在项目级条目备注「已晋升」
+- **老化**：既有条目「最后命中」距本次复盘超过 90 天 → 整行移入经验库「已归档」节（不删除）；归档条目再次命中则移回原节并复现次数 +1
 - 条目格式见 `../shared/templates/experience.md`
 
 ### Step 5：落盘与交付
 
 - 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升各几条）
+- 交付格式：先完成状态 → 回显 `feature-module`、`feature-slug` 与 `feature-summary` → 报告摘要（两侧关键点各前三条）→ 经验库变更摘要（新增 / 合并 / 晋升 / 归档各几条）+ 规则级改进建议条数
 
 ## 硬约束
 

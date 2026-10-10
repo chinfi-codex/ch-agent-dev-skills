@@ -1,12 +1,16 @@
-# Tech Spec：<feature_name>
+---
+doc_type: tech-spec
+feature_module: <feature-module>
+feature_slug: <feature-slug>
+feature_summary: <feature-summary>
+version: YYYY-MM-DD
+status: 草稿        # 草稿 | 已确认（待拆解）—— /issue-split 以 status = 已确认（待拆解） 为开工门禁
+upstream:                  # 标准路径：定稿 PRD + pd-review-report；小变更路径：change-request（删 pd-review-report 行）
+  prd: <PRD 文件名>                # 小变更路径改写 change-request 文件名
+  pd-review-report: <pd-review-report 文件名>
+---
 
-| 项 | 内容 |
-|---|---|
-| feature-slug | `<feature-slug>` |
-| feature-summary | `<feature-summary>` |
-| 版本 | YYYY-MM-DD |
-| 上游 | 最新 PRD（`<文件名>`），pd-review 结论 = 可交付 |
-| 状态 | `草稿` / `已确认（待拆解）` |
+# Tech Spec：<feature_name>
 
 ## 1. 目标与范围
 

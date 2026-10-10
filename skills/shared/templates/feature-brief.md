@@ -34,6 +34,17 @@
 
 ## 5. Feature Brief 正文
 
+```yaml
+---
+doc_type: feature-brief
+feature_module: <feature-module>
+feature_slug: <feature-slug>
+feature_summary: <feature-summary>
+version: YYYY-MM-DD
+status: 待写PRD      # 待写PRD | 待验证 | 不进入 —— 与「衔接建议」一致；/prd 以 status = 待写PRD 为开工门禁
+---
+```
+
 # Feature Brief / 需求方案
 
 ## 1. 需求概述

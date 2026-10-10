@@ -1,6 +1,6 @@
 ---
 name: pd-review
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -58,6 +58,7 @@ allowed-tools:
 2. 通读 PRD，识别目标、范围、规则、状态、验收是否完整
 3. 按 7 个维度评分；每一个低于 8 分的维度，直接修改 PRD。修订时按当前 `shared/templates/prd.md` 结构补齐行为规格（业务规则与处理逻辑 / 状态迁移表 / 字段级输入输出表 / 权限矩阵 / SM 埋点闭环），旧版本 PRD 缺这些结构的，一律补到当前结构，不保留结构性缺口
 4. 输出修订后的 PRD 与评审报告
+5. 修订完成且结论非阻塞：修订版 PRD frontmatter `status` 置 `定稿`（FR 编号「定稿后不复用、不重排」自此刻起算）；报告 frontmatter `verdict` 必须与正文「交付结论」一致。存量 PRD 缺 frontmatter 时，先按正文「文档信息」誊抄补全（只加 frontmatter 不动正文）再置值
 
 ## 评审重点
 

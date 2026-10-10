@@ -1,7 +1,7 @@
 ---
 name: pd-plan
 preamble-tier: 1
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -120,6 +120,7 @@ allowed-tools:
 
 ### Step 0：读取上下文
 先读最新 `project memo`；命中已有 `feature-slug` 则续读该目录下已有需求文档；新需求先按「feature-module 归档」完成模块归属确认（用户最终确认），再确认 `feature_name`、`feature-slug` 与本次 `feature-summary`，然后产出文档。再看：
+- `./docs/EXPERIENCE.md` 需求阶段经验（如有）：相关条目作为拷打「已知坑」，直接进 Step 2 缺口清单，不重复问已踩过的坑
 - feature / brief / issue / todo
 - 已有 PRD、roadmap、约束材料
 - README / CLAUDE / AGENTS.md
@@ -185,7 +186,7 @@ allowed-tools:
 frontier 为空且覆盖维度均有归属后：
 
 1. 先输出共识摘要（关键决策清单 + 各维度归属）与**产品逻辑结构图**，请用户确认
-2. 用户确认后才产出 Feature Brief，结构图随文档落盘；用户推翻任一条，回到对应分支继续拷打
+2. 用户确认后才产出 Feature Brief，frontmatter `status` 按「衔接建议」置 `待写PRD` / `待验证` / `不进入`，结构图随文档落盘；用户推翻任一条，回到对应分支继续拷打
 
 #### 产品逻辑结构图（共识确认必附）
 

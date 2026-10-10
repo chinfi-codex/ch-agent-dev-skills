@@ -34,7 +34,7 @@ quality-gate:
 # 不变式（任何档位不得缩水）：红线检查 / DoD 验收命令 / 独立评审 / 每 feature 至少一次 full（集成票）
 verify-policy:
   light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
-  scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full
+  scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full；拆票时预估 > 此值 → 票必须再拆（/issue-split 粒度红线）
   scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full
   escalate-triggers:        # 命中任一（声明或实测）→ 至少 full，无论文件数
     - "公共接口 / API 签名变更"

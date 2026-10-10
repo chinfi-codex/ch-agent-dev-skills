@@ -4,6 +4,20 @@
 > 修改本文件即时生效，无需重新生成 SKILL.md。
 > 产出时必须严格遵循章节结构，不自行增删一级章节。
 
+```yaml
+---
+doc_type: pd-review-report
+feature_module: <feature-module>
+feature_slug: <feature-slug>
+feature_summary: <feature-summary>
+version: YYYY-MM-DD
+verdict: 可交付     # 可交付 | 可交付但有风险 | 阻塞 —— 必须与正文「交付结论」一致；/tech-spec 的开工门禁字段
+upstream:
+  prd: <PRD 文件名>
+  feature-brief: <feature brief 文件名>
+---
+```
+
 # PD Review Report
 
 ## 交付结论

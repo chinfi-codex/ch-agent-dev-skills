@@ -1,6 +1,6 @@
 ---
 name: pd-review
-version: 0.2.0
+version: 0.3.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -44,7 +44,10 @@ allowed-tools:
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
 - 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 经验库读法：`EXPERIENCE.md` ≤50 行全读；超过则按本模块 slug 清单（GLOSSARY「feature-module 归档」节）与相关分类关键词 grep 滤行，只带命中行进上下文（「已归档」节不参与筛选），不全读
+- 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
+- 经验库回流：`./docs/EXPERIENCE.md`（项目级经验库，由 `/review` 维护）中与本需求同模块 / 同分类的条目，作为「已知坑」进入本轮提问与写作——需求阶段条目进拷打维度与假设清单，不重复踩过的坑；条目与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
@@ -139,8 +142,7 @@ allowed-tools:
 - 关键规则当场裁决并写进文档，不留给“开发时再决定”或“实现时再说”
 - 若存在假设，必须把假设写成可见条目，而不是隐藏在叙述里
 - 若存在 tradeoff，必须明确说明选择、放弃项与原因
-- 用词必须遵循 `./docs/GLOSSARY.md` 中的标准术语；用户别名只在引用原话时出现
-- 引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
+- 术语用法与指标口径遵循「术语与数据口径（GLOSSARY）」使用纪律，本节不重复
 
 ## `/pd-review` 评审方法
 
@@ -194,6 +196,7 @@ allowed-tools:
 2. 通读 PRD，识别目标、范围、规则、状态、验收是否完整
 3. 按 7 个维度评分；每一个低于 8 分的维度，直接修改 PRD。修订时按当前 `shared/templates/prd.md` 结构补齐行为规格（业务规则与处理逻辑 / 状态迁移表 / 字段级输入输出表 / 权限矩阵 / SM 埋点闭环），旧版本 PRD 缺这些结构的，一律补到当前结构，不保留结构性缺口
 4. 输出修订后的 PRD 与评审报告
+5. 修订完成且结论非阻塞：修订版 PRD frontmatter `status` 置 `定稿`（FR 编号「定稿后不复用、不重排」自此刻起算）；报告 frontmatter `verdict` 必须与正文「交付结论」一致。存量 PRD 缺 frontmatter 时，先按正文「文档信息」誊抄补全（只加 frontmatter 不动正文）再置值
 
 ## 评审重点
 
