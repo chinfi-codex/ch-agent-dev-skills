@@ -6,7 +6,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
 - 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-module` 与 `feature-slug`——被派发方全靠落盘文件工作
-- 模型档位：被派发对话默认取宿主可用范围内**经济性最高的一档**（`agents-config.dispatch.model: economy`，比主会话低一档）；仅票被标记高风险 / 复杂时显式升级
+- 模型档位：被派发对话默认取 `agents-config.dispatch.model` 优先级清单中**第一个当前可用的宿主模型**（清单由 `/setup-dev` 枚举宿主可选模型后由人确认，推荐首选为经济性最高的一档）；仅票被标记高风险 / 复杂时显式升级（升级目标也取自该清单）
 
 ### 宿主适配
 
