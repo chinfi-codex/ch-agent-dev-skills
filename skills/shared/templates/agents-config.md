@@ -17,8 +17,9 @@ dispatch:
   executor: subagent   # subagent = 主会话通过宿主 agent 的新开独立对话能力执行 /implement
                        # （宿主无关：Claude Code = Task，ZCode = Agent，Codex / WorkBuddy =
                        #  各自的新会话 / 派发机制；宿主无此能力时按派发协议兜底）
-  model: economy       # 被派发对话默认模型：当前宿主可用范围内经济性最高的一档（低主会话一档）；
-                       # 仅高风险 / 复杂票显式升级
+  # 被派发对话模型：当前宿主 agent 可选模型清单中的具体模型，按人确认的优先级排序——
+  # 派发时取清单中第一个当前可用的模型，首选不可用按序降级；高风险 / 复杂票显式升级（升级目标也取自本清单）
+  model: [<setup-dev 时枚举宿主可选模型、由人确认优先级后填写具体模型名；推荐首选取可选范围内经济性最高的一档>]
 
 # 质量门命令
 quality-gate:
@@ -31,7 +32,9 @@ quality-gate:
 #   light  = DoD 验收命令 + fast                （单点小改：文案 / 阈值 / 默认值 / 局部样式）
 #   scoped = light + 关联测试选择                （改动集中在 1-2 个模块的常规票）
 #   full   = scoped + 完整测试套件               （高风险票与集成票）
-# 不变式（任何档位不得缩水）：红线检查 / DoD 验收命令 / 独立评审 / 每 feature 至少一次 full（集成票）
+# 不变式（任何档位不得缩水）：红线检查 / DoD 验收命令 / 独立评审 / 每 feature 至少一次 full——
+# 唯一例外是集成票的「模块隔离认定」（见 verify-policy 集成票条）：认定成立时按 module-scoped 跑涉及模块的全闭包，
+# 不再机械全仓；认定不成立或有疑义时 full 不变。
 verify-policy:
   light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
   scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full；拆票时预估 > 此值 → 票必须再拆（/issue-split 粒度红线）
@@ -53,13 +56,25 @@ verify-policy:
   # 漂移规则（实测 diff 超出票的 declared-scope 时）：
   #   仍同模块、未触发 escalate-triggers、未超阈值 → 不升档，impl-log「漂移与升档记录」登记漂移文件清单即可
   #   触发 escalate-triggers 或超 scoped-max-* 阈值 → 升档（只升不降），立即按新档补验证并在 evidence 记录
-  # 集成票：DAG 中无后继（没有其他票 blocked-by 它）的票一律 verify-tier: full
-  # repo-level 平移：C 类仓可在计算结果上再降一档（下限 light）；B 类按规则执行；A 类不进 /implement
+  # 集成票：DAG 中无后继（没有其他票 blocked-by 它）的票一律 verify-tier: full——
+  #   唯一例外「模块隔离认定」（前提：selection 具备反向闭包能力即 impact-map；dir-map 仓无闭包工具、
+  #   无法机器判空，不得做隔离认定，集成票仍 full）：本 feature 全部票的生产 diff 都落在同一叶子模块内
+  #   （该模块不被本 feature 外的生产代码 import，按 selection 的反向闭包判定为空）、未命中任何 full 级触发器、
+  #   不触碰共享模块 / 公共接口 → 集成票按 module-scoped 跑该模块的全闭包（不是只跑本票 diff），
+  #   并在 evidence 记录隔离判定依据（反向闭包为空 + 涉及模块清单）。
+  #   判定有疑义（闭包工具不全 / 依赖图有动态边）→ 仍 full。隔离认定的代价是把「跨模块回归」
+  #   推迟到下一次非隔离 feature 的集成票，故该认定必须可机器复核，不得凭感觉。
+  # repo-level 平移：C 类仓可在计算结果上再降一档（下限 light）；B 类按规则执行；A 类不进 /implement。
+  #   C 类仓集成票若被降为 light / scoped，须在本 feature 末票交付时按 module-scoped 跑一次
+  #   涉及模块的全闭包（模块隔离的等价安全网），记录同模块隔离认定。
   selection: dir-map        # scoped 档的关联测试选择机制：
                            #   dir-map    = 目录约定映射（源码路径 → 测试路径，零基建；看不见跨模块影响面，只配低风险 scoped 票）
                            #   impact-map = coverage / 静态导入闭包反查（diff → 依赖这些模块的测试，含调用方模块的测试；
                            #                hub 形态仓库必选本档——dir-map 会漏掉沿 import 链传导的影响面，给出全绿假信号；
                            #                scoped+ 级触发器处理也依赖本档的闭包）
+                           #   module-scoped = 按需求涉及模块选择该模块的全部测试（模块目录映射 + 该模块的反向闭包测试），
+                           #                不跑全仓——用于「模块隔离认定」成立的集成票与 C 类仓末票；
+                           #                选择面比 scoped 宽（整个模块而非本票 diff）、比 full 窄（不跨无关模块）
   # 先在失败归因：套件基线长期存在与本票无关的失败时，档位门只对可归因于本票 diff 的失败判红
   attribution: known-failures
     # known-failures（推荐默认）：维护落盘的既有失败清单（测试名 + 失败签名 + 首录日期 + 来源 evidence）；
@@ -115,8 +130,8 @@ gitlab-ci: manual
 
 ## 说明
 
-- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底
+- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
-- 评审与实现的被派发对话模型默认取 `dispatch.model`（经济性最高档）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
+- 评审与实现的被派发对话模型默认取 `dispatch.model` 清单中第一个当前可用的宿主模型（清单由 `/setup-dev` 枚举宿主可选模型后由人确认优先级）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护
 - 本文件不进 GLOSSARY；术语口径仍以 `./docs/GLOSSARY.md` 为准

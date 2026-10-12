@@ -4,7 +4,8 @@ version: 0.5.0
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally auto-dispatched by the
-  main session as a fresh host-agent conversation (economy-tier model):
+  main session as a fresh host-agent conversation (model per the
+  agents-config dispatch.model priority list):
   TDD in a dedicated worktree, per-round scope-drift checks with one-way
   verify-tier escalation, on-disk evidence for the ticket's tier gate,
   then independent /ai-review, BLOCKER fixes, and the merge request made
@@ -49,7 +50,7 @@ allowed-tools:
 运行身份：
 
 - 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
-- 被派发对话的模型取 `agents-config.dispatch.model`（默认 economy，比主会话低一档）
+- 被派发对话的模型取 `agents-config.dispatch.model` 优先级清单中第一个当前可用的宿主模型
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
 ---
@@ -99,7 +100,7 @@ allowed-tools:
 - **按档位出证据**（档位 = 票 `verify-tier`，发生升档则按升档后档位；规则见 `agents-config.verify-policy`）：
   - `light`：DoD + fast
   - `scoped`：DoD + fast + 关联测试——**选择集从最终 diff（merge-base..HEAD）重算**：滤出生产代码文件，按 `verify-policy.selection`（dir-map 目录约定映射 / impact-map 导入闭包反查）换算受影响测试集；漂移碰到的文件天然进入选择集，无需改票；选择集占全套 ≥ 50% 时在 evidence 记录占比（评审信号），不因此升档
-  - `full`：DoD + fast + scoped + 完整测试套件（full 档票与集成票必跑）
+  - `full`：DoD + fast + scoped + 完整测试套件（full 档票与集成票必跑）。集成票若票面已做「模块隔离认定」（feature 全程只动不被外部依赖的叶子模块），按 module-scoped 跑涉及模块的全闭包替代全仓，evidence 记录隔离判定依据（反向闭包为空 + 模块清单）；认定有疑义或前序票 diff 实际漂出该模块 → 仍跑 full
 - **先在失败归因按 `verify-policy.attribution` 执行**：`known-failures` 模式下失败先比对落盘的既有失败清单，在清单且签名一致 = 先在失败（显式列出，不进 `all-passed` 分母）；不在清单或签名不符的单项才补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败
 - 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
 - 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
@@ -109,7 +110,7 @@ allowed-tools:
 
 - 票置 `in-review`；push 分支
 - **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审对话模型默认取 `dispatch.model` 的 economy 档）：
+- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审对话模型默认取 `dispatch.model` 清单的首选可用项）：
   - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec；保留评审对话句柄（如 agentId），供 Step 7 复审续接
   - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
   - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
