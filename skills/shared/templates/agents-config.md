@@ -17,9 +17,16 @@ dispatch:
   executor: subagent   # subagent = 主会话通过宿主 agent 的新开独立对话能力执行 /implement
                        # （宿主无关：Claude Code = Task，ZCode = Agent，Codex / WorkBuddy =
                        #  各自的新会话 / 派发机制；宿主无此能力时按派发协议兜底）
-  # 被派发对话模型：当前宿主 agent 可选模型清单中的具体模型，按人确认的优先级排序——
-  # 派发时取清单中第一个当前可用的模型，首选不可用按序降级；高风险 / 复杂票显式升级（升级目标也取自本清单）
-  model: [<setup-dev 时枚举宿主可选模型、由人确认优先级后填写具体模型名；推荐首选取可选范围内经济性最高的一档>]
+  # 被派发对话模型：按宿主 agent 分别配置（各宿主可选模型阵容不同），每个宿主条目由人在 /setup-dev 确认。
+  # 主会话按自身所在宿主取对应条目；当前宿主无条目 → 停下请人确认后补写，不跨宿主套用、不自行挑选。
+  # 按票分档：default 用于 light / scoped 票的实现与评审；escalated 用于 full 档票、集成票、高风险票，
+  #   以及评审达 review-round-alert 轮后的续修。清单内按优先级排序，取第一个当前可用的模型。
+  model:
+    <宿主名，如 claude-code / zcode / codex>:
+      default: [<宿主具体模型，推荐经济性最高、速度快的一档>]
+      escalated: [<宿主具体模型，推荐能力最强的一档>]
+      reasoning-effort: {default: medium, escalated: high}   # 宿主支持推理强度时填写，否则删去
+  parallel-max: 2      # frontier 中 declared-scope 互不相交的票可并行派发的上限；1 = 串行
 
 # 质量门命令
 quality-gate:
@@ -83,6 +90,25 @@ verify-policy:
     #   清单由 full 档执行顺带刷新（全量结果即新基线），条目修复后销记
     # two-sided（保守档）：每条失败 branch / base 同命令各跑一遍对照——归因成本翻倍（全套 ×2），
     #   仅套件小或清单机制未建时使用
+  # 测试职责边界：AI 交付门只保证功能实现度；性能与展示由人工确认
+  gate-scope:
+    categories-file: null     # 测试分类清单路径（仓库内，测试名 → 类别）；未配置时全部用例视为 functional
+    non-gating: [perf, display]
+      # perf    = 断言墙钟 / 吞吐阈值或以性能为主要目的的用例与 DoD
+      # display = 断言渲染样式 / CSS / 版式 / 展示字节（报告「内容是否正确」——计数、结论、章节存在——属功能，仍在门内）
+      # non-gating 类：交付时在最终 commit 执行一次并落盘原始输出，不阻塞、不进 all-passed 分母、不因噪声反复重跑；
+      #   结果列入 evidence「人工确认项」，由人在验收时判定。阈值不达标不是 BLOCKER，除非同时伴随功能错误
+    env-skip: true            # 分类清单中声明了外部依赖（环境变量 / 外部服务）的用例，依赖缺失时显式 skip，
+                              #   evidence 列出 skip 清单与缺失项；不算失败（免归因），也不算通过
+  # full 次数：同一张票的 full 只在「评审通过后的最终 commit」上跑一次
+  full-runs: once-at-final
+    # Step 5 先跑 DoD + fast + scoped 进评审；评审通过后在最终 commit 跑一次 full（full 档票 / 集成票）
+    # 评审回修轮：只跑 DoD + fast + 回修 diff 的 scoped，不重跑 full
+    # full 失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 最终 commit 再跑一次 full
+    # rebase / 合并 main：无冲突且本票改动文件 blob 不变 → 复用证据；有冲突 → 跑冲突文件闭包的 scoped
+  # 基线冻结：票开工时固定 base（记 impl-log），实现与评审期间不追集成分支；只在合入前 rebase 一次
+  #   （无冲突且本票文件 blob 不变 → 复用证据；有冲突 → 冲突文件闭包 scoped）
+  base-freeze: true
   # 执行形态（耗时契约，档位语义不因此缩水）：
   #   - 独立用例型套件应并行执行（并发度按机器自定；共享端口 / 文件等资源的用例标记 serial 除外）
   #   - 单项超时分层：默认上限 + slow 白名单（实测头部慢项登记）——避免个别卡死项烧满统一上限
@@ -90,6 +116,18 @@ verify-policy:
 
 # 自修复轮次上限（构建失败或评审 BLOCKER 的回修循环，超出打回人工）
 max-fix-rounds: 99
+# 评审轮次预警：同票评审达到此轮数 → 主会话介入判断（拆票 / 缩范围 / 升级模型），不是硬停
+review-round-alert: 3
+
+# 预授权机械刷新：随生产文件变更必然联动、可由机器证明「只动这些字段」的派生物，
+# 刷新不视为「修改既有测试 / 红线绕过验收」，无需停下等人授权；须在 impl-log 逐文件登记，评审独立复核 diff 只含所列字段
+mechanical-refresh:
+  - "<路径 glob> :: <JSON 指针或生成块标记>"   # 例：golden/**/*.json :: /fingerprint ；SKILL.md :: <!-- generated:task-catalog -->
+
+# 产物体积预算（证据瘦身）：超出由 fast 档 lint 报错
+artifact-budget:
+  impl-log-max-lines: 120      # impl-log / evidence 正文行数上限；详细过程放 raw 文件，正文只留结论与指针
+  impl-dir-max-mb: 20          # impl/<issue-id>/ 体积上限；中间轮原始产物只留最终轮
 
 # 红线：命中任一 glob 即停止并报告，不得绕过
 # 注意：redlines 是「不允许改」；ocr exclude 是「不送审」，两者不可互替
@@ -132,6 +170,6 @@ gitlab-ci: manual
 
 - 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
-- 评审与实现的被派发对话模型默认取 `dispatch.model` 清单中第一个当前可用的宿主模型（清单由 `/setup-dev` 枚举宿主可选模型后由人确认优先级）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
+- 评审与实现的被派发对话模型取 `dispatch.model.<当前宿主>` 按票档位取 default / escalated 清单的第一个当前可用模型（各宿主条目由 `/setup-dev` 逐宿主请人确认）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护
 - 本文件不进 GLOSSARY；术语口径仍以 `./docs/GLOSSARY.md` 为准

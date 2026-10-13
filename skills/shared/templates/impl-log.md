@@ -1,5 +1,8 @@
 # Impl Log：<issue-id> <title>
 
+> 体积预算：正文 ≤ `artifact-budget.impl-log-max-lines` 行，只写结论、表格与 raw 文件指针；过程日志、完整输出放 `raw/`，中间轮只留最终轮。
+
+
 | 项 | 内容 |
 |---|---|
 | feature-slug | `<feature-slug>` |

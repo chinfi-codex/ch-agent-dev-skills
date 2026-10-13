@@ -1,5 +1,8 @@
 # Evidence：<issue-id>
 
+> 体积预算：正文 ≤ `artifact-budget.impl-log-max-lines` 行，只写结论、表格与 raw 文件指针；过程日志、完整输出放 `raw/`，中间轮只留最终轮。
+
+
 ```yaml
 issue: <issue-id>
 feature-slug: <feature-slug>
@@ -7,6 +10,7 @@ commit: <完成时 HEAD 的 commit hash>
 branch: feat/<feature-slug>-<issue-id>
 verify-tier: light|scoped|full      # 票 frontmatter 标注的档位
 tier-executed: light|scoped|full    # 实际执行的档位（发生升档时高于票标注值，须附升档原因）
+full-commit: <跑 full 的 commit；须等于 commit，或与之差异仅为不改本票文件 blob 的 rebase>  # full 档才填
 all-passed: true|false    # 全部验收命令与档位门退出码为 0 时才允许 true
 generated: YYYY-MM-DD HH:MM
 ```
@@ -38,3 +42,8 @@ generated: YYYY-MM-DD HH:MM
 - full 档（full 档票与集成票必填）：`<quality-gate.full>` → 退出码 / 耗时；集成票按「模块隔离认定」执行时改记：涉及模块清单 + 反向闭包为空的判定依据 + module-scoped 命令与退出码 / 耗时
 - 先在失败归因（套件存在与本票无关的既有失败时必填）：归因方式（`known-failures` / `two-sided`）；known-failures 模式下记录清单版本或路径、命中清单的先在失败项（测试名 + 签名一致判定）、清单外补跑 base 侧的单项清单与对照结果；two-sided 模式逐条记录 branch / base 退出码与原始日志名。先在失败显式列出但不进 `all-passed` 分母
 - 升档记录（如有）：触发原因（escalate-triggers 命中项及其级别 / 超 scoped-max-* 阈值；scoped+ 级另记可枚举性判定依据）+ 升档时间点
+
+## 人工确认项（non-gating，不进 all-passed）
+
+- 性能 / 展示类结果：命令、原始输出路径、与参考值对比（只陈述，不判通过）
+- env skip 清单：用例名 + 缺失依赖

@@ -31,7 +31,7 @@ allowed-tools:
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
 
-默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`；宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制），并监督执行直到完成合并；被派发对话模型从当前宿主可选模型清单中选取（`dispatch.model` 为具体模型的优先级清单，Step 1 由人确认指定，推荐首选为可选范围内经济性最高的一档）；评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；质量门日常只跑 fast 档，交付验证按票的 verify-tier 分档（light / scoped / full，集成票强制 full）。
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`；宿主无关：Claude Code 用 `Task`、ZCode 用 `Agent`，Codex / WorkBuddy 等用各自的新开对话机制），并监督执行直到完成合并；被派发对话模型按宿主分别配置（`dispatch.model.<宿主>` 分 default / escalated 两档具体模型清单，Step 1 逐宿主由人确认）；评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；质量门日常只跑 fast 档，交付验证按票的 verify-tier 分档（light / scoped / full，集成票强制 full）。
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
@@ -45,7 +45,7 @@ allowed-tools:
 - 规则：`<repo>/.opencodereview/rule.json` 是否已存在
 - 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/`
 - 测试选择基建：pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力是否可用——决定 `verify-policy.selection` 推荐 dir-map 还是 impact-map
-- 宿主可选模型：枚举当前宿主 agent 可供派发选用的模型清单（宿主有模型列举能力时直接取用；无列举能力时按人对该宿主阵容的了解列出候选）——作为 `dispatch.model` 的候选池
+- 宿主可选模型：**逐个**枚举本机已安装、会用来跑 dev 流程的宿主 agent（如 Claude Code / ZCode / Codex，按 `~/.claude`、`~/.zcode`、`~/.codex` 等配置目录存在判断）各自可供派发选用的模型清单（宿主有模型列举能力时直接取用；无列举能力时按人对该宿主阵容的了解列出候选）——作为 `dispatch.model.<宿主>` 的候选池
 
 探查结果先回显给人，作为后续推荐依据。内网 GitLab 已确认可用（2026-09-09），tracker 默认推荐 `gitlab`；评审与执行默认都在当前 agent 内完成（delegate 评审 + 宿主新开对话派发），CI 接入是可选项而非前提。
 
@@ -59,10 +59,11 @@ allowed-tools:
 4. **main-branch**：默认取探查结果
 5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
 6. **quality-gate**：fast / scoped / full 三档命令，从项目实际测试框架推导后请人确认。默认规则写进配置注释：**日常开发（实现、自修复每一轮）只跑 fast；交付验证按票 `verify-tier` 分档——light = DoD + fast，scoped = 另加按最终 diff 换算的受影响测试集，full = 完整套件（full 档票与集成票必跑）**
-7. **verify-policy**：档位阈值与选择机制——`light-max-files`（默认 3）/ `scoped-max-files`（默认 10）/ `scoped-max-loc`（默认 400）请人按仓库体量调整；`escalate-triggers` 默认五项、分两级（full 级：公共接口签名 / 数据迁移 schema / 鉴权权限——直接全量；scoped+ 级：共享模块 / 红线邻接——先判影响面可枚举性，可枚举走 scoped 全闭包，不可枚举才 full）请人增删；`selection` 按探查结果推荐——无测试选择基建用 `dir-map`（零基建但看不见跨模块影响面），有 testmon / coverage / 静态导入闭包基建推荐 `impact-map`（hub 形态仓库必选）；集成票「模块隔离认定」与 C 类仓末票用 `module-scoped`（按需求涉及模块跑该模块全闭包，不跨无关模块）；`attribution` 默认 `known-failures`（落盘清单比对，仅清单外单项补跑 base 侧），保守可选 `two-sided`（每条失败双侧对照，成本翻倍）；执行形态（并行 / 超时分层 / slow 白名单）按套件实测写入配置注释
+7. **verify-policy**：档位阈值与选择机制——`light-max-files`（默认 3）/ `scoped-max-files`（默认 10）/ `scoped-max-loc`（默认 400）请人按仓库体量调整；`escalate-triggers` 默认五项、分两级（full 级：公共接口签名 / 数据迁移 schema / 鉴权权限——直接全量；scoped+ 级：共享模块 / 红线邻接——先判影响面可枚举性，可枚举走 scoped 全闭包，不可枚举才 full）请人增删；`selection` 按探查结果推荐——无测试选择基建用 `dir-map`（零基建但看不见跨模块影响面），有 testmon / coverage / 静态导入闭包基建推荐 `impact-map`（hub 形态仓库必选）；集成票「模块隔离认定」与 C 类仓末票用 `module-scoped`（按需求涉及模块跑该模块全闭包，不跨无关模块）；`attribution` 默认 `known-failures`（落盘清单比对，仅清单外单项补跑 base 侧），保守可选 `two-sided`（每条失败双侧对照，成本翻倍）；执行形态（并行 / 超时分层 / slow 白名单）按套件实测写入配置注释；`gate-scope` 默认 non-gating = perf + display（AI 门只保功能，性能 / 展示归人工确认），有外部依赖用例时请人指定测试分类清单路径；`full-runs` 默认 `once-at-final`
 8. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
 9. **max-fix-rounds**：默认 99，可调
-10. **dispatch.model**：被派发对话模型——把 Step 0 枚举的宿主可选模型清单列给人，由人确认指定具体模型并按优先级排序（推荐项 A = 可选范围内经济性最高的一档为首选）；取值只能是清单内的宿主具体模型，不落抽象档位名；高风险 / 复杂票的升级目标也从确认后的清单取
+10. **dispatch.model**：被派发对话模型——**按宿主逐个确认**：把 Step 0 枚举的每个宿主的可选模型清单列给人，由人为该宿主分别指定 `default`（light / scoped 票，推荐项 A = 经济性最高、速度快的一档）与 `escalated`（full / 集成 / 高风险票及评审预警后，推荐能力最强的一档）两档优先级清单，宿主支持时一并确认推理强度；取值只能是该宿主清单内的具体模型，不落抽象档位名，不跨宿主套用；`parallel-max` 默认 2
+11. **review-round-alert / base-freeze / mechanical-refresh / artifact-budget**：默认 3 / true / 空清单 / 120 行 + 20MB；mechanical-refresh 按仓库实际的金样本指纹、生成块请人列出
 
 ### Step 2：写配置与种子
 
@@ -88,5 +89,5 @@ allowed-tools:
 - 只写配置与种子：`./dev/agents-config.md`、`.gitignore` 一行、`.opencodereview/rule.json`、AGENTS.md / CLAUDE.md 说明节；`ci/ocr-review.gitlab-ci.yml` 与 `.gitlab-ci.yml` 的 include 节仅在 ci 模式写；不写任何业务代码
 - 不替人决定 repo-level；不代替人在 GitLab 后台设变量；api_key 只进 `ocr config`（或人手填），不写进任何入库文件
 - `delegate` 是默认模式而非降级，无需 LLM 端点即可落；`ocr llm test` 不通过不得把 `ocr.mode` 落为 `local` / `ci`
-- `dispatch.model` 只写 Step 1 人确认的宿主具体模型（按优先级排序），不写抽象档位名；宿主可选模型变化后由人重跑本 skill 或直接修订配置
+- `dispatch.model` 按宿主分条，只写 Step 1 人逐宿主确认的具体模型（default / escalated 两档，按优先级排序），不写抽象档位名；新增宿主或宿主可选模型变化后由人重跑本 skill 或直接修订配置
 - 配置写完后不进入任何后续 skill

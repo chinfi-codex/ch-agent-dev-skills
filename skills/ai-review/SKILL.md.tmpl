@@ -87,8 +87,9 @@ allowed-tools:
 
 - `ocr delegate preview --format json` 取可评审文件清单与模式元数据；`ocr delegate rule --format json <paths...>` 取各文件规则
 - 以**独立对话**（宿主新开对话机制：Claude Code `Task`、ZCode `Agent`，Codex / WorkBuddy 等用各自等价机制；新实例、不共享实现会话上下文）执行逐文件评审：diff（按 preview 给的 merge_base）+ 规则组 + 票 DoD，输出 path/content/start_line/end_line/category/severity 结构
-- 评审对话模型：默认按 `agents-config.dispatch.model` 优先级清单取第一个当前可用的宿主模型；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
+- 评审对话模型：取 `agents-config.dispatch.model.<当前宿主>`，与被评审票同档（default / escalated）的第一个当前可用模型；评审严格性由规则组、票 DoD 与红线复核保证，不靠模型档位
 - 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
+- **首轮穷尽**：首轮评审一次审完整个 diff、列全所有 BLOCKER，不按批次冻结分段评审、不把可见问题留到后续轮
 
 ### Step 3：红线、档位与清理复核（第二双眼睛，确定性检查）
 
@@ -101,6 +102,8 @@ allowed-tools:
 - 实测范围命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值，而票标的是低档且无升档记录 → **BLOCKER（critical）**：该升没升
 - evidence 的 `tier-executed` 低于票 `verify-tier`，或 light / scoped 票宣称跑过 full → BLOCKER（critical）：档位虚标
 - 集成票（无后继票）未标 / 未跑 full → BLOCKER（critical）
+- `full-runs: once-at-final` 下评审时 full 尚未执行属正常（最终 commit 再跑），不报；回修轮只跑回修 diff 的 scoped 属正常
+- 性能阈值未达标、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 - 漂移已登记、未触发升档条件 → 不报，属正常小漂移
 
 **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存。
@@ -114,7 +117,7 @@ allowed-tools:
 ### Step 5：结论、返回与校准
 
 - 结论：无 BLOCKER → `pass`；仅 medium / low → `pass-with-notes`；任一 BLOCKER → `blocked`
-- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：仍按原固定点取全量 diff 复核、聚焦回修增量，Step 3 确定性复核重跑；同日同票报告原地追加「复审记录」节并把头部「结论」更新为最新一轮（轮次日志属原地更新，不适用新文件规则），收口方以头部结论为准
+- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：**范围 = 回修增量 diff + 上轮 BLOCKER 是否闭合 + 回修引入的回归**，Step 3 确定性复核重跑；在上轮已审且本轮未改动的代码中新发现的 high，标「首轮漏报」并默认转后续票（记 Medium 遗留 + 建议票），仅 critical、红线命中、数据 / 判定结果错误仍阻塞；复审结果写成独立短报告 `...-review-<issue-id>-rN-YYYY-MM-DD.md`（只含本轮 BLOCKER 表与闭合状态），原报告头部「结论」更新为最新一轮并链接各轮报告，收口方以头部结论为准
 - 报告路径与结论返回调用方（`/implement` 被派发对话或主会话），供回修或主会话合并判断
 - 标准失配校准：若连续多轮首轮全 PASS / 全 BLOCK，提示人用已合并 MR 回测误报漏报，再修订 `.opencodereview/rule.json` 的 `rules`；反复出现的判据沉淀进仓库 `REVIEW.md`（无则提示人创建）
 
