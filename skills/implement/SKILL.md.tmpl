@@ -105,6 +105,7 @@ allowed-tools:
 - 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
 - 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
 - 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 轮次记录
+- 证据引用的捕获物（截图 / 页面捕获 / 原始日志）落主工作区 `impl/<issue-id>/` 同目录并按「留存与体积控制」执行：中间轮只留最终轮，可重下载缓存与 merge 中间物不留
 
 ### Step 6：建 draft MR 并触发评审
 
@@ -129,7 +130,7 @@ allowed-tools:
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
   - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列收尾：按分支名发现 worktree → `git worktree remove`（拒删则 `--force`）→ `git worktree prune` → 删分支 → `rmdir .worktrees 2>/dev/null || true`
+  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 后再合；仍无法自动解决 → 票置 `needs-human`，停下与人确认，不硬合
 
 ### Step 9：收尾报告
