@@ -31,11 +31,13 @@ allowed-tools:
 
 {{GLOSSARY}}
 
+{{ASK_FORMAT}}
+
+{{GRILLING}}
+
 {{COMPLETION_STATUS}}
 
 {{DOC_WRITING_RULES}}
-
-{{GRILLING}}
 
 # /ceo-office —— 真正的 CEO Office
 
@@ -182,10 +184,7 @@ allowed-tools:
 - **目前不足以判断**
 
 ### Step 4：拷打与追问
-按「拷打规则（Grilling）」执行轮次制拷打。先把未决问题归类为：
-- `可假设继续`
-- `必须提问后继续`
-- `仅记录为低优先级风险`
+按「拷打规则（Grilling）」执行轮次制拷打，未决问题按「提问格式与对人表达」归类（`可假设继续` / `必须提问后继续` / `仅记录为低优先级风险`）。
 
 凡是影响商业模式 / 经济模型是否成立、市场是否值得做、增长路径是否可信、当前 top-level 决策是否清晰、关键用户 / 约束 / 资源是否明确的问题，都默认是 `必须提问后继续`。
 
@@ -244,7 +243,7 @@ allowed-tools:
   - Markdown 源：`decision-card-YYYY-MM-DD.md`，产出前必须先读模板 `shared/templates/decision-card.md`（相对本 SKILL.md 为 `../shared/templates/decision-card.md`）
   - 可视化渲染：同名 `decision-card-YYYY-MM-DD.html`，产出前必须先读模板 `shared/templates/decision-card.html`，按模板注释直接填写占位符，不执行任何命令
   - md 是源，html 是渲染，两文件内容必须逐字段一致
-- **对话回显**：产出后在对话中内嵌完整卡块，末尾列出选项，等待一词批复（A / B / C 或 批准 / 调整 / 搁置）
+- **对话呈现**：产出后在对话中内嵌完整卡块，末尾列出选项，等待一词批复（A / B / C 或 批准 / 调整 / 搁置）
 - **状态流转**：状态取值 待批准 / 已批准 / 已调整 / 已搁置；收到批复后原地更新两文件的状态字段——这是 dated-file 约定对决策卡的唯一例外；判断内容本身变化时，新建当日新卡，不改旧卡
 - **可选渲染**：宿主具备浏览器 / 截图能力时，可将 html 截图导出图片用于转发推送；非必需，不阻塞产出
 
@@ -270,7 +269,7 @@ allowed-tools:
 
 ## 六、输出要求
 
-结束时回显七项：
+结束时向用户汇报七项——先用一句话说本轮最重要的判断，再逐项带出，用商业语言说人话，不贴字段名清单、不用流程黑话：
 
 1. **mode**：FOCUS / EXPANSION / HOLD / REDUCTION
 2. **完成状态**：按「完成状态协议」；讨论未收敛时用 `继续讨论中`

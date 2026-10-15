@@ -25,13 +25,13 @@
 
 匹配结果三类：
 
-- `EXACT_MATCH`：唯一高置信命中——回显「当前需求已匹配到 <feature-module>/<feature-slug>（<feature_name>）」后继续
+- `EXACT_MATCH`：唯一高置信命中——用一句大白话告诉用户当前需求定位到了哪个模块下的哪个需求（中文名），再继续
 - `AMBIGUOUS_MATCH`：多个合理候选——单问题确认，不自行选择
 - `NO_MATCH`：无可接受候选——`/pd-plan` 可作新需求处理（先确认 `feature-module` 归属，用户最终确认后再确认新 `feature-slug`）；`/prd`、`/pd-review` 不得擅自新建模块或需求目录，返回 `需补充上下文` 或 `阻塞`
 
-匹配到存量平铺目录（`features/` 直下一级 slug 目录、无模块层）时：可读可用，回显迁移建议（GLOSSARY 登记 + `git mv` 移入模块目录），不自动迁移；新需求一律落两级结构。
+匹配到存量平铺目录（`features/` 直下一级 slug 目录、无模块层）时：可读可用，用大白话向用户说明这是旧结构、建议怎么迁（登记进术语表 + 移动目录），用户同意后再动，不自动迁移；新需求一律落两级结构。
 
 ## `feature-summary` 使用规则
 
 - `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
-- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；回显归档信息时三者同时回显
+- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；向用户说明文档归档位置时三者一起用自然句说清，不贴占位符
