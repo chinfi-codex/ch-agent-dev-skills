@@ -1,6 +1,6 @@
-# 需求说明：full 回归降频与基线治理（每日定时回归方案）
+# 需求说明：full 回归降频与基线治理（C+D+F 三层方案）
 
-> 状态：待实现 · 提出：2026-10-15 · 方案改订：2026-10-15（merge-train → 每日定时回归，补强点已裁决）· 仓库：ch-agent-dev-skills（skill 规则仓）
+> 状态：待实现 · 提出：2026-10-15 · 方案改订：2026-10-15（merge-train → 每日回归 → C+D+F；R1 已落地，R2 待实现）· 仓库：ch-agent-dev-skills（skill 规则仓）
 > 姊妹需求：[req-host-test-budget.md](req-host-test-budget.md)（本机测试算力预算，已实现）；本需求的每日回归经 `test_slots.py run` 包装执行
 
 ## 1. 背景与数据
@@ -17,35 +17,37 @@ dev 流水线（/issue-split → /implement → /ai-review → 主会话合并�
 
 结论：full 按票执行，成本高、收益低；基线一直红，又把每次 full 都变成了归因任务。
 
-**方案改订记录**：初版 R1 为 merge-train（每合入 K 张票批量 full + tree hash 去重）。2026-10-15 改订为每日定时回归——merge-train 的批量状态机 / tree 去重 / 集成票门语义复杂度高，每日方案机制最小（定时器 + 槽位 + 落盘 + quarantine）；代价是失败发现窗口从「K 张合入」放宽到「≤ 1 个工作日」，且 3–4% 的命中率是在 scoped 先滤过一遍的流水线上测得的，票内收敛后每日 full 的新失败率会高于此数——失败是延迟发现，不是不发现。
+**方案改订记录**：初版 R1 为 merge-train（每合入 K 张批量 full）；二版改为「每日定时回归为唯一套件级回归」并取消集成票 full。三版（当前，已落地）对比各维度后定为 C+D+F：
+
+| 方案 | 结论 |
+|---|---|
+| A 每票 full（原状） | 弃：97% 的运行一无所获，白天抢 CPU |
+| B 每合入 K 张 | 弃：仍在白天跑；多 feature 交错时定位范围不比 D 清楚 |
+| **C feature 收尾（集成票）** | **保留**：feature 关闭前整体验证，责任明确；单用时看不到 feature 之间的回归 |
+| **D 每工作日定时** | **新增**：补 C 的跨 feature 漏洞，夜间 / 低负载时段跑；延迟最多 1 天 |
+| E 空闲触发 | 作为 D 漏跑的兜底（`max-gap-days`） |
+| **F 按风险（迁移 / 鉴权）** | **保留票内 full**：出错代价高，不等 D |
+| G 发布前 | 不单独采用 |
 
 ## 2. 目标
 
-1. 票内交付门收敛为 DoD + fast + 小闭包 scoped；套件级回归从「按票」降为「main tree 每个工作日至少一次 full」
-2. 先在失败不再产生 exit 1，full 退出码重新有意义（quarantine）
-3. 定档 / 升档原因可统计（`tier-reason`），票内 scoped 的占比阈值按槽位落地后的实测校准
+1. 票内 full 只留给迁移 / 鉴权、超阈值和集成票；跨 feature 回归由 main 每工作日一次 full 兜底（已落地）
+2. 先在失败不再产生 exit 1，full 退出码重新有意义（quarantine，R2，待实现）
+3. 定档 / 升档原因可统计（`tier-reason`，字段已落地，统计待实现）
 
 非目标：本机并发 / 算力调度（姊妹需求，已实现）；评审流程（已在 472e568 完成）。
 
 ## 3. 需求
 
-### R1 票内门收敛 + 每日定时 full
+### R1 套件级回归三层（C+D+F）——已落地（见本次提交）
 
-**票内执行**：
-
-- 所有票：DoD + fast；独立评审照旧（评审不跑套件，现状不变）
-- scoped：选择集占全套 ≤ 30% 时票内照跑（全闭包）；> 30% 时不跑票内，留给每日 full。阈值进 config（`daily-regression.scoped-in-ticket-max`，默认 0.30），槽位落地后按实测校准
-- **例外，保留票内 full**：命中 full 级触发器「数据迁移 / schema」「鉴权 / 权限」的票，评审通过后的最终 commit 跑一次（once-at-final 语义对例外票不变）
-- 集成票不再强制票内 full；「模块隔离认定」机制一并移除（其职责被 30% 线 + 每日 full 覆盖）。「每 feature 至少一次 full」不变式改写为「main tree 每个工作日至少一次 full」——它就是定时任务的目标节奏，不做票级门、不阻塞单票合入、不设监控告警
-
-**每日 full（定时任务）**：
-
-- 触发 = 定时任务，只此一层：macOS 用 launchd `StartCalendarInterval`（睡眠错过会在唤醒时补跑一次；cron 可作 fallback）。不做补跑检查、不做时效告警——机器全天睡眠就跳过当天，漏跑容忍
-- 频率上限：每天最多一次，按日期去重（当日已有记录不再跑；当日失败后也不当日重跑——修复验证靠责任票的 scoped 与次日 full）
-- 执行：专用 worktree（`.worktrees/daily-full`）checkout main HEAD，经 `test_slots.py run` 包装（遵守整机预算，后台执行轮询）；落盘 `dev/full-runs/<date>-<tree8>.md`（tree hash、自上次通过以来的合入清单、结果、归因、耗时、jobs / queue-seconds）
-- 出现清单外新失败：在「上次通过 tree..本次 tree」合入区间二分定位（每步只跑失败项，不跑整套）→ 责任票置 `needs-human`，由原实现对话回修；二分期间合入不暂停（乐观合并，窗口即一个工作日）
-- 新增薄脚本 `skills/shared/scripts/daily_full.py`：更新 worktree → test_slots 包装跑 full → 原始输出与摘要落 `dev/full-runs/`、同日去重；归因 / 清单刷新 / needs-human 路由由主会话或人读结果后执行，不进脚本
-- 定时器的安装 / 改时点进 /setup-dev（生成 launchd plist 或 cron 行，人确认后安装）
+- **票内 full 只剩三类**：full 级触发器（数据迁移 / schema、鉴权 / 权限）、实测超 `scoped-max-*` 阈值、集成票（DAG 终点票）。其余票 DoD + fast + scoped
+- **触发器改级**：「公共接口 / API 签名」从 full 级降为 scoped+ 级，选择集 = 调用方反向闭包；scoped+ 级闭包不可枚举时不再升 full，标「闭包不完整」仍 scoped，剩余风险由集成票与每日回归兜底
+- **集成票（C）**：保留 full 与「模块隔离认定」；合并候选 tree 与某次通过的每日回归 tree 相同时，evidence 填 `full-ref` 复用，免跑
+- **每日回归（D）**：`verify-policy.daily-regression`（enabled / record-dir / worktree / skip-if-unchanged / max-gap-days）。定时器**由人自设**，skill 不安装；/setup-dev 收尾时给出定时任务 prompt。每次落盘 `dev/full-runs/<date>-<tree8>.md`，含 `tree:` 与 `result:` 行（process_check 读这两行判定 full-ref）
+- **新失败处理**：在「上次通过 tree..本次 tree」合入区间二分（每步只跑失败项）→ 责任票 needs-human 并开回修票；合入不暂停。主会话监督循环每轮读最新记录（supervision-loop 6a）
+- **漏跑兜底（E）**：有进行中 feature 且最近记录早于 `max-gap-days`（默认 3）→ 主会话空闲时补跑一次
+- **tier-reason**：票 frontmatter 新字段，/issue-split 定档、/implement 升档时写；process_check 输出
 
 ### R2 基线隔离（quarantine）
 
@@ -57,35 +59,28 @@ dev 流水线（/issue-split → /implement → /ai-review → 主会话合并�
 
 ### R3 触发器命中统计（tier-reason）
 
-- /issue-split 定档、/implement 升档时，在票 frontmatter 记 `tier-reason:`（命中的触发器名或阈值项），process_check.py 一并输出
-- /board 汇总各触发器占比，供人调整触发器（可拆后续）
-- 原「scoped 选择集 ≥ 50% 改跑 full」的想法废弃，由 R1 的 30% 线取代：选择集占比决定**票内跑不跑**，不再是升档理由；verify-policy 注释按此改写
+- 已落地：票 frontmatter `tier-reason`；/issue-split 定档、/implement 升档时写；process_check.py 输出
+- 待实现：/board 汇总各触发器导致 full 的占比，供人调整触发器
+- 二版提出的「scoped 选择集 > 30% 时不在票内跑」未采用：三版保持「选择集大小不是升档 / 降档理由」，scoped 票照跑全闭包；槽位落地后若 scoped 墙钟仍过高再议
 
-## 4. 涉及文件
+## 4. 剩余工作与涉及文件
 
-- `skills/shared/templates/agents-config.md`：verify-policy 移除「集成票一律 full」「模块隔离认定」，`full-runs: once-at-final` 收敛为仅例外票；新增 `daily-regression`（enabled / time / scoped-in-ticket-max）；known-failures 隔离语义
-- `skills/shared/fragments/dev-config.md`：同步字段说明
-- `skills/shared/fragments/supervision-loop.md`：收口不再查 full-commit（例外票除外）；feature 总账不等 full
-- `skills/implement/SKILL.md.tmpl`：Step 5 / 8 去掉票内 full（例外票保留 once-at-final）；scoped 30% 判定；evidence 字段
-- `skills/issue-split/SKILL.md.tmpl`：定档写 `tier-reason`；集成票不再一律 full；粒度红线不变
-- `skills/shared/templates/evidence.md`、`issue.md`：`tier-reason` 字段；`full-commit` 仅例外票
-- `skills/shared/scripts/process_check.py`：merge 阶段——例外票（`tier-reason` 命中迁移 / 鉴权触发器）须票内 `full-commit`，其余票不查 full；输出 tier-reason
-- 新增 `skills/shared/scripts/daily_full.py`，测试放 `skills/shared/scripts/tests/`
-- `skills/board/board.py`：隔离超期告警（触发器占比可拆后续）
-- `skills/setup-dev/SKILL.md.tmpl`：`daily-regression` 采集与定时器安装
-- 改完运行 `node --experimental-strip-types skills/scripts/gen-skill-docs.ts` 重新生成 SKILL.md；需要 `bash sync.sh` 分发时先问人
+R1 已在本次提交落地（agents-config、dev-config、supervision-loop 6a、implement、issue-split、ai-review、setup-dev、evidence / issue 模板、process_check.py 的 full-ref 与 tier-reason，测试 `skills/shared/scripts/tests/test_process_check.py`）。剩余：
+
+- R2 quarantine：`agents-config.md` 的 `attribution` 注释改为隔离语义；`implement` Step 5 归因段；`evidence.md` 隔离数字段；清单格式（owner / 去向 / 首录日期）
+- R3 统计：`skills/board/board.py`（board 当前已从仓库移除，恢复后再做）
+- 改完运行 `node --experimental-strip-types skills/scripts/gen-skill-docs.ts`；需要 `bash sync.sh` 分发时先问人
 
 ## 5. 验收
 
-- 文档：上述字段和流程在模板、fragment、生成后的 SKILL.md 中一致；`grep` 不到残留的「集成票必跑 full」「full 档票必跑」旧表述（例外条款除外）
-- process_check.py：补合成仓用例（例外票缺票内 full → FAIL；非例外 full 档票无 full-commit → PASS；tier-reason 正确输出）。用例落到 `skills/shared/scripts/tests/`
-- daily_full.py：同日重复调用只跑一次；落盘字段齐全（tree hash / 合入区间 / 结果 / jobs / queue-seconds）
-- 在 yufeng-pandu-agent 上按新规则回放最近 10 张已合并的 full 档票，估算票内 full 次数（应只剩例外票）与每日 full 的墙钟，写进实现说明
-- 定时器安装后手动触发一次，验证 worktree 更新 → 槽位包装 → 落盘链路
+- R1（已过）：`python3 -m unittest discover -s skills/shared/scripts/tests -p "test_process_check.py"` 7 项通过，覆盖集成票须 full、review 阶段推迟 full、full-commit 过期、full-ref 复用 tree 相同且 pass 的记录、拒绝 tree 不符或结果非 pass 的记录
+- R1（待人）：定时任务设好后手动触发一次，确认 `dev/full-runs/` 记录含 `tree:` / `result:` 行，且二分 → needs-human 链路走通
+- R2：隔离用例以 skip 运行、full 退出码为 0；evidence 列出隔离数；超期条目可被列出
+- 在 yufeng-pandu-agent 上按新规则回放最近 10 张已合并的 full 档票，估算票内 full 次数下降与每日 full 墙钟，写进实现说明
 
 ## 6. 已裁决
 
-- 例外范围：仅「数据迁移 / schema」「鉴权 / 权限」保留票内 full；公共接口签名**不入**例外（命中率基数低，每日 full + 二分兜底；观察 tier-reason 统计一个周期再议）
-- 隔离清单超期天数 M = 14；每日时点在 /setup-dev 确认（建议工作日午休 12:30，机器醒着且负载低）
-- scoped 票内占比阈值 = 30%，槽位落地后按实测校准
-- 方案改订：merge-train（K 批量）废弃，定时任务是唯一套件级回归节奏；触发只此一层，漏跑容忍，无补跑检查 / 时效告警
+- 方案：C+D+F（见方案改订记录）；集成票 full 与模块隔离认定保留
+- 票内 full 范围：数据迁移 / schema、鉴权 / 权限、超阈值、集成票；公共接口签名降为 scoped+
+- 每日回归定时器由人在宿主里自设，skill 只给 prompt；漏跑由 `max-gap-days`（默认 3）空闲补跑兜底
+- 隔离清单超期天数 M = 14

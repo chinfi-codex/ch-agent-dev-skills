@@ -356,20 +356,32 @@ def run(args) -> tuple[Report, dict]:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:
             rep.add("evidence", "FAIL", f"tier-executed {_name(executed)} < 本阶段要求 {_name(need)}")
-        if executed == TIERS["full"] and not ev.get("full-commit"):
-            rep.add("evidence", "FAIL", "tier-executed: full 但缺 full-commit（档位虚标）")
+        full_ref = str(ev.get("full-ref") or "").strip()
+        if executed == TIERS["full"] and not ev.get("full-commit") and not full_ref:
+            rep.add("evidence", "FAIL", "tier-executed: full 但缺 full-commit / full-ref（档位虚标）")
+        if full_ref:
+            ref_path = root / full_ref
+            m = re.search(r"^\s*[-*]?\s*tree:\s*`?([0-9a-f]{7,40})", ref_path.read_text(encoding="utf-8"), re.M) \
+                if ref_path.is_file() else None
+            head_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+            if not m:
+                rep.add("evidence", "FAIL", f"full-ref 记录不存在或缺 tree 行：{full_ref}")
+            elif not head_tree.startswith(m.group(1)):
+                rep.add("evidence", "FAIL", f"full-ref 记录 tree {m.group(1)[:8]} ≠ HEAD tree {head_tree[:8]}，不能复用")
+            elif not re.search(r"^\s*[-*]?\s*result:\s*`?pass", ref_path.read_text(encoding="utf-8"), re.M):
+                rep.add("evidence", "FAIL", f"full-ref 记录结果不是 pass：{full_ref}")
         if ev.get("all-passed") is not True:
             rep.add("evidence", "FAIL", "all-passed 不是 true")
         if not _same_ticket_tree(repo, ev_commit, head, [p for _, p, _, _ in files]):
             rep.add("evidence", "FAIL", f"evidence commit {ev_commit[:8] or '<空>'} 与 HEAD {head[:8]} 的本票文件不一致（证据过期）")
-        if args.phase == "merge" and target == TIERS["full"] and ev.get("full-commit"):
+        if args.phase == "merge" and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
             if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
                 rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
 
     meta = {
         "issue": issue_id, "phase": args.phase, "base": base, "head": head,
         "production-files": n_prod, "production-loc": loc,
-        "ticket-tier": fm.get("verify-tier"), "tier-target": _name(target) if target is not None else None,
+        "ticket-tier": fm.get("verify-tier"), "tier-reason": fm.get("tier-reason"), "tier-target": _name(target) if target is not None else None,
         "tier-required-by-rules": _name(required), "successors": succ,
         "drift": drift, "redline-hits": redline_hits,
     }
@@ -408,7 +420,7 @@ def main(argv=None) -> int:
     verdict = "FAIL" if rep.failed else "PASS"
     print(f"process-check {meta['issue']} phase={meta['phase']} {meta['head'][:8]} → {verdict}")
     print(f"  生产文件 {meta['production-files']} / LOC {meta['production-loc']}；票档 {meta['ticket-tier']} → "
-          f"目标 {meta['tier-target']}（规则下限 {meta['tier-required-by-rules']}）；后继票 {meta['successors'] or '无（集成票）'}")
+          f"目标 {meta['tier-target']}（原因 {meta['tier-reason'] or '未填'}；规则下限 {meta['tier-required-by-rules']}）；后继票 {meta['successors'] or '无（集成票）'}")
     for i in rep.items:
         print(f"  [{i['level']}] {i['check']}: {i['msg']}")
     if args.json:

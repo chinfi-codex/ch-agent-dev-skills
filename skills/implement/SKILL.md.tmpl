@@ -88,7 +88,7 @@ allowed-tools:
 - **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
 - 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
-- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现。scoped+ 级触发器（共享模块 / 工具库、红线邻接）按可枚举性定档：闭包完整可枚举 → scoped（选择集 = 全闭包），不可枚举 → full；选择集大小不是升档理由
+- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现。scoped+ 级触发器（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 反向闭包；闭包不可枚举时标「闭包不完整」仍 scoped，由集成票与每日回归兜底；选择集大小不是升档理由；升档时同步更新票 `tier-reason`
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 
@@ -104,7 +104,7 @@ allowed-tools:
 - **按档位出证据**（档位 = 票 `verify-tier`，发生升档则按升档后档位；规则见 `agents-config.verify-policy`）：
   - `light`：DoD + fast
   - `scoped`：DoD + fast + 关联测试——**选择集从最终 diff（merge-base..HEAD）重算**：滤出生产代码文件，按 `verify-policy.selection`（dir-map 目录约定映射 / impact-map 导入闭包反查）换算受影响测试集；漂移碰到的文件天然进入选择集，无需改票；选择集占全套 ≥ 50% 时在 evidence 记录占比（评审信号），不因此升档
-  - `full`：DoD + fast + scoped + 完整测试套件（full 档票与集成票必跑）。集成票若票面已做「模块隔离认定」（feature 全程只动不被外部依赖的叶子模块），按 module-scoped 跑涉及模块的全闭包替代全仓，evidence 记录隔离判定依据（反向闭包为空 + 模块清单）；认定有疑义或前序票 diff 实际漂出该模块 → 仍跑 full
+  - `full`：DoD + fast + scoped + 完整测试套件（full 档票必跑：迁移 / 鉴权、超阈值、集成票；其余跨模块风险由 main 每日回归兜底，不在票内补跑 full）。集成票的合并候选 tree 与 `daily-regression.record-dir` 中某次通过记录的 tree 相同时，evidence 填 `full-ref` 指向该记录、免跑。集成票若票面已做「模块隔离认定」（feature 全程只动不被外部依赖的叶子模块），按 module-scoped 跑涉及模块的全闭包替代全仓，evidence 记录隔离判定依据（反向闭包为空 + 模块清单）；认定有疑义或前序票 diff 实际漂出该模块 → 仍跑 full
 - **测试职责边界按 `verify-policy.gate-scope`**：档位门只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
 - **full 执行时机按 `verify-policy.full-runs`**（默认 `once-at-final`）：full 档票 / 集成票在本步只跑 DoD + fast + scoped 进入评审，完整套件推迟到 Step 8 评审通过后的最终 commit 跑**一次**；evidence 头 `tier-executed: full` 只在该次 full 落盘后填写
 - **先在失败归因按 `verify-policy.attribution` 执行**：`known-failures` 模式下失败先比对落盘的既有失败清单，在清单且签名一致 = 先在失败（显式列出，不进 `all-passed` 分母）；不在清单或签名不符的单项才补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败
@@ -136,7 +136,7 @@ allowed-tools:
 
 评审通过（pass / pass-with-notes）后：
 
-- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑。执行形态同 Step 5（槽位包装 + 后台轮询；单项超时先按 load-flake 规则处理）
+- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`（或复用每日回归时填 `full-ref`）；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑。执行形态同 Step 5（槽位包装 + 后台轮询；单项超时先按 load-flake 规则处理）
 - **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6）；退出码非 0 → 补齐证据 / 重跑最终 full，不转 ready。主会话收口时以同一命令复核
 
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件

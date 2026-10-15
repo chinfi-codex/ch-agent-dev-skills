@@ -6,6 +6,7 @@ status: proposed        # proposed / confirmed / in-progress / in-review / mr-su
 blocked-by: []          # 例如 [issue-001]；frontier 票此处为空
 verify-tier: scoped     # 交付验证档位：light / scoped / full；由 /issue-split 按 verify-policy 计算并过门②确认，
                         # 实现期只升不降（升档规则见 agents-config.verify-policy）；集成票（无后继票）一律 full
+tier-reason: default    # 定档原因：命中的触发器名 / 阈值项 / integration / default；升档时更新
 declared-scope: []      # 声明将触碰的生产代码路径 / glob 清单；实测漂移按 verify-policy 漂移规则处理
 verify-fails: 0         # 主会话验收复跑失败计数（见「监督循环」收口）；达 2 票置 needs-human
 tracker-iid:            # tracker: gitlab 时回写 GitLab issue IID

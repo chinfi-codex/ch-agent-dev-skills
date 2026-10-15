@@ -46,7 +46,9 @@ host-budget:
 # 档位含义（累计向下包含）：
 #   light  = DoD 验收命令 + fast                （单点小改：文案 / 阈值 / 默认值 / 局部样式）
 #   scoped = light + 关联测试选择                （改动集中在 1-2 个模块的常规票）
-#   full   = scoped + 完整测试套件               （高风险票与集成票）
+#   full   = scoped + 完整测试套件               （迁移 / 鉴权票、超阈值票与集成票，票内跑）
+# 套件级回归三层（C+D+F）：①集成票（feature 收尾）票内 full；②main 每个工作日定时 full（daily-regression，
+#   兜底跨 feature 回归与票内未跑 full 的风险，最长延迟 1 个工作日）；③迁移 / 鉴权票票内 full。其余票不跑票内 full。
 # 不变式（任何档位不得缩水）：红线检查 / DoD 验收命令 / 独立评审 / 每 feature 至少一次 full——
 # 唯一例外是集成票的「模块隔离认定」（见 verify-policy 集成票条）：认定成立时按 module-scoped 跑涉及模块的全闭包，
 # 不再机械全仓；认定不成立或有疑义时 full 不变。
@@ -56,19 +58,20 @@ verify-policy:
   scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full
   # production-exclude: ["tests/**", "docs/**", "dev/**", "**/*.md"]   # 可选：不计入生产文件数 / LOC 的 glob；缺省用 process_check.py 内置清单
   escalate-triggers:        # 命中任一（声明或实测）→ 升级验证；按两级分别处理，不一律全量
-    # —— full 级：影响面难以静态枚举、或错误代价高的变更，直接 full
-    - "公共接口 / API 签名变更"                     # full 级
+    # —— full 级：错误代价高的变更，票内 full（不等每日回归）
     - "数据迁移 / schema 兼容变更"                  # full 级
     - "鉴权 / 权限逻辑改动"                         # full 级
-    # —— scoped+ 级：影响面通常可静态枚举的变更，先判可枚举性，不盲目全量
+    # —— scoped+ 级：先判可枚举性，不盲目全量；跨模块剩余风险由每日回归与集成票兜底
+    - "公共接口 / API 签名变更"                     # scoped+ 级（选择集 = 调用方反向闭包）
     - "共享模块 / 工具库改动"                       # scoped+ 级
     - "红线邻接（redlines glob 命中文件的同目录）"   # scoped+ 级
   # scoped+ 级处理：按 selection 反查变更文件的反向依赖闭包（含调用方测试）——
   #   闭包完整可枚举（无动态加载 / 反射 / subprocess 间接调用变更模块）→ scoped，选择集 = 全闭包；
-  #   闭包不可枚举（存在上述动态依赖）→ full。
+  #   闭包不可枚举（存在上述动态依赖）→ 仍 scoped（可枚举部分 + 按目录约定补齐），evidence 标
+  #   「闭包不完整」，不可见的动态依赖由每日回归兜底，不为此跑票内 full。
   # 选择集大小不是升档理由：闭包即精确选择集，大闭包跑大闭包；占比 ≥ 50% 时在 evidence 记录
   # （作为「本票影响面广」的评审信号），不升 full——动态依赖与跨模块交互风险由集成票
-  # （DAG 终点票）的 full 统一兜底，不由每票重复全量。
+  # （DAG 终点票）的 full 与每日回归统一兜底，不由每票重复全量。
   # 漂移规则（实测 diff 超出票的 declared-scope 时）：
   #   仍同模块、未触发 escalate-triggers、未超阈值 → 不升档，impl-log「漂移与升档记录」登记漂移文件清单即可
   #   触发 escalate-triggers 或超 scoped-max-* 阈值 → 升档（只升不降），立即按新档补验证并在 evidence 记录
@@ -109,12 +112,24 @@ verify-policy:
       #   结果列入 evidence「人工确认项」，由人在验收时判定。阈值不达标不是 BLOCKER，除非同时伴随功能错误
     env-skip: true            # 分类清单中声明了外部依赖（环境变量 / 外部服务）的用例，依赖缺失时显式 skip，
                               #   evidence 列出 skip 清单与缺失项；不算失败（免归因），也不算通过
-  # full 次数：同一张票的 full 只在「评审通过后的最终 commit」上跑一次
+  # 档位原因：定档 / 升档时写入票 frontmatter `tier-reason`（命中的触发器名 / 阈值项 / integration），
+  #   process_check.py 输出、/board 统计，用于观察并调整触发器
+  # full 次数：同一张票的 full 只在「评审通过后的最终 commit」上跑一次（仅 full 档票：迁移 / 鉴权 / 超阈值 / 集成票）
   full-runs: once-at-final
     # Step 5 先跑 DoD + fast + scoped 进评审；评审通过后在最终 commit 跑一次 full（full 档票 / 集成票）
     # 评审回修轮：只跑 DoD + fast + 回修 diff 的 scoped，不重跑 full
     # full 失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 最终 commit 再跑一次 full
     # rebase / 合并 main：无冲突且本票改动文件 blob 不变 → 复用证据；有冲突 → 跑冲突文件闭包的 scoped
+    # 集成票复用：其合并候选 tree 与 dev/full-runs/ 中某次通过的每日回归 tree 相同 → 复用该记录（full-ref），不重跑
+  # 每日回归：main HEAD 每个工作日一次 full，由人自设的定时任务触发（/setup-dev 给出任务 prompt）
+  daily-regression:
+    enabled: true
+    record-dir: dev/full-runs      # 每次落盘 <date>-<tree8>.md：tree / 上次通过以来的合入区间 / 结果 / 归因 / 二分结论 / 耗时 / jobs
+    worktree: .worktrees/daily-full
+    skip-if-unchanged: true        # main tree 与最近一次记录相同 → 当日跳过
+    max-gap-days: 3                # 存在进行中 feature 且最近记录早于此天数 → 主会话在空闲时补跑一次（定时漏跑兜底）
+    # 新失败（清单外）：在「上次通过 tree..本次 tree」合入区间内二分（每步只跑失败项）→ 定位到合入提交 → 其票置
+    #   needs-human 并开回修票；合入不暂停。先在失败按 attribution 判定，清单由本次结果刷新
   # 基线冻结：票开工时固定 base（记 impl-log），实现与评审期间不追集成分支；只在合入前 rebase 一次
   #   （无冲突且本票文件 blob 不变 → 复用证据；有冲突 → 冲突文件闭包 scoped）
   base-freeze: true
@@ -183,7 +198,7 @@ gitlab-ci: manual
 ## 说明
 
 - 整机算力预算：scoped / full / 归因补跑经 `shared/scripts/test_slots.py run` 包装执行（预算真源是机器级 `~/.cache/agent-dev/slots/budget.json`，`host-budget` 节为镜像）；单项超时撞高负载（load-peak > ncpu）先串行重跑，通过记 `load-flake`，不直接归因
-- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
+- 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级 = 迁移 / 鉴权，票内全量；scoped+ 级含公共接口签名，跑反向闭包），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，跨 feature 回归由 `daily-regression`（main 每工作日一次 full）兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
 - 评审与实现的被派发对话模型取 `dispatch.model.<当前宿主>` 按票档位取 default / escalated 清单的第一个当前可用模型（各宿主条目由 `/setup-dev` 逐宿主请人确认）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护

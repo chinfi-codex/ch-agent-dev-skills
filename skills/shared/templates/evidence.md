@@ -13,6 +13,7 @@ tier-target: light|scoped|full      # 升档后的目标档位（未升档 = ver
 tier-executed: light|scoped|full    # 实际已执行的档位（once-at-final 下评审前 full 档票为 scoped，最终 full 落盘后改 full）
 isolation:                          # 仅集成票按「模块隔离认定」跑 module-scoped 时填 module-scoped，其余留空
 full-commit: <跑 full 的 commit；须等于 commit，或与之差异仅为不改本票文件 blob 的 rebase>  # full 档才填
+full-ref:     # 集成票复用每日回归时填 dev/full-runs/<date>-<tree8>.md（tree 须与合并候选相同），与 full-commit 二选一
 all-passed: true|false    # 全部验收命令与档位门退出码为 0 时才允许 true
 generated: YYYY-MM-DD HH:MM
 ```
