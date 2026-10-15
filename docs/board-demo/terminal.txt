@@ -1,0 +1,56 @@
+═══ 跨项目看板 · 2026-10-14 16:23 ═══
+项目 2 │ 卡片 11
+
+▌需求看板（docs/ 树：需求 → PRD → 技术方案 → 拆票）
+  ▍pandu
+    ─ ◇ 技术方案（1）─
+      stock/earnings-sub 财报订阅
+  ▍nova
+    ─ ◇ 需求澄清（1）─
+      cms/markdown-import Markdown 导入  │ 需补充上下文
+
+▌开发看板（dev/ 树：票 → 派发 → 实现 → 评审 → 合并）
+  项目 × 阶段
+         待执行  实现中  评审/合并  阻塞  已完成
+  pandu       2       1          1     –       2
+  nova        –       –          1     1       1
+
+  宿主在制（跨项目 WIP）
+    zcode·glm-4.7            在制 1 · 已完成 1
+    codex·gpt-5.4-codex      在制 1 · 已完成 1
+    claude·opus-4.1          在制 1 · 已完成 0
+
+  ⚠ 告警
+    [pandu] issue-003 盯盘列表页 — 验收复跑失败×1
+    [pandu] issue-003 盯盘列表页 — 评审第3轮
+    [pandu] issue-003 盯盘列表页 — 停滞3天
+    [pandu] issue-004 告警规则引擎 — 停滞5天
+    [pandu] issue-006 快照导出 — 集成票档位非 full
+    [nova] issue-002 评论列表页 — 需人工裁决
+    [nova] issue-002 评论列表页 — 验收复跑失败×2
+    [nova] issue-002 评论列表页 — 集成票档位非 full
+
+  ▍pandu  /Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/pandu
+    ⚙ codex·gpt-5.4-codex（在制 1 · 共 2 张 · done 1）
+      ▸ stock/realtime-watch 实时盯盘 │ 票进度 2/6 done
+        ▶ issue-004      告警规则引擎  〔stock/realtime-watch〕  │ full │ DoD 1/3 │ ⚠停滞5天
+
+    ⚙ zcode·glm-4.7（在制 1 · 共 2 张 · done 1）
+      ▸ stock/realtime-watch 实时盯盘 │ 票进度 2/6 done
+        ◐ issue-003      盯盘列表页  〔stock/realtime-watch〕  │ scoped │ DoD 3/3 │ ⚠验收复跑失败×1 │ ⚠评审第3轮 │ ⚠停滞3天
+
+    ⚙ 未派发（在制 0 · 共 2 张 · done 0）
+      ▸ stock/realtime-watch 实时盯盘 │ 票进度 2/6 done
+        ☐ issue-005      端到端集成与回归  〔stock/realtime-watch〕  │ full │ DoD 0/3 │ blocked-by: issue-003,issue-004 │ 集成票
+        ☐ issue-006      快照导出  〔stock/realtime-watch〕  │ light │ DoD 0/3 │ 可派发 │ 集成票 │ ⚠集成票档位非 full
+
+
+  ▍nova  /Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/nova
+    ⚙ claude·opus-4.1（在制 1 · 共 1 张 · done 0）
+      ▸ cms/comments 评论系统 │ 票进度 1/3 done
+        ◐ issue-001      评论模型与接口  〔cms/comments〕  │ scoped │ DoD 3/3 │ 待合并
+
+    ⚙ zcode·deepseek-v4（在制 0 · 共 2 张 · done 1）
+      ▸ cms/comments 评论系统 │ 票进度 1/3 done
+        ✕ issue-002      评论列表页  〔cms/comments〕  │ scoped │ DoD 2/3 │ 集成票 │ ⚠需人工裁决 │ ⚠验收复跑失败×2 │ ⚠集成票档位非 full
+

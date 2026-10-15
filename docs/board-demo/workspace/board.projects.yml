@@ -1,0 +1,5 @@
+projects:
+  - name: pandu
+    path: /Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/pandu
+  - name: nova
+    path: /Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/nova

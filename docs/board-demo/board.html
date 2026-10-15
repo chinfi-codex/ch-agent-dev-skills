@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>跨项目看板</title>
+<style>
+:root {
+  --bg:#fafbfc; --panel:#f2f4f7; --card:#ffffff; --line:#e6e9ee; --line2:#d8dde5;
+  --fg:#1f2329; --dim:#8a94a6; --faint:#aab2c0;
+  --accent:#4c6ef5; --accent-bg:#eef1fe;
+  --warn:#b7791f; --warn-bg:#fdf3e3;
+  --bad:#d64545;  --bad-bg:#fdecec;
+  --ok:#2f9e6e;   --ok-bg:#e7f6ef;
+}
+* { box-sizing:border-box; }
+html { -webkit-font-smoothing:antialiased; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:16.8px/1.65 -apple-system,"PingFang SC","Helvetica Neue","Source Han Sans SC",sans-serif;
+  font-variant-numeric:tabular-nums; }
+::selection { background:var(--accent-bg); }
+
+/* 顶栏 */
+header { padding:22px 32px 18px; background:rgba(250,251,252,.85);
+  backdrop-filter:saturate(1.4) blur(12px); -webkit-backdrop-filter:saturate(1.4) blur(12px);
+  border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+h1 { font-size:22.8px; font-weight:700; letter-spacing:.02em; margin:0 0 2px; }
+.meta { color:var(--faint); font-size:14.4px; margin-bottom:14px; }
+.filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+select,input[type=text] { background:var(--card); color:var(--fg);
+  border:1px solid var(--line2); border-radius:8px; padding:6px 12px; font-size:15.6px;
+  outline:none; transition:border-color .15s, box-shadow .15s; }
+select:focus,input[type=text]:focus { border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-bg); }
+.filters label { color:var(--dim); font-size:15.6px; display:flex; gap:6px;
+  align-items:center; cursor:pointer; user-select:none; }
+input[type=checkbox] { accent-color:var(--accent); }
+
+main { padding:10px 32px 48px; }
+
+/* 看板标题 */
+.bt { font-size:19.2px; font-weight:700; letter-spacing:.02em; margin:28px 0 14px;
+  padding-left:10px; border-left:3px solid var(--accent); }
+.bt .btsub { font-size:14.4px; font-weight:400; color:var(--faint); margin-left:10px; }
+
+.proj { margin-bottom:20px; }
+.proj h3 { font-size:16.2px; font-weight:600; color:var(--dim); margin:0 0 10px;
+  letter-spacing:.01em; }
+
+/* 列与格 */
+.lane { display:grid; gap:14px; overflow-x:auto; padding-bottom:4px; }
+.colshead, .srow { display:grid; gap:14px; }
+.colshead { margin-bottom:8px; }
+.colshead .ch { font-size:14.4px; color:var(--dim); padding:0 6px; letter-spacing:.02em; }
+.srow { margin-bottom:6px; align-items:start; }
+.col, .cell { background:var(--panel); border-radius:12px; padding:10px; min-height:56px; }
+.col h4 { font-size:14.4px; color:var(--dim); margin:0 2px 10px; font-weight:500;
+  letter-spacing:.02em; display:flex; justify-content:space-between; align-items:center; }
+.col h4 .cnt { background:var(--card); border:1px solid var(--line); color:var(--dim);
+  border-radius:99px; padding:0 8px; font-size:13.2px; }
+
+/* 泳道 */
+.laneblock { margin-bottom:22px; }
+.lanehead { font-size:16.2px; font-weight:600; margin:0 0 8px; display:flex;
+  align-items:baseline; gap:10px; }
+.lanehead .dim { color:var(--faint); font-weight:400; font-size:14.4px; }
+.fsep { font-size:12.6px; color:var(--faint); margin:8px 0 3px; letter-spacing:.02em; }
+
+/* 卡片 */
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:10px 12px; margin-bottom:8px;
+  transition:box-shadow .15s, border-color .15s, transform .15s; }
+.card:last-child { margin-bottom:2px; }
+.card:hover { border-color:var(--line2); box-shadow:0 2px 8px rgba(31,35,41,.06);
+  transform:translateY(-1px); }
+.card .t { font-size:15.6px; font-weight:600; line-height:1.45; margin-bottom:3px; }
+.card .id { font-size:13.2px; color:var(--faint); margin-bottom:7px; }
+.agent { font-size:13.8px; color:var(--accent); margin-bottom:6px; letter-spacing:.01em; }
+
+/* 徽章 */
+.badges { display:flex; gap:5px; flex-wrap:wrap; }
+.b { font-size:12.6px; border-radius:6px; padding:1.5px 7px; background:#eceff3;
+  color:var(--dim); letter-spacing:.01em; }
+.b.host { color:var(--accent); background:var(--accent-bg); }
+.b.warn { color:var(--warn); background:var(--warn-bg); }
+.b.bad  { color:var(--bad);  background:var(--bad-bg); }
+.b.ok   { color:var(--ok);   background:var(--ok-bg); }
+
+/* DoD 进度条 */
+.bar { height:3px; background:#e9edf2; border-radius:2px; margin-top:8px; }
+.bar i { display:block; height:100%; background:var(--ok); border-radius:2px; }
+
+.empty { color:var(--faint); font-size:15px; padding:18px 0 26px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>跨项目看板</h1>
+  <div class="meta" id="meta"></div>
+  <div class="filters">
+    <select id="fProject"><option value="">全部项目</option></select>
+    <select id="fHost"><option value="">全部宿主</option></select>
+    <input type="text" id="fText" placeholder="搜索标题 / 编号" size="24">
+    <label><input type="checkbox" id="fDone"> 显示已完成</label>
+  </div>
+</header>
+<main id="board"></main>
+<script>
+const DATA = {"generated_at": "2026-10-15 10:18", "projects": [{"name": "pandu", "path": "/Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/pandu", "cards": [{"kind": "feature", "board": "requirement", "id": "stock/earnings-sub", "title": "财报订阅", "stage": "spec", "badges": [], "host": "", "model": "", "alerts": [], "project": "pandu"}, {"id": "issue-001", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-001-行情快照存储.md", "title": "行情快照存储", "status": "done", "stage": "done", "blocked_by": [], "verify_tier": "scoped", "verify_fails": 0, "dod_done": 3, "dod_total": 3, "host": "zcode", "model": "glm-4.7", "dispatched_at": "2026-10-06 10:12", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": [], "integration": false, "frontier": false, "project": "pandu"}, {"id": "issue-002", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-002-推送通道.md", "title": "推送通道", "status": "done", "stage": "done", "blocked_by": [], "verify_tier": "scoped", "verify_fails": 0, "dod_done": 2, "dod_total": 2, "host": "codex", "model": "gpt-5.4-codex", "dispatched_at": "2026-10-07 09:40", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": [], "integration": false, "frontier": false, "project": "pandu"}, {"id": "issue-003", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-003-盯盘列表页.md", "title": "盯盘列表页", "status": "in-review", "stage": "review", "blocked_by": ["issue-001"], "verify_tier": "scoped", "verify_fails": 1, "dod_done": 3, "dod_total": 3, "host": "zcode", "model": "glm-4.7", "dispatched_at": "2026-10-11 15:02", "attempts": 1, "rounds": 3, "tracker_url": "", "alerts": ["验收复跑失败×1", "评审第3轮", "停滞4天"], "integration": false, "frontier": false, "project": "pandu"}, {"id": "issue-004", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-004-告警规则引擎.md", "title": "告警规则引擎", "status": "in-progress", "stage": "dev", "blocked_by": ["issue-002"], "verify_tier": "full", "verify_fails": 0, "dod_done": 1, "dod_total": 3, "host": "codex", "model": "gpt-5.4-codex", "dispatched_at": "2026-10-09 14:20", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": ["停滞6天"], "integration": false, "frontier": false, "project": "pandu"}, {"id": "issue-005", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-005-端到端集成.md", "title": "端到端集成与回归", "status": "confirmed", "stage": "ready", "blocked_by": ["issue-003", "issue-004"], "verify_tier": "full", "verify_fails": 0, "dod_done": 0, "dod_total": 3, "host": "", "model": "", "dispatched_at": "", "attempts": 0, "rounds": 0, "tracker_url": "", "alerts": [], "integration": true, "frontier": false, "project": "pandu"}, {"id": "issue-006", "feature": "stock/realtime-watch", "board": "dev", "file": "dev/features/stock/realtime-watch/issues/issue-006-快照导出.md", "title": "快照导出", "status": "confirmed", "stage": "ready", "blocked_by": ["issue-002"], "verify_tier": "light", "verify_fails": 0, "dod_done": 0, "dod_total": 3, "host": "", "model": "", "dispatched_at": "", "attempts": 0, "rounds": 0, "tracker_url": "", "alerts": ["集成票档位非 full"], "integration": true, "frontier": true, "project": "pandu"}], "summary": {"brief": 0, "prd": 0, "spec": 1, "ready": 2, "dev": 1, "review": 1, "blocked": 0, "done": 2}, "hosts": {"zcode·glm-4.7": {"wip": 1, "done": 1}, "codex·gpt-5.4-codex": {"wip": 1, "done": 1}}, "features": [{"module": "stock", "slug": "earnings-sub", "title": "财报订阅", "progress": null}, {"module": "stock", "slug": "realtime-watch", "title": "实时盯盘", "progress": {"done": 2, "total": 6}}]}, {"name": "nova", "path": "/Users/chenhuizhang/Desktop/ch-agent-dev-skills/docs/board-demo/workspace/nova", "cards": [{"id": "issue-001", "feature": "cms/comments", "board": "dev", "file": "dev/features/cms/comments/issues/issue-001-评论模型与接口.md", "title": "评论模型与接口", "status": "mr-submitted", "stage": "review", "blocked_by": [], "verify_tier": "scoped", "verify_fails": 0, "dod_done": 3, "dod_total": 3, "host": "claude", "model": "opus-4.1", "dispatched_at": "2026-10-12 11:00", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": ["停滞3天"], "integration": false, "frontier": false, "project": "nova"}, {"id": "issue-002", "feature": "cms/comments", "board": "dev", "file": "dev/features/cms/comments/issues/issue-002-评论列表页.md", "title": "评论列表页", "status": "needs-human", "stage": "blocked", "blocked_by": ["issue-001"], "verify_tier": "scoped", "verify_fails": 2, "dod_done": 2, "dod_total": 3, "host": "zcode", "model": "deepseek-v4", "dispatched_at": "2026-10-10 16:45", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": ["需人工裁决", "验收复跑失败×2", "集成票档位非 full"], "integration": true, "frontier": false, "project": "nova"}, {"id": "issue-003", "feature": "cms/comments", "board": "dev", "file": "dev/features/cms/comments/issues/issue-003-表情回复.md", "title": "表情回复", "status": "done", "stage": "done", "blocked_by": [], "verify_tier": "light", "verify_fails": 0, "dod_done": 2, "dod_total": 2, "host": "zcode", "model": "deepseek-v4", "dispatched_at": "2026-10-08 10:30", "attempts": 1, "rounds": 0, "tracker_url": "", "alerts": [], "integration": false, "frontier": false, "project": "nova"}, {"kind": "feature", "board": "requirement", "id": "cms/markdown-import", "title": "Markdown 导入", "stage": "brief", "badges": ["需补充上下文"], "host": "", "model": "", "alerts": [], "project": "nova"}], "summary": {"brief": 1, "prd": 0, "spec": 0, "ready": 0, "dev": 0, "review": 1, "blocked": 1, "done": 1}, "hosts": {"claude·opus-4.1": {"wip": 1, "done": 0}, "zcode·deepseek-v4": {"wip": 0, "done": 1}}, "features": [{"module": "cms", "slug": "comments", "title": "评论系统", "progress": {"done": 1, "total": 3}}, {"module": "cms", "slug": "markdown-import", "title": "Markdown 导入", "progress": null}]}], "totals": {"brief": 1, "prd": 0, "spec": 1, "ready": 2, "dev": 1, "review": 2, "blocked": 1, "done": 3}, "alerts": ["[pandu] issue-003 盯盘列表页 — 验收复跑失败×1", "[pandu] issue-003 盯盘列表页 — 评审第3轮", "[pandu] issue-003 盯盘列表页 — 停滞4天", "[pandu] issue-004 告警规则引擎 — 停滞6天", "[pandu] issue-006 快照导出 — 集成票档位非 full", "[nova] issue-001 评论模型与接口 — 停滞3天", "[nova] issue-002 评论列表页 — 需人工裁决", "[nova] issue-002 评论列表页 — 验收复跑失败×2", "[nova] issue-002 评论列表页 — 集成票档位非 full"]};
+const REQ = [{key:'brief',label:'需求澄清'},{key:'prd',label:'PRD/评审'},
+             {key:'spec',label:'技术方案'},{key:'ready',label:'待拆票'}];
+const DEV = [{key:'ready',label:'待执行'},{key:'dev',label:'实现中'},
+             {key:'review',label:'评审/合并'},{key:'blocked',label:'阻塞'},{key:'done',label:'已完成'}];
+const $ = s => document.querySelector(s);
+
+document.getElementById('meta').textContent =
+  `生成于 ${DATA.generated_at} · ${DATA.projects.length} 个项目 · ` +
+  `${DATA.projects.reduce((n,p)=>n+p.cards.length,0)} 张卡片`;
+
+const hosts = new Set();
+DATA.projects.forEach(p => p.cards.forEach(c => { if (c.host) hosts.add(c.host); }));
+hosts.forEach(h => $('#fHost').insertAdjacentHTML('beforeend', `<option>${h}</option>`));
+DATA.projects.forEach(p => $('#fProject').insertAdjacentHTML('beforeend', `<option>${p.name}</option>`));
+
+function esc(s){ return String(s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function badges(c){
+  const out = [];
+  if (c.kind === 'feature') { (c.badges||[]).forEach(b=>out.push(`<span class="b">${esc(b)}</span>`)); return out.join(''); }
+  if (c.verify_tier) out.push(`<span class="b">${esc(c.verify_tier)}</span>`);
+  if (c.frontier) out.push(`<span class="b ok">可派发</span>`);
+  if (c.integration && c.stage !== 'done') out.push(`<span class="b">集成票</span>`);
+  if (c.status === 'proposed') out.push(`<span class="b warn">门②待确认</span>`);
+  if (c.status === 'mr-submitted') out.push(`<span class="b ok">待合并</span>`);
+  const CANON = new Set(['proposed','confirmed','in-progress','in-review','mr-submitted','needs-human','done']);
+  if (!CANON.has(c.status)) out.push(`<span class="b warn">${esc(c.status)}</span>`);
+  (c.alerts||[]).forEach(a=>out.push(`<span class="b ${c.stage==='blocked'?'bad':'warn'}">⚠${esc(a)}</span>`));
+  return out.join('');
+}
+function cardHtml(c){
+  let bar = '';
+  if (c.dod_total) bar = `<div class="bar"><i style="width:${Math.round(100*c.dod_done/c.dod_total)}%"></i></div>`;
+  const agent = c.kind === 'feature' ? '' :
+    `<div class="agent">⚙ ${esc(c.host ? (c.model ? c.host+' · '+c.model : c.host) : '未派发')}</div>`;
+  return `<div class="card"><div class="t">${esc(c.title)}</div>` +
+         `<div class="id">${esc(c.id)}${c.feature ? ' · ' + esc(c.feature) : ''}</div>${agent}<div class="badges">${badges(c)}</div>${bar}</div>`;
+}
+function laneHtml(cards, stages){
+  const cols = stages.map(s => {
+    const cs = cards.filter(c => c.stage===s.key);
+    const inner = cs.map(cardHtml).join('');
+    return `<div class="col"><h4>${s.label}${cs.length?`<span class="cnt">${cs.length}</span>`:''}</h4>${inner}</div>`;
+  }).join('');
+  return `<div class="lane" style="grid-template-columns:repeat(${stages.length},minmax(210px,1fr))">${cols}</div>`;
+}
+function cellHtml(cards){
+  const groups = {};
+  cards.forEach(c => {
+    const k = c.feature || '未归档';
+    (groups[k] = groups[k] || []).push(c);
+  });
+  const keys = Object.keys(groups);
+  return keys.map(k =>
+    (keys.length > 1 ? `<div class="fsep">${esc(k)}</div>` : '') +
+    groups[k].map(cardHtml).join('')
+  ).join('');
+}
+function render(){
+  const fp = $('#fProject').value, fh = $('#fHost').value, ft = $('#fText').value.trim();
+  const showDone = $('#fDone').checked;
+  const hit = c => (!fp || c.project === fp) && (!fh || c.host === fh) &&
+    (!ft || c.title.includes(ft) || c.id.includes(ft));
+  const devStages = showDone ? DEV : DEV.filter(s => s.key !== 'done');
+
+  // 需求看板：按项目分区（文档卡无 agent 维度）
+  let reqHtml = '';
+  DATA.projects.filter(p=>!fp || p.name===fp).forEach(p => {
+    const req = p.cards.filter(c => c.board==='requirement' && hit(c));
+    if (req.length)
+      reqHtml += `<section class="proj"><h3>${esc(p.name)}</h3>${laneHtml(req, REQ)}</section>`;
+  });
+
+  // 开发看板：固定阶段列，泳道 = 执行 agent（跨项目聚合），泳道内按 feature 分组
+  const devAll = [];
+  DATA.projects.forEach(p => p.cards.forEach(c => {
+    if (c.board === 'dev') devAll.push(c);
+  }));
+  const visible = devAll.filter(c => hit(c) && (showDone || c.stage !== 'done'));
+  const lanes = {};
+  visible.forEach(c => {
+    const k = c.host ? (c.model ? c.host+'·'+c.model : c.host) : '未派发';
+    (lanes[k] = lanes[k] || []).push(c);
+  });
+  const laneKeys = Object.keys(lanes).sort((a,b) =>
+    (a==='未派发') - (b==='未派发') || a.localeCompare(b));
+  const gridCols = `repeat(${devStages.length},minmax(210px,1fr))`;
+  let devHtml = `<div class="colshead" style="grid-template-columns:${gridCols}">` +
+    devStages.map(s=>`<span class="ch">${s.label}</span>`).join('') + `</div>`;
+  laneKeys.forEach(k => {
+    const cards = lanes[k];
+    const wip = cards.filter(c=>c.stage==='dev'||c.stage==='review').length;
+    const done = cards.filter(c=>c.stage==='done').length;
+    devHtml += `<div class="laneblock"><div class="lanehead">⚙ ${esc(k)} ` +
+      `<span class="dim">在制 ${wip} · 共 ${cards.length} 张${done ? ' · done '+done : ''}</span></div>` +
+      `<div class="srow" style="grid-template-columns:${gridCols}">` +
+      devStages.map(s=>`<div class="cell">${cellHtml(cards.filter(c=>c.stage===s.key))}</div>`).join('') +
+      `</div></div>`;
+  });
+  if (!laneKeys.length) devHtml += '<p class="empty">无匹配票卡</p>';
+
+  $('#board').innerHTML =
+    `<h2 class="bt">需求看板<span class="btsub">docs/ 树 · 需求 → PRD → 方案 → 拆票</span></h2>` +
+    (reqHtml || '<p class="empty">无在途需求文档</p>') +
+    `<h2 class="bt">开发看板<span class="btsub">dev/ 树 · 泳道 = 执行 agent · 列 = 阶段</span></h2>` + devHtml;
+}
+['fProject','fHost','fDone'].forEach(id => document.getElementById(id).addEventListener('change', render));
+document.getElementById('fText').addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
