@@ -98,7 +98,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `tracker`：`local`（markdown 票文件）或 `gitlab`（glab CLI）
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
-- `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**
+- `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**。scoped / full / 归因补跑一律经 `shared/scripts/test_slots.py run` 包装执行（拿整机槽位，并发度 = 分得数 `$JOBS`；后台执行、输出落文件后轮询），fast 不受限
+- `host-budget`：整机测试算力预算（`total` 重测试 worker 总数 / `max-runs` 重套件套数 / `queue-timeout` 排队秒数上限）。真源是机器级文件 `~/.cache/agent-dev/slots/budget.json`（同机各仓共享一份），agents-config 里只是镜像记录，执行以机器级文件为准
 - `verify-policy`：验证档位策略（阈值 / 两级升档触发器 / 漂移规则 / 选择机制 / 先在失败归因）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。触发器分两级——full 级（公共接口签名 / 数据迁移 schema / 鉴权权限）直接 full；scoped+ 级（共享模块 / 工具库、红线邻接）先判影响面可枚举性：静态反向闭包完整可枚举 → scoped（选择集 = 全闭包），不可枚举 → full。选择集大小不是升档理由（闭包大跑大闭包，占比 ≥ 50% 仅记录为评审信号）；DAG 无后继的集成票一律 full，动态依赖与跨模块交互风险由它统一兜底——唯一例外「模块隔离认定」：feature 全程只动不被外部依赖的叶子模块时，集成票按 module-scoped 跑该模块全闭包（不机械全仓），判定依据须可机器复核、有疑义仍 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。先在失败归因按 `attribution`：默认 `known-failures`（失败比对落盘清单，仅清单外单项补跑 base 侧对照，不整套重跑）；`two-sided` 为保守档（每条失败双侧同命令对照）。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档。**测试职责边界（`gate-scope`）**：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只执行一次并落盘记录，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖（环境变量 / 外部服务）的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过。**full 次数（`full-runs: once-at-final`）**：full 档每票只在评审通过后的最终 commit 跑一次；评审回修轮只跑 DoD + fast + 回修 diff 的 scoped；无冲突 rebase 且本票文件 blob 不变时复用证据不重跑
 - `max-fix-rounds`：自修复轮次上限，默认 99；`review-round-alert`（默认 3）：同票评审达此轮数时主会话介入判断拆票 / 缩范围 / 升级模型（预警，不是硬停）
 - `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次
@@ -207,6 +208,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
 - 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
 - **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
+- 升档补验证的 scoped 属重套件，按 Step 5 的「重套件执行形态」包装执行（拿整机槽位 + 后台轮询）
 - 达到轮次上限仍未过：票置 `needs-human`，附完整轨迹（命令 + 输出 + 已试路径），**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
@@ -219,6 +221,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **测试职责边界按 `verify-policy.gate-scope`**：档位门只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
 - **full 执行时机按 `verify-policy.full-runs`**（默认 `once-at-final`）：full 档票 / 集成票在本步只跑 DoD + fast + scoped 进入评审，完整套件推迟到 Step 8 评审通过后的最终 commit 跑**一次**；evidence 头 `tier-executed: full` 只在该次 full 落盘后填写
 - **先在失败归因按 `verify-policy.attribution` 执行**：`known-failures` 模式下失败先比对落盘的既有失败清单，在清单且签名一致 = 先在失败（显式列出，不进 `all-passed` 分母）；不在清单或签名不符的单项才补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败
+- **重套件执行形态**（scoped / full / 归因补跑；fast 不受限）：一律 `python3 ../shared/scripts/test_slots.py run --label <feature-slug>/<issue-id>/<档> -- <质量门命令>` 包装拿整机槽位（上限见 `host-budget`），并发度 = 分得槽位数（命令内用 `$JOBS`）；**后台执行**、输出与退出码落 worktree `.logs/` 文件后轮询（full 墙钟可超宿主单次命令上限，不得前台久等）；排队超 `host-budget.queue-timeout` 报告而非死等。包装器 stderr 末行摘要的 queue-seconds / run-seconds / jobs 记入 evidence 档位门记录
+- **负载感知的超时处理**：单项超时且包装器记录的运行期 `load-peak` > ncpu → 先串行单独重跑该项一次再归因；重跑通过 = `load-flake`，evidence 列出，不算失败、不进归因；仍败才按归因流程。高负载下的超时不得直接记本票引入，也不得直接记先在失败
 - 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-target`（升档后目标档位，未升档等于 `verify-tier`）/ `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
 - 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
 - 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
@@ -245,7 +249,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 评审通过（pass / pass-with-notes）后：
 
-- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑
+- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑。执行形态同 Step 5（槽位包装 + 后台轮询；单项超时先按 load-flake 规则处理）
 - **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6）；退出码非 0 → 补齐证据 / 重跑最终 full，不转 ready。主会话收口时以同一命令复核
 
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件

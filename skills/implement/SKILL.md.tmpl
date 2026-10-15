@@ -95,6 +95,7 @@ allowed-tools:
 - 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
 - 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
 - **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
+- 升档补验证的 scoped 属重套件，按 Step 5 的「重套件执行形态」包装执行（拿整机槽位 + 后台轮询）
 - 达到轮次上限仍未过：票置 `needs-human`，附完整轨迹（命令 + 输出 + 已试路径），**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
@@ -107,6 +108,8 @@ allowed-tools:
 - **测试职责边界按 `verify-policy.gate-scope`**：档位门只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
 - **full 执行时机按 `verify-policy.full-runs`**（默认 `once-at-final`）：full 档票 / 集成票在本步只跑 DoD + fast + scoped 进入评审，完整套件推迟到 Step 8 评审通过后的最终 commit 跑**一次**；evidence 头 `tier-executed: full` 只在该次 full 落盘后填写
 - **先在失败归因按 `verify-policy.attribution` 执行**：`known-failures` 模式下失败先比对落盘的既有失败清单，在清单且签名一致 = 先在失败（显式列出，不进 `all-passed` 分母）；不在清单或签名不符的单项才补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败
+- **重套件执行形态**（scoped / full / 归因补跑；fast 不受限）：一律 `python3 ../shared/scripts/test_slots.py run --label <feature-slug>/<issue-id>/<档> -- <质量门命令>` 包装拿整机槽位（上限见 `host-budget`），并发度 = 分得槽位数（命令内用 `$JOBS`）；**后台执行**、输出与退出码落 worktree `.logs/` 文件后轮询（full 墙钟可超宿主单次命令上限，不得前台久等）；排队超 `host-budget.queue-timeout` 报告而非死等。包装器 stderr 末行摘要的 queue-seconds / run-seconds / jobs 记入 evidence 档位门记录
+- **负载感知的超时处理**：单项超时且包装器记录的运行期 `load-peak` > ncpu → 先串行单独重跑该项一次再归因；重跑通过 = `load-flake`，evidence 列出，不算失败、不进归因；仍败才按归因流程。高负载下的超时不得直接记本票引入，也不得直接记先在失败
 - 全部退出码为 0 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-target`（升档后目标档位，未升档等于 `verify-tier`）/ `tier-executed` 与完成时 commit hash；**任何一条不过 = 未完成，回到 Step 4**
 - 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
 - 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
@@ -133,7 +136,7 @@ allowed-tools:
 
 评审通过（pass / pass-with-notes）后：
 
-- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑
+- **最终 full（full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑。执行形态同 Step 5（槽位包装 + 后台轮询；单项超时先按 load-flake 规则处理）
 - **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6）；退出码非 0 → 补齐证据 / 重跑最终 full，不转 ready。主会话收口时以同一命令复核
 
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件

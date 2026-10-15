@@ -30,9 +30,17 @@ dispatch:
 
 # 质量门命令
 quality-gate:
-  fast: "pytest -q <相关测试文件>"      # 日常开发默认档：实现 / 自修复每一轮只跑 fast（秒级）
-  scoped: "pytest -q <按最终 diff 换算的受影响测试集>"   # scoped 档票的交付门：选择集从 merge-base..HEAD 的实际 diff 重算
-  full: "pytest -q"                     # full 档票与集成票的交付门：完整测试套件
+  fast: "pytest -q <相关测试文件>"      # 日常开发默认档：实现 / 自修复每一轮只跑 fast（秒级）；fast 不受整机槽位限制
+  scoped: "pytest -q -n $JOBS <按最终 diff 换算的受影响测试集>"   # scoped 档票的交付门：选择集从 merge-base..HEAD 的实际 diff 重算；经 test_slots.py run 包装执行，并发度 = 分得槽位数 $JOBS
+  full: "pytest -q -n $JOBS"            # full 档票与集成票的交付门：完整套件；同样经 test_slots.py run 包装
+
+# 整机测试算力预算（跨项目 / 跨会话共享，防多 agent 任务超卖）
+# 真源是机器级文件 ~/.cache/agent-dev/slots/budget.json（同机各仓共用一份），此处为镜像记录；
+# /setup-dev 写入并核对两者一致，日常执行只读机器级文件
+host-budget:
+  total: 8            # 整机同时运行的重测试 worker 总数上限；默认 ncpu - 2（P+E 混合机型按实测调低）
+  max-runs: 2         # 整机同时运行的重套件（scoped / full / 归因补跑）套数上限；超出排队
+  queue-timeout: 1200 # 排队秒数上限（大于 full 套件 P90）；超时报告而非静默等待
 
 # 验证档位策略：交付验证按票的 verify-tier 分档，不再每票一刀切跑全量
 # 档位含义（累计向下包含）：
@@ -114,6 +122,11 @@ verify-policy:
   #   - 独立用例型套件应并行执行（并发度按机器自定；共享端口 / 文件等资源的用例标记 serial 除外）
   #   - 单项超时分层：默认上限 + slow 白名单（实测头部慢项登记）——避免个别卡死项烧满统一上限
   #   - full 档仍全量跑（slow 项不剔），慢项排前起跑压墙钟；同 tree 已跑过 full 的证据可复用，不重复执行
+  #   - 重套件（scoped / full / 归因补跑）经 shared/scripts/test_slots.py run 包装拿整机槽位
+  #     （上限见 host-budget），并发度 = 分得槽位数（命令内用 $JOBS）；一律后台执行、输出与
+  #     退出码落文件后轮询（full 墙钟可超宿主单次命令上限）；fast 不受限
+  #   - 负载感知超时：单项超时且包装器记录的运行期 load-peak > ncpu → 先串行单独重跑该项一次；
+  #     通过记 load-flake（evidence 列出，不算失败、不进归因），仍败才进归因流程
 
 # 自修复轮次上限（构建失败或评审 BLOCKER 的回修循环，超出打回人工）
 max-fix-rounds: 99
@@ -169,6 +182,7 @@ gitlab-ci: manual
 
 ## 说明
 
+- 整机算力预算：scoped / full / 归因补跑经 `shared/scripts/test_slots.py run` 包装执行（预算真源是机器级 `~/.cache/agent-dev/slots/budget.json`，`host-budget` 节为镜像）；单项超时撞高负载（load-peak > ncpu）先串行重跑，通过记 `load-flake`，不直接归因
 - 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级直接全量，scoped+ 级按影响面可枚举性定档），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，动态依赖与跨模块交互风险由它统一兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
 - 评审与实现的被派发对话模型取 `dispatch.model.<当前宿主>` 按票档位取 default / escalated 清单的第一个当前可用模型（各宿主条目由 `/setup-dev` 逐宿主请人确认）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
