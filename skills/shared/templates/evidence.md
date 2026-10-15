@@ -9,7 +9,9 @@ feature-slug: <feature-slug>
 commit: <完成时 HEAD 的 commit hash>
 branch: feat/<feature-slug>-<issue-id>
 verify-tier: light|scoped|full      # 票 frontmatter 标注的档位
-tier-executed: light|scoped|full    # 实际执行的档位（发生升档时高于票标注值，须附升档原因）
+tier-target: light|scoped|full      # 升档后的目标档位（未升档 = verify-tier；高于票面时 impl-log「漂移与升档记录」须有对应行）
+tier-executed: light|scoped|full    # 实际已执行的档位（once-at-final 下评审前 full 档票为 scoped，最终 full 落盘后改 full）
+isolation:                          # 仅集成票按「模块隔离认定」跑 module-scoped 时填 module-scoped，其余留空
 full-commit: <跑 full 的 commit；须等于 commit，或与之差异仅为不改本票文件 blob 的 rebase>  # full 档才填
 all-passed: true|false    # 全部验收命令与档位门退出码为 0 时才允许 true
 generated: YYYY-MM-DD HH:MM

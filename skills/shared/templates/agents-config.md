@@ -46,6 +46,7 @@ verify-policy:
   light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
   scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full；拆票时预估 > 此值 → 票必须再拆（/issue-split 粒度红线）
   scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full
+  # production-exclude: ["tests/**", "docs/**", "dev/**", "**/*.md"]   # 可选：不计入生产文件数 / LOC 的 glob；缺省用 process_check.py 内置清单
   escalate-triggers:        # 命中任一（声明或实测）→ 升级验证；按两级分别处理，不一律全量
     # —— full 级：影响面难以静态枚举、或错误代价高的变更，直接 full
     - "公共接口 / API 签名变更"                     # full 级
@@ -135,7 +136,7 @@ redlines:
   - "protocols/**"        # 协议文件（示例，按仓库实际填写）
   - "**/secrets*"
   - "**/*.key"
-  - "tests/**"            # 禁止为通过验收而修改测试；TDD 新增测试除外，须在 impl-log 中说明
+  - "tests/**"            # 禁止为通过验收而修改测试；TDD 新增测试除外，须在 impl-log 中说明；票 DoD / tech-spec 明确改变行为导致的旧测试更新（需求驱动更新）登记映射后自动执行，不算命中
 
 # 仓库等级：A = 飞行软件 / 涉密（只读辅助，禁止 /implement）
 #           B = 型号配套工具（全流程）

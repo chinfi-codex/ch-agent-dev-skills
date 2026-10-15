@@ -1,6 +1,6 @@
 ---
 name: ai-review
-version: 0.6.0
+version: 0.7.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
@@ -115,7 +115,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `verify-policy`：验证档位策略（阈值 / 两级升档触发器 / 漂移规则 / 选择机制 / 先在失败归因）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。触发器分两级——full 级（公共接口签名 / 数据迁移 schema / 鉴权权限）直接 full；scoped+ 级（共享模块 / 工具库、红线邻接）先判影响面可枚举性：静态反向闭包完整可枚举 → scoped（选择集 = 全闭包），不可枚举 → full。选择集大小不是升档理由（闭包大跑大闭包，占比 ≥ 50% 仅记录为评审信号）；DAG 无后继的集成票一律 full，动态依赖与跨模块交互风险由它统一兜底——唯一例外「模块隔离认定」：feature 全程只动不被外部依赖的叶子模块时，集成票按 module-scoped 跑该模块全闭包（不机械全仓），判定依据须可机器复核、有疑义仍 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。先在失败归因按 `attribution`：默认 `known-failures`（失败比对落盘清单，仅清单外单项补跑 base 侧对照，不整套重跑）；`two-sided` 为保守档（每条失败双侧同命令对照）。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档。**测试职责边界（`gate-scope`）**：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只执行一次并落盘记录，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖（环境变量 / 外部服务）的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过。**full 次数（`full-runs: once-at-final`）**：full 档每票只在评审通过后的最终 commit 跑一次；评审回修轮只跑 DoD + fast + 回修 diff 的 scoped；无冲突 rebase 且本票文件 blob 不变时复用证据不重跑
 - `max-fix-rounds`：自修复轮次上限，默认 99；`review-round-alert`（默认 3）：同票评审达此轮数时主会话介入判断拆票 / 缩范围 / 升级模型（预警，不是硬停）
 - `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次
-- `mechanical-refresh`：预授权机械刷新白名单（路径 glob + 字段 / 生成块）；diff 可机器证明只动所列字段时直接刷新并登记，不停等人；白名单外的既有测试 / 夹具改动仍按红线处理
+- `mechanical-refresh`：预授权机械刷新白名单（路径 glob + 字段 / 生成块）；diff 可机器证明只动所列字段时直接刷新并登记，不停等人；白名单外的既有测试 / 夹具改动仍按红线处理——唯一例外「需求驱动更新」：票 DoD / tech-spec 明确改变的行为，其冲突旧测试随票更新并逐条登记映射（见 /implement Step 2），不按红线停
 - `artifact-budget`：impl-log / evidence 正文行数与 impl 目录体积上限；正文只留结论与指针，过程放 raw，中间轮原始产物只留最终轮
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
@@ -183,22 +183,22 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
 - **首轮穷尽**：首轮评审一次审完整个 diff、列全所有 BLOCKER，不按批次冻结分段评审、不把可见问题留到后续轮
 
-### Step 3：红线、档位与清理复核（第二双眼睛，确定性检查）
+### Step 3：流程核对读取 + 语义复核（只判代码，不判测试执行）
 
-三项复核共用同一份 diff 文件清单（由 Step 0 的 diff 统计换算，只生成一次，不重复执行 `git diff`）；复核输出只保留命中项与结论，全量清单不进报告、不堆进对话。
+**职责切分**：可机器判定的流程核对（红线 glob 命中与登记、漂移登记、阈值 / 集成票档位下限、evidence 头字段与 commit 一致性）**只由** `../shared/scripts/process_check.py` 做一次——`/implement` 发起评审前已跑 `--phase review` 且必须通过，结果 JSON 路径随评审输入传入。评审员**读它，不重做**：不再自行 grep 红线、数文件、比对 evidence 头。
 
-**红线复核**：`agents-config.redlines` 的 glob 对实际改动文件清单复核一遍（grep 可解释清单，不靠语义猜测）：命中协议 / 密钥 / 测试判定文件 → 无论 ocr 是否报，一律列 Critical BLOCKER。ocr 的 `exclude`（不送审）不等于红线（不允许改），两者不可互替。
+- 未收到核对结果 → 自行只读运行一次（`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <worktree> --phase review`，不加 `--json`，输出不落盘）；结果为 FAIL → 报告只引用其 FAIL 行列为 BLOCKER（critical），不展开复核，结论 `blocked`
+- 核对结果中的 `REVIEW` 项是交给评审的语义判断，按下方逐项处理
 
-**档位复核**：实际 diff（固定点..HEAD）对照票 `verify-tier` / `declared-scope` 与 impl-log「漂移与升档记录」——
+**语义复核**（脚本判不了，评审独有）：
 
-- 实测范围命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值，而票标的是低档且无升档记录 → **BLOCKER（critical）**：该升没升
-- evidence 的 `tier-executed` 低于票 `verify-tier`，或 light / scoped 票宣称跑过 full → BLOCKER（critical）：档位虚标
-- 集成票（无后继票）未标 / 未跑 full → BLOCKER（critical）
-- `full-runs: once-at-final` 下评审时 full 尚未执行属正常（最终 commit 再跑），不报；回修轮只跑回修 diff 的 scoped 属正常
-- 性能阈值未达标、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
-- 漂移已登记、未触发升档条件 → 不报，属正常小漂移
+- **测试改动映射**：核对结果列出的「已登记的既有文件改动」逐条对照 impl-log「红线接触记录」——`mechanical-refresh` 白名单内的确只动所列字段；「需求驱动更新」的「测试 → 票 DoD 条目 / tech-spec 节锚点」映射成立、冲突说明成立、改动限于被变更行为覆盖的断言与夹具 → 正常；映射不上或借机放宽无关断言 → **BLOCKER（critical）**，视同红线
+- **语义升档触发**：diff 实际含 `verify-policy.escalate-triggers` 的语义命中（公共接口 / API 签名、数据迁移 / schema、鉴权权限、共享模块且闭包不可枚举），而核对结果的 `tier-target` 低于应有档位 → **BLOCKER（critical）**：该升没升（阈值与集成票类的升档由脚本判定，不在此重复）
+- **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
+- **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
+- 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 
-**清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存。
+**与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判测试执行状态——full 是否已跑、归因是否完成、evidence 是否已更新到最终 commit，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；这些由 `process_check.py --phase merge` 在收口时把关。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
 
 ### Step 4：解析与映射
 
@@ -209,7 +209,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 ### Step 5：结论、返回与校准
 
 - 结论：无 BLOCKER → `pass`；仅 medium / low → `pass-with-notes`；任一 BLOCKER → `blocked`
-- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：**范围 = 回修增量 diff + 上轮 BLOCKER 是否闭合 + 回修引入的回归**，Step 3 确定性复核重跑；在上轮已审且本轮未改动的代码中新发现的 high，标「首轮漏报」并默认转后续票（记 Medium 遗留 + 建议票），仅 critical、红线命中、数据 / 判定结果错误仍阻塞；复审结果写成独立短报告 `...-review-<issue-id>-rN-YYYY-MM-DD.md`（只含本轮 BLOCKER 表与闭合状态），原报告头部「结论」更新为最新一轮并链接各轮报告，收口方以头部结论为准
+- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：**范围 = 回修增量 diff + 上轮 BLOCKER 是否闭合 + 回修引入的回归**，Step 3 读取新 HEAD 的 `process_check.py --phase review` 结果、只对回修触及的 `REVIEW` 项做语义复核；在上轮已审且本轮未改动的代码中新发现的 high，标「首轮漏报」并默认转后续票（记 Medium 遗留 + 建议票），仅 critical、红线命中、数据 / 判定结果错误仍阻塞；复审结果写成独立短报告 `...-review-<issue-id>-rN-YYYY-MM-DD.md`（只含本轮 BLOCKER 表与闭合状态），原报告头部「结论」更新为最新一轮并链接各轮报告，收口方以头部结论为准
 - 报告路径与结论返回调用方（`/implement` 被派发对话或主会话），供回修或主会话合并判断
 - 标准失配校准：若连续多轮首轮全 PASS / 全 BLOCK，提示人用已合并 MR 回测误报漏报，再修订 `.opencodereview/rule.json` 的 `rules`；反复出现的判据沉淀进仓库 `REVIEW.md`（无则提示人创建）
 
@@ -220,6 +220,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 红线命中一律 Critical，无论引擎结论；档位失配（该升没升 / 档位虚标 / 集成票未 full）与旧实现该删没删（替代落地而旧代码留存、无约束依据）同列 BLOCKER
+- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）与旧测试改动映射不成立（需求驱动更新复核不通过）同列 BLOCKER
+- 不以测试执行状态（full 未跑 / 归因未完 / evidence 未更新）开 BLOCKER 或推迟结论；测试代码质量问题照常评
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语
