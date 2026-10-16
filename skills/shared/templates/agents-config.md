@@ -148,6 +148,17 @@ max-fix-rounds: 99
 # 评审轮次预警：同票评审达到此轮数 → 主会话介入判断（拆票 / 缩范围 / 升级模型），不是硬停
 review-round-alert: 3
 
+# 需求符合性核对（主模型校验）：主会话在合并前核对「要的有没有、偏没偏」——与 ai-review 正交，
+# 评审判代码质量（同档模型够用），本核对判需求语义符合性（必须主模型，实现 / 评审同档模型有同源盲区）。
+# 方法：先独立枚举需求点（反向枚举先行，不看 impl-log 覆盖矩阵），再对照矩阵逐条核映射、打开代码验证语义；
+# 结论落盘 impl/<issue-id>/conformance-<issue-id>.md，process_check.py --phase close 机器把关。
+conformance:
+  mode: always            # always = 每票合并前必核；sampled = 实测 light 档票抽查（未抽中写 verdict: skipped
+                          #   落盘留痕），scoped / full / 集成票仍一律必核（按实测档位 tier-target 判定，升档票不免核）
+  light-sample: 1/3       # sampled 模式下 light 票的抽查比例
+  checker: main-session   # main-session = 主会话亲核（默认，输入有界不读全量代码）；
+                          #   dispatched = 上下文紧张时按派发协议开独立对话核对（模型取 dispatch.model escalated 首选）
+
 # 预授权机械刷新：随生产文件变更必然联动、可由机器证明「只动这些字段」的派生物，
 # 刷新不视为「修改既有测试 / 红线绕过验收」，无需停下等人授权；须在 impl-log 逐文件登记，评审独立复核 diff 只含所列字段
 mechanical-refresh:

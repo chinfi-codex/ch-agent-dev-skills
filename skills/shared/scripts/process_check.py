@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""确定性流程核对：红线 / 漂移 / 档位 / 证据完整性，一处计算、多方读取。
+"""确定性流程核对：红线 / 漂移 / 档位 / 证据完整性 / 需求符合性，一处计算、多方读取。
 
 dev 阶段的流程核对只在这里做一次：/implement 在发起评审前（--phase review）与
-合并前（--phase merge）运行，主会话收口时运行 --phase merge；/ai-review 只读本脚本
+转 ready 前（--phase merge）运行，主会话收口时运行 --phase close（= merge 全部项 +
+需求覆盖矩阵 + 需求符合性核对记录）；/ai-review 只读本脚本
 的输出，不再自行复核 glob、档位与 evidence。本脚本只做可机器判定的事——语义判断
-（需求驱动测试更新的映射是否成立、escalate-triggers 的语义命中、清理复核）留给评审。
+（需求驱动测试更新的映射是否成立、escalate-triggers 的语义命中、清理复核、
+需求点与实现是否语义相符）留给评审与主会话的符合性核对。
 
 用法：
   python3 process_check.py --issue <票文件> --repo <票 worktree 或仓库> \
-      --phase review|merge [--base REV] [--head REV] [--json OUT]
+      --phase review|merge|close [--base REV] [--head REV] [--json OUT]
 
 退出码：0 = 全部通过；1 = 有 FAIL 项；2 = 输入 / 配置错误。
 只依赖 Python 3.8+ 标准库；只读仓库与 dev/ 产物，唯一写入是 --json 指定的文件。
@@ -273,6 +275,11 @@ def run(args) -> tuple[Report, dict]:
     redline_sec = md_section(log_text, "红线接触")
     drift_sec = md_section(log_text, "漂移与升档")
     done_sec = md_section(log_text, "做了什么")
+    matrix_sec = md_section(log_text, "需求覆盖矩阵")
+
+    # 0. 需求覆盖矩阵：主会话符合性核对的索引，缺了等于堵死合并前最后一道门
+    if log_text and not matrix_sec.strip():
+        rep.add("matrix", "FAIL", "impl-log「需求覆盖矩阵」为空或缺失（每行为点一行；无对应实现也须如实登记）")
 
     # 1. 红线：命中即须在 impl-log 登记；新增测试可登记在「做了什么」或「红线接触」
     policy = config.get("verify-policy") or {}
@@ -351,7 +358,7 @@ def run(args) -> tuple[Report, dict]:
     if ev and target is not None:
         executed = tier_of(ev.get("tier-executed"))
         ev_commit = str(ev.get("commit") or "")
-        need = target if args.phase == "merge" else min(target, TIERS["scoped"])
+        need = target if args.phase in ("merge", "close") else min(target, TIERS["scoped"])
         if executed is None:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:
@@ -374,9 +381,29 @@ def run(args) -> tuple[Report, dict]:
             rep.add("evidence", "FAIL", "all-passed 不是 true")
         if not _same_ticket_tree(repo, ev_commit, head, [p for _, p, _, _ in files]):
             rep.add("evidence", "FAIL", f"evidence commit {ev_commit[:8] or '<空>'} 与 HEAD {head[:8]} 的本票文件不一致（证据过期）")
-        if args.phase == "merge" and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
+        if args.phase in ("merge", "close") and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
             if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
                 rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
+
+    # 5. 需求符合性核对（仅 close 相）：主会话合并前核对结论落盘，此处只把机器可判的关
+    if args.phase == "close":
+        conf = config.get("conformance") or {}
+        mode = str(conf.get("mode") or "always")
+        cfile = impl_dir / f"conformance-{issue_id}.md"
+        cv = read_first_yaml_block(cfile) if cfile.is_file() else {}
+        if not cv:
+            rep.add("conformance", "FAIL", f"需求符合性核对记录不存在或缺 yaml 头：{cfile}")
+        else:
+            verdict = str(cv.get("verdict") or "").strip()
+            if verdict == "skipped":
+                if not (mode == "sampled" and target == TIERS["light"]):
+                    rep.add("conformance", "FAIL",
+                            f"verdict: skipped 仅在 conformance.mode=sampled 且实测 light 档时允许"
+                            f"（当前 mode={mode}，档={_name(target) if target is not None else '?'}）")
+            elif verdict != "conform":
+                rep.add("conformance", "FAIL", f"需求符合性核对结论为 {verdict or '<空>'}，须为 conform（deviate / missing 先回修）")
+            elif not _same_ticket_tree(repo, str(cv.get("commit") or ""), head, [p for _, p, _, _ in files]):
+                rep.add("conformance", "FAIL", "conformance commit 与 HEAD 的本票文件不一致（核对过期，回修后须重核）")
 
     meta = {
         "issue": issue_id, "phase": args.phase, "base": base, "head": head,
@@ -402,10 +429,11 @@ def _same_ticket_tree(repo: Path, a: str, b: str, paths) -> bool:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 档位 / 证据）")
+    ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 档位 / 证据 / 需求符合性）")
     ap.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     ap.add_argument("--repo", required=True, help="票 worktree（或含该分支的仓库）路径")
-    ap.add_argument("--phase", choices=["review", "merge"], required=True)
+    ap.add_argument("--phase", choices=["review", "merge", "close"], required=True,
+                    help="review=评审前置门；merge=转 ready 前；close=主会话收口（含符合性核对）")
     ap.add_argument("--base", help="固定点；默认 merge-base(main-branch, head)")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--impl-log")

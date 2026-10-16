@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""process_check.py 的红线 / 漂移 / 档位 / 证据 / full-ref 契约测试。
+"""process_check.py 的红线 / 漂移 / 档位 / 证据 / full-ref / 覆盖矩阵 / 符合性核对契约测试。
 
 运行：python3 -m unittest discover -s skills/shared/scripts/tests -v
 每个用例在独立临时目录建合成 git 仓（main + feat 分支 + dev/ 产物）。
@@ -27,6 +27,12 @@ redlines:
 
 LOG_OK = """## 做了什么
 x
+
+## 需求覆盖矩阵
+
+| 需求点 | 实现位置 | 覆盖测试 | evidence 行 | 关键 |
+|---|---|---|---|---|
+| DoD-1 | src/a.py:f | tests/test_a.py | L3 | ★ |
 
 ## 红线接触记录
 tests/test_a.py 需求驱动更新 -> DoD-1
@@ -161,6 +167,74 @@ class ProcessCheckTest(unittest.TestCase):
         code, out = self.check("merge")
         self.assertEqual(code, 1, out)
         self.assertIn("不是 pass", out)
+
+    # ---- 需求覆盖矩阵 ----
+
+    def test_matrix_section_missing_fails(self):
+        self.log.write_text(LOG_OK.replace("## 需求覆盖矩阵", "## 覆盖矩阵（改名）"), encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 1, out)
+        self.assertIn("需求覆盖矩阵", out)
+
+    # ---- 需求符合性核对（close 相）----
+
+    def write_conformance(self, verdict="conform", commit=None):
+        (self.feat / "impl/issue-001/conformance-issue-001.md").write_text(
+            f"```yaml\nissue: issue-001\ncommit: {commit or self.head}\nverdict: {verdict}\n```\n",
+            encoding="utf-8")
+
+    def write_config(self, extra=""):
+        (self.root / "dev/agents-config.md").write_text(CONFIG.replace("```\n", extra + "```\n"),
+                                                        encoding="utf-8")
+
+    def make_light_ticket(self):
+        sh(self.root, "git", "checkout", "-q", "main")
+        sh(self.root, "git", "checkout", "-qb", "feat-light")
+        (self.root / "src/a.py").write_text("a\nlight\n")
+        sh(self.root, "git", "commit", "-qam", "light work")
+        self.head = sh(self.root, "git", "rev-parse", "HEAD")
+        self.write_issue(tier="light", reason="default")
+        self.write_evidence(target="light", executed="light")
+
+    def test_close_requires_conformance_record(self):
+        code, out = self.check("close")
+        self.assertEqual(code, 1, out)
+        self.assertIn("符合性核对记录不存在", out)
+
+    def test_close_conform_passes(self):
+        self.write_conformance()
+        self.assertEqual(self.check("close")[0], 0)
+
+    def test_close_deviate_or_missing_fails(self):
+        self.write_conformance(verdict="deviate")
+        code, out = self.check("close")
+        self.assertEqual(code, 1, out)
+        self.assertIn("deviate", out)
+
+    def test_close_stale_conformance_fails(self):
+        self.write_conformance()
+        (self.root / "src/a.py").write_text("a\nb\nlate\n")
+        sh(self.root, "git", "commit", "-qam", "late")
+        code, out = self.check("close")
+        self.assertEqual(code, 1, out)
+        self.assertIn("核对过期", out)
+
+    def test_close_skipped_only_for_sampled_light(self):
+        # scoped 票即使 sampled 模式也不允许 skipped
+        self.write_config("conformance:\n  mode: sampled\n")
+        self.write_conformance(verdict="skipped")
+        code, out = self.check("close")
+        self.assertEqual(code, 1, out)
+        self.assertIn("skipped", out)
+        # sampled 模式 + 实测 light 档 → skipped 合法
+        self.make_light_ticket()
+        self.write_conformance(verdict="skipped")
+        self.assertEqual(self.check("close")[0], 0)
+        # 未配 conformance 节（默认 always）的 light 票不许 skipped
+        self.write_config()
+        code, out = self.check("close")
+        self.assertEqual(code, 1, out)
+        self.assertIn("skipped", out)
 
 
 if __name__ == "__main__":

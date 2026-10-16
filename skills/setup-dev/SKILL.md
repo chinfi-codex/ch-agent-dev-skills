@@ -1,6 +1,6 @@
 ---
 name: setup-dev
-version: 0.5.0
+version: 0.6.0
 default-mode: IMPLEMENT_MODE
 description: |
   One-time per-repo setup for the dev-stage skills. Detects ocr / glab /
@@ -88,6 +88,7 @@ allowed-tools:
         issue-001/
           impl-log-issue-001.md
           evidence-issue-001.md
+          conformance-issue-001.md
       reviews/
         <feature-summary>-review-issue-001-YYYY-MM-DD.md
       mr/
@@ -135,6 +136,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `host-budget`：整机测试算力预算（`total` 重测试 worker 总数 / `max-runs` 重套件套数 / `queue-timeout` 排队秒数上限）。真源是机器级文件 `~/.cache/agent-dev/slots/budget.json`（同机各仓共享一份），agents-config 里只是镜像记录，执行以机器级文件为准
 - `verify-policy`：验证档位策略（阈值 / 两级升档触发器 / 漂移规则 / 选择机制 / 先在失败归因）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。触发器分两级——full 级（数据迁移 schema / 鉴权权限）票内 full；scoped+ 级（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 静态反向闭包，闭包不可枚举时标「闭包不完整」仍 scoped。定档 / 升档原因写票 `tier-reason`。**套件级回归三层**：集成票（feature 收尾）票内 full + main 每工作日定时 full（`daily-regression`，人自设定时任务触发，新失败在合入区间内二分到票）+ 迁移 / 鉴权票票内 full；其余票不跑票内 full。选择集大小不是升档理由（闭包大跑大闭包，占比 ≥ 50% 仅记录为评审信号）；DAG 无后继的集成票一律 full，动态依赖与跨模块交互风险由它统一兜底——唯一例外「模块隔离认定」：feature 全程只动不被外部依赖的叶子模块时，集成票按 module-scoped 跑该模块全闭包（不机械全仓），判定依据须可机器复核、有疑义仍 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。先在失败归因按 `attribution`：默认 `known-failures`（失败比对落盘清单，仅清单外单项补跑 base 侧对照，不整套重跑）；`two-sided` 为保守档（每条失败双侧同命令对照）。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档。**测试职责边界（`gate-scope`）**：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只执行一次并落盘记录，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖（环境变量 / 外部服务）的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过。**full 次数（`full-runs: once-at-final`）**：full 档每票只在评审通过后的最终 commit 跑一次；评审回修轮只跑 DoD + fast + 回修 diff 的 scoped；无冲突 rebase 且本票文件 blob 不变时复用证据不重跑
 - `max-fix-rounds`：自修复轮次上限，默认 99；`review-round-alert`（默认 3）：同票评审达此轮数时主会话介入判断拆票 / 缩范围 / 升级模型（预警，不是硬停）
+- `conformance`：需求符合性核对（主模型校验）——主会话在合并前核对「要的有没有、偏没偏」，与 ai-review 正交（评审判代码质量用同档模型，需求语义符合性必须主模型）。方法：先独立枚举需求点（不看 impl-log 覆盖矩阵），再对照矩阵打开代码逐条核语义；结论落盘 `impl/<issue-id>/conformance-<issue-id>.md`，`process_check.py --phase close` 把关。`mode: always`（默认）每票必核，`sampled` 时实测 light 档抽查、其余档必核；`checker: main-session`（默认亲核）或 `dispatched`（派发独立主模型对话，上下文紧张时用）。缺此节按默认执行，即默认启用
 - `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次
 - `mechanical-refresh`：预授权机械刷新白名单（路径 glob + 字段 / 生成块）；diff 可机器证明只动所列字段时直接刷新并登记，不停等人；白名单外的既有测试 / 夹具改动仍按红线处理——唯一例外「需求驱动更新」：票 DoD / tech-spec 明确改变的行为，其冲突旧测试随票更新并逐条登记映射（见 /implement Step 2），不按红线停
 - `artifact-budget`：impl-log / evidence 正文行数与 impl 目录体积上限；正文只留结论与指针，过程放 raw，中间轮原始产物只留最终轮
@@ -181,6 +183,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 10. **max-fix-rounds**：默认 99，可调
 11. **dispatch.model**：被派发对话模型——**按宿主逐个确认**：把 Step 0 枚举的每个宿主的可选模型清单列给人，由人为该宿主分别指定 `default`（light / scoped 票，推荐项 A = 经济性最高、速度快的一档）与 `escalated`（full / 集成 / 高风险票及评审预警后，推荐能力最强的一档）两档优先级清单，宿主支持时一并确认推理强度；取值只能是该宿主清单内的具体模型，不落抽象档位名，不跨宿主套用；`parallel-max` 默认 2
 12. **review-round-alert / base-freeze / mechanical-refresh / artifact-budget**：默认 3 / true / 空清单 / 120 行 + 20MB；mechanical-refresh 按仓库实际的金样本指纹、生成块请人列出
+13. **conformance**：需求符合性核对（合并前主模型校验）——默认 `mode: always`（每票必核）+ `checker: main-session`（主会话亲核），落进配置不问人；人主动提出 light 票抽查或上下文紧张时，才改 `sampled` / `dispatched`
 
 ### Step 2：写配置与种子
 

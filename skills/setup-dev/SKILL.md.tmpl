@@ -1,6 +1,6 @@
 ---
 name: setup-dev
-version: 0.5.0
+version: 0.6.0
 default-mode: IMPLEMENT_MODE
 description: |
   One-time per-repo setup for the dev-stage skills. Detects ocr / glab /
@@ -66,6 +66,7 @@ allowed-tools:
 10. **max-fix-rounds**：默认 99，可调
 11. **dispatch.model**：被派发对话模型——**按宿主逐个确认**：把 Step 0 枚举的每个宿主的可选模型清单列给人，由人为该宿主分别指定 `default`（light / scoped 票，推荐项 A = 经济性最高、速度快的一档）与 `escalated`（full / 集成 / 高风险票及评审预警后，推荐能力最强的一档）两档优先级清单，宿主支持时一并确认推理强度；取值只能是该宿主清单内的具体模型，不落抽象档位名，不跨宿主套用；`parallel-max` 默认 2
 12. **review-round-alert / base-freeze / mechanical-refresh / artifact-budget**：默认 3 / true / 空清单 / 120 行 + 20MB；mechanical-refresh 按仓库实际的金样本指纹、生成块请人列出
+13. **conformance**：需求符合性核对（合并前主模型校验）——默认 `mode: always`（每票必核）+ `checker: main-session`（主会话亲核），落进配置不问人；人主动提出 light 票抽查或上下文紧张时，才改 `sampled` / `dispatched`
 
 ### Step 2：写配置与种子
 

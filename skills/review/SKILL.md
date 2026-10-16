@@ -130,6 +130,7 @@ allowed-tools:
         issue-001/
           impl-log-issue-001.md
           evidence-issue-001.md
+          conformance-issue-001.md
       reviews/
         <feature-summary>-review-issue-001-YYYY-MM-DD.md
       mr/
