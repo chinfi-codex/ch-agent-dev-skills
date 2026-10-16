@@ -74,6 +74,7 @@ allowed-tools:
 - 全部工作发生在 worktree 内；主工作区不放任何本票改动
 - 并行多票 = 各自 worktree，互不干扰；本 skill 一次只驱动一张票
 - worktree 已存在（恢复场景）：检查分支状态后续跑，不重复创建
+- worktree 准备完成、即将进入实现时：主工作区票文件 `status` 从 `confirmed` 置为 `in-progress`；恢复其他活跃状态时保留现状。会话命名按票 frontmatter 投影，不能从 worktree 是否存在反猜状态
 
 ### Step 2：红线即时检查
 

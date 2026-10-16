@@ -13,6 +13,7 @@
 - `handoff/`: 会话交接 skill（横切；不落盘，交接提示词直接输出在对话里供复制到新会话）
 - `shared/fragments/`: 多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
 - `shared/templates/`: 输出格式模板（不内联，agent 运行时按指针读取）
+- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode 会话命名及 hooks 非破坏安装
 - `scripts/`: 生成 `SKILL.md` 的构建脚本
 
 ## 维护规则
@@ -59,6 +60,12 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 同步脚本会自动做两件事：
 1. 重新生成各个 `SKILL.md`
 2. 把最新的各 skill 目录与 `shared/` 复制到你的 Codex skills 目录
+
+此外会安装锁定的 CC Agent SDK 运行依赖，并向 CC 合并 session 自动命名 hooks；不会覆盖已有 hooks。Codex / ZCode 同步共享投影与可选适配器，未配置活跃会话附着命令时不注册空转 hooks。共享脚本回归：
+
+```bash
+python3 -m unittest discover -s skills/shared/scripts/tests -v
+```
 
 ## 产物约定
 

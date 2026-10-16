@@ -19,6 +19,10 @@ sync_flat() {
   for item in "${FLAT_ITEMS[@]}"; do
     rsync -a --delete "$PACK/$item" "$target_root/"
   done
+  if [ -f "$PACK/shared/scripts/package.json" ]; then
+    cp "$PACK/shared/scripts/package.json" "$PACK/shared/scripts/package-lock.json" "$target_root/shared/scripts/"
+    (cd "$target_root/shared/scripts" && npm ci --omit=dev --no-audit --no-fund)
+  fi
   echo "synced (flat)   -> $target_root"
 }
 
@@ -46,3 +50,13 @@ if [ -d "$HOME/.codex" ]; then
 else
   echo "skip: ~/.codex 不存在（宿主未安装）"
 fi
+
+# 安装 CC 原生 session 自动命名 hooks；Codex/ZCode 保留共享投影与可选适配器，
+# 但未提供可附着当前会话的命令时不注册空转 hooks。
+install_title_hooks() {
+  local host="$1"
+  local target_root="$2"
+  python3 "$target_root/shared/scripts/install_host_hooks.py" \
+    --host "$host" --script "$target_root/shared/scripts/session_title.py"
+}
+if [ -d "$HOME/.claude" ]; then install_title_hooks claude "$HOME/.claude/skills"; fi

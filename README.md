@@ -18,4 +18,4 @@
 
 ## 仓库结构
 
-skills/ 下每个 skill 一个目录：SKILL.md.tmpl 是源码，SKILL.md 是生成物；shared/fragments/ 构建时内联，shared/templates/ 运行时读取。改后跑 bash ./sync.sh 重新生成并平铺分发到 Claude Code / ZCode / Kimi Code / Codex。
+skills/ 下每个 skill 一个目录：SKILL.md.tmpl 是源码，SKILL.md 是生成物；shared/fragments/ 构建时内联，shared/templates/ 运行时读取。改后跑 bash ./sync.sh 重新生成并平铺分发到 Claude Code / ZCode / Kimi Code / Codex；同时为 CC 安装按 docs/dev 阶段自动命名顶层 session 的 hooks（合并且保留已有配置），Codex / ZCode 同步共享投影与可选适配器。
