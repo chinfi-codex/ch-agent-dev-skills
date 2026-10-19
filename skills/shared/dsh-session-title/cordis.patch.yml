@@ -1,0 +1,6 @@
+# ch-agent session title bridge：由共享 Python 计算标题，本插件调用原生 sessionTitle.rename。
+
+- insert:
+    - id: ch-agent-session-title
+      name: '@ch-agent/dsh-session-title'
+      config: {}

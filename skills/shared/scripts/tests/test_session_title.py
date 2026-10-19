@@ -140,6 +140,24 @@ class SessionTitleTest(unittest.TestCase):
         self.assertEqual(MODULE.claude_rename({"hook_event_name": "PostToolUse"}, "标题", None),
                          ("标题", "skipped"))
 
+    def test_deepseek_pending_ack_and_manual_protection(self):
+        self.issue()
+        event = {"session_id": "d1", "cwd": str(self.root), "hook_event_name": "UserPromptSubmit",
+                 "prompt": "/implement issue-003", "title_source": "fallback", "session_title": "旧标题"}
+        result = MODULE.refresh("deepseek", event)
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(MODULE.hook_output("deepseek", "UserPromptSubmit", result),
+                         {"action": "rename", "title": result["title"]})
+        saved = MODULE.load_state("deepseek")["sessions"]["deepseek:d1"]
+        self.assertNotIn("last_title", saved)
+        accepted = MODULE.acknowledge("deepseek", "d1", result["title"])
+        self.assertEqual(accepted["status"], "written")
+        event.update(session_title=result["title"], title_source="user")
+        self.assertEqual(MODULE.refresh("deepseek", event)["status"], "unchanged")
+        event["session_title"] = "手工标题"
+        self.assertEqual(MODULE.refresh("deepseek", event)["status"], "paused")
+        self.assertEqual(MODULE.refresh("deepseek", dict(event, origin="subagent"))["reason"], "subagent")
+
     def test_unbound_hook_does_nothing(self):
         result = MODULE.refresh("claude", {"session_id": "s2", "cwd": str(self.root),
                                            "hook_event_name": "UserPromptSubmit", "prompt": "普通问题"})

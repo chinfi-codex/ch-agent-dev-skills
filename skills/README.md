@@ -13,7 +13,8 @@
 - `handoff/`: 会话交接 skill（横切；不落盘，交接提示词直接输出在对话里供复制到新会话）
 - `shared/fragments/`: 多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
 - `shared/templates/`: 输出格式模板（不内联，agent 运行时按指针读取）
-- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode 会话命名及 hooks 非破坏安装
+- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode / DSH 会话命名及 hooks 非破坏安装
+- `shared/dsh-session-title/`: DSH 原生 bundle，监听宿主事件并调用 `ctx.sessionTitle.rename()`，与 Python 两阶段同步 accepted title
 - `scripts/`: 生成 `SKILL.md` 的构建脚本
 
 ## 维护规则
@@ -61,10 +62,11 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 1. 重新生成各个 `SKILL.md`
 2. 把最新的各 skill 目录与 `shared/` 复制到你的宿主 skills 目录（如 `~/.claude/skills/`；DSH 默认为 `~/.dsh/skills/`，设置 `DSH_HOME` 时为 `$DSH_HOME/skills/`）
 
-此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks；不会覆盖已有 hooks（Kimi Code / DSH 只同步 skills，不装 hooks）。共享脚本回归：
+此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks，并注册 DSH 原生 session 标题 bundle；不会覆盖已有 hooks。Kimi Code 只同步 skills，不装 hooks。共享脚本与 DSH 桥接回归：
 
 ```bash
 python3 -m unittest discover -s skills/shared/scripts/tests -v
+node --test skills/shared/dsh-session-title/test_session_title_bridge.mjs
 ```
 
 ## 产物约定

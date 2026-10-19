@@ -25,7 +25,7 @@ try:
 except ImportError:  # 允许作为包外的独立脚本由测试加载
     parse_yaml_subset = None
 
-HOSTS = ("claude", "codex", "zcode")
+HOSTS = ("claude", "codex", "zcode", "deepseek")
 STATE_VERSION = 1
 ISSUE_TITLES = {
     "proposed": "待确认",
@@ -95,7 +95,7 @@ def host_root(host):
     override = os.environ.get("SESSION_TITLE_HOST_ROOT")
     if override:
         return Path(override).expanduser().resolve()
-    names = {"claude": ".claude", "codex": ".codex", "zcode": ".zcode"}
+    names = {"claude": ".claude", "codex": ".codex", "zcode": ".zcode", "deepseek": ".dsh"}
     return Path.home() / names[host]
 
 
@@ -597,6 +597,20 @@ def zcode_rename(event, title, last_title, unchanged=False):
         return title, "written"
 
 
+def deepseek_rename(event, title, last_title, unchanged=False, override_manual=False):
+    """只决定待写标题；原生 Harness 插件 rename 后用 ack 确认。"""
+    current_title = event.get("session_title")
+    source = event.get("title_source")
+    if not override_manual:
+        if last_title and current_title is not None and current_title != last_title:
+            return None, "paused"
+        if not last_title and source == "user" and current_title:
+            return None, "paused"
+    if unchanged:
+        return title, "unchanged"
+    return title, "pending"
+
+
 def claude_rename(event, title, last_title, unchanged=False, override_manual=False):
     current_title = event.get("session_title")
     if not override_manual:
@@ -622,6 +636,8 @@ def rename(host, event, title, last_title, unchanged=False, override_manual=Fals
         return codex_rename(event, title, last_title, unchanged)
     if host == "zcode":
         return zcode_rename(event, title, last_title, unchanged)
+    if host == "deepseek":
+        return deepseek_rename(event, title, last_title, unchanged, override_manual)
     raise SessionTitleError("不支持的宿主")
 
 
@@ -634,7 +650,7 @@ def refresh(host, event, force=False):
     cwd = field(event, "cwd") or os.getcwd()
     if not session_id:
         return {"status": "skipped", "reason": "missing-session-id"}
-    if field(event, "agent_id", "agentId"):
+    if field(event, "agent_id", "agentId") or event.get("origin") == "subagent":
         return {"status": "skipped", "reason": "subagent"}
     state = load_state(host)
     key = binding_key(host, str(session_id))
@@ -682,6 +698,21 @@ def refresh(host, event, force=False):
     return {"status": outcome, "title": title}
 
 
+def acknowledge(host, session_id, accepted_title):
+    accepted_title = str(accepted_title or "").strip()
+    if not accepted_title:
+        raise SessionTitleError("accepted title 不能为空")
+    state = load_state(host)
+    key = binding_key(host, session_id)
+    binding = state["sessions"].get(key)
+    if not binding:
+        raise SessionTitleError("找不到待确认的 session 绑定")
+    binding["last_title"] = accepted_title
+    binding.pop("paused", None)
+    save_state(host, state)
+    return {"status": "written", "title": accepted_title}
+
+
 def desktop_title_context(title):
     params = json.dumps({"session_id": "self", "title": title}, ensure_ascii=False)
     return (
@@ -694,6 +725,8 @@ def desktop_title_context(title):
 
 
 def hook_output(host, event_name, result):
+    if host == "deepseek" and result.get("status") == "pending":
+        return {"action": "rename", "title": result["title"]}
     if host == "claude" and result.get("status") == "native" and event_name in NATIVE_TITLE_EVENTS:
         return {"hookSpecificOutput": {
             "hookEventName": event_name,
@@ -730,6 +763,10 @@ def main(argv=None):
     title_target.add_argument("--feature")
     title_target.add_argument("--issue")
     title.add_argument("--role", choices=("supervisor", "review", "implementation", "requirement"))
+    ack = sub.add_parser("ack", help="原生宿主改名成功后保存实际接受的标题")
+    ack.add_argument("--host", choices=HOSTS, required=True)
+    ack.add_argument("--session-id", required=True)
+    ack.add_argument("--title", required=True)
     hook = sub.add_parser("hook", help="从 stdin 读取宿主 Hook 事件")
     hook.add_argument("--host", choices=HOSTS, required=True)
     hook.add_argument("--force", action="store_true")
@@ -743,6 +780,9 @@ def main(argv=None):
         if args.command == "title":
             binding = normalize_binding(args.repo, feature=args.feature, issue=args.issue, role=args.role)
             print(compute_title(binding))
+            return 0
+        if args.command == "ack":
+            print(json.dumps(acknowledge(args.host, args.session_id, args.title), ensure_ascii=False))
             return 0
         event = read_event()
         result = refresh(args.host, event, args.force)
