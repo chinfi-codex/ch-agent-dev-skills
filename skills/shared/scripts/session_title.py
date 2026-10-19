@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,6 +48,20 @@ NATIVE_TITLE_EVENTS = {"SessionStart", "UserPromptSubmit"}
 
 class SessionTitleError(Exception):
     pass
+
+
+@contextmanager
+def adapter_reentry_guard():
+    key = "SESSION_TITLE_ADAPTER_ACTIVE"
+    previous = os.environ.get(key)
+    os.environ[key] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
 
 
 def field(event, snake, camel=None):
@@ -513,11 +528,10 @@ class NDJSONClient:
 
 
 def codex_rename(event, title, last_title, unchanged=False):
-    command = command_from_env("SESSION_TITLE_CODEX_COMMAND")
+    command = default_command("codex")
     if not command:
-        # 不从 Hook 另起 app-server：新进程不能可靠附着当前活跃线程。
         return None, "unavailable"
-    with NDJSONClient(command, field(event, "cwd") or os.getcwd()) as client:
+    with adapter_reentry_guard(), NDJSONClient(command, field(event, "cwd") or os.getcwd()) as client:
         client.call("initialize", {"clientInfo": {"name": "session-title", "title": "Session Title", "version": "1.0.0"}})
         session_id = field(event, "session_id", "sessionId")
         try:
@@ -542,9 +556,8 @@ def codex_rename(event, title, last_title, unchanged=False):
 
 
 def zcode_rename(event, title, last_title, unchanged=False):
-    command = command_from_env("SESSION_TITLE_ZCODE_COMMAND")
+    command = default_command("zcode")
     if not command:
-        # 不从 Hook 另起 app-server：空会话与活跃桌面会话未必能被新进程 resume。
         return None, "unavailable"
     command = list(command)
     if "--cwd" not in command:
@@ -552,7 +565,7 @@ def zcode_rename(event, title, last_title, unchanged=False):
     session_id = field(event, "session_id", "sessionId")
     if str(session_id).startswith("sess_subagent_"):
         return None, "skipped"
-    with NDJSONClient(command, field(event, "cwd") or os.getcwd()) as client:
+    with adapter_reentry_guard(), NDJSONClient(command, field(event, "cwd") or os.getcwd()) as client:
         current = client.call("session/list", {"sessionIds": [session_id]})
         sessions = current.get("sessions") or []
         if len(sessions) != 1:
@@ -584,14 +597,14 @@ def zcode_rename(event, title, last_title, unchanged=False):
         return title, "written"
 
 
-def claude_rename(event, title, last_title, unchanged=False):
-    session_id = field(event, "session_id", "sessionId")
+def claude_rename(event, title, last_title, unchanged=False, override_manual=False):
     current_title = event.get("session_title")
-    if current_title is not None and last_title:
-        if current_title != last_title:
+    if not override_manual:
+        if current_title is not None and last_title:
+            if current_title != last_title:
+                return None, "paused"
+        elif current_title:
             return None, "paused"
-    elif current_title:
-        return None, "paused"
     if unchanged:
         return title, "unchanged"
     event_name = field(event, "hook_event_name", "hookEventName")
@@ -599,23 +612,12 @@ def claude_rename(event, title, last_title, unchanged=False):
         if event_name == "SessionStart" and event.get("source") not in ("startup", "resume", "fork"):
             return None, "skipped"
         return title, "native"
-    command = command_from_env("SESSION_TITLE_CLAUDE_COMMAND")
-    if not command:
-        import shutil
-        node = shutil.which("node")
-        helper = Path(__file__).with_name("claude_rename_session.mjs")
-        if not node or not helper.is_file():
-            raise SessionTitleError("Claude 非原生事件改名需要 Node 与 Agent SDK")
-        command = [node, str(helper)]
-    completed = subprocess.run(command + [session_id, title, field(event, "cwd") or os.getcwd()], capture_output=True, text=True, timeout=12)
-    if completed.returncode:
-        raise SessionTitleError("Claude 改名失败: {}".format((completed.stderr or completed.stdout).strip()))
-    return title, "written"
+    return title, "skipped"
 
 
-def rename(host, event, title, last_title, unchanged=False):
+def rename(host, event, title, last_title, unchanged=False, override_manual=False):
     if host == "claude":
-        return claude_rename(event, title, last_title, unchanged)
+        return claude_rename(event, title, last_title, unchanged, override_manual)
     if host == "codex":
         return codex_rename(event, title, last_title, unchanged)
     if host == "zcode":
@@ -624,6 +626,8 @@ def rename(host, event, title, last_title, unchanged=False):
 
 
 def refresh(host, event, force=False):
+    if os.environ.get("SESSION_TITLE_ADAPTER_ACTIVE") == "1":
+        return {"status": "skipped", "reason": "adapter-reentry"}
     if host not in HOSTS:
         raise SessionTitleError("host 必须是 claude、codex 或 zcode")
     session_id = field(event, "session_id", "sessionId")
@@ -664,7 +668,7 @@ def refresh(host, event, force=False):
     try:
         title = compute_title(binding)
         # 即使业务标题未变化，也必须先检查用户是否已手工改名。
-        written_title, outcome = rename(host, event, title, binding.get("last_title"), binding.get("last_title") == title and not force)
+        written_title, outcome = rename(host, event, title, binding.get("last_title"), binding.get("last_title") == title and not force, force)
     except (OSError, ValueError, subprocess.SubprocessError, SessionTitleError) as exc:
         return {"status": "error", "reason": str(exc)}
     if outcome == "paused":
@@ -678,9 +682,24 @@ def refresh(host, event, force=False):
     return {"status": outcome, "title": title}
 
 
+def desktop_title_context(title):
+    params = json.dumps({"session_id": "self", "title": title}, ensure_ascii=False)
+    return (
+        "<session-title-sync>\n"
+        "如果当前宿主提供 mcp__ccd_session_mgmt__set_session_title 工具，"
+        "在开始其他工作前用它调用一次，参数为 " + params + "。"
+        "如果没有该工具，忽略本段，不要尝试其他改名方式，也不要向用户提及这一步。\n"
+        "</session-title-sync>"
+    )
+
+
 def hook_output(host, event_name, result):
     if host == "claude" and result.get("status") == "native" and event_name in NATIVE_TITLE_EVENTS:
-        return {"hookSpecificOutput": {"hookEventName": event_name, "sessionTitle": result["title"]}}
+        return {"hookSpecificOutput": {
+            "hookEventName": event_name,
+            "sessionTitle": result["title"],
+            "additionalContext": desktop_title_context(result["title"]),
+        }}
     return None
 
 

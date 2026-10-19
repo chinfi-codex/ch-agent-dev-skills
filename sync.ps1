@@ -17,16 +17,6 @@ function Sync-Flat($TargetRoot) {
     if (Test-Path $Dst) { Remove-Item -Recurse -Force $Dst }
     Copy-Item -Recurse (Join-Path $Pack $Item) $Dst
   }
-  $ScriptDir = Join-Path $TargetRoot "shared\scripts"
-  if (Test-Path (Join-Path $ScriptDir "package.json")) {
-    Push-Location $ScriptDir
-    try {
-      npm ci --omit=dev --no-audit --no-fund
-      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally {
-      Pop-Location
-    }
-  }
   Write-Host "synced (flat)   -> $TargetRoot"
 }
 
@@ -35,10 +25,18 @@ if (Test-Path "$HOME\.zcode")  { Sync-Flat "$HOME\.zcode\skills" }  else { Write
 if (Test-Path "$HOME\.kimi-code") { Sync-Flat "$HOME\.kimi-code\skills" } else { Write-Host "skip: ~/.kimi-code 不存在（宿主未安装）" }
 if (Test-Path "$HOME\.codex")  { Sync-Flat "$HOME\.codex\skills" }  else { Write-Host "skip: ~/.codex 不存在（宿主未安装）" }
 
-# 安装 CC 原生 session 自动命名 hooks；Codex/ZCode 未提供可附着命令时不注册空转 hooks。
+# DeepSeek Harness（DSH）只同步 skills：dsh-skill-filesystem 默认扫描 ~/.dsh/skills，
+# 设置 DSH_HOME 时扫描 $DSH_HOME/skills；目录变化在下一次模型步骤即时生效，无需重启。
+$DSHRoot = Join-Path $HOME ".dsh"
+if ($env:DSH_HOME) { $DSHRoot = $env:DSH_HOME }
+if (Test-Path $DSHRoot) { Sync-Flat (Join-Path $DSHRoot "skills") } else { Write-Host "skip: $DSHRoot 不存在（宿主未安装）" }
+
+# 安装三宿主 session 自动命名 hooks；合并配置，不覆盖已有 hooks（DSH 不安装本套 hooks）。
 function Install-TitleHooks($HostName, $TargetRoot) {
   $ScriptDir = Join-Path $TargetRoot "shared\scripts"
   python (Join-Path $ScriptDir "install_host_hooks.py") --host $HostName --script (Join-Path $ScriptDir "session_title.py")
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 if (Test-Path "$HOME\.claude") { Install-TitleHooks "claude" "$HOME\.claude\skills" }
+if (Test-Path "$HOME\.zcode") { Install-TitleHooks "zcode" "$HOME\.zcode\skills" }
+if (Test-Path "$HOME\.codex") { Install-TitleHooks "codex" "$HOME\.codex\skills" }

@@ -43,9 +43,9 @@ bash skills/scripts/build-all.sh
 powershell -ExecutionPolicy Bypass -File skills/scripts/build-all.ps1
 ```
 
-## 同步到 Codex
+## 同步到各宿主
 
-如果你已经把这个仓库安装到了 Codex，修改模板后还需要同步一次，否则 Codex 里的版本不会自动更新。
+如果你已经把这个仓库安装到了某个宿主（Claude Code / ZCode / Kimi Code / Codex / DeepSeek Harness（DSH）），修改模板后还需要同步一次，否则宿主里的版本不会自动更新。
 
 ```bash
 bash ./sync.sh
@@ -59,9 +59,9 @@ powershell -ExecutionPolicy Bypass -File .\sync.ps1
 
 同步脚本会自动做两件事：
 1. 重新生成各个 `SKILL.md`
-2. 把最新的各 skill 目录与 `shared/` 复制到你的 Codex skills 目录
+2. 把最新的各 skill 目录与 `shared/` 复制到你的宿主 skills 目录（如 `~/.claude/skills/`；DSH 默认为 `~/.dsh/skills/`，设置 `DSH_HOME` 时为 `$DSH_HOME/skills/`）
 
-此外会安装锁定的 CC Agent SDK 运行依赖，并向 CC 合并 session 自动命名 hooks；不会覆盖已有 hooks。Codex / ZCode 同步共享投影与可选适配器，未配置活跃会话附着命令时不注册空转 hooks。共享脚本回归：
+此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks；不会覆盖已有 hooks（Kimi Code / DSH 只同步 skills，不装 hooks）。共享脚本回归：
 
 ```bash
 python3 -m unittest discover -s skills/shared/scripts/tests -v

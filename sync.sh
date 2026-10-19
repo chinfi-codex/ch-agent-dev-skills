@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 同步 skills/ 到本机各 agent 宿主的 skills 目录。
 # 两件事：1) 重新生成全部 SKILL.md；2) 按各宿主布局分发（平铺：skill 目录 + shared）。
-#   Claude Code / ZCode / Kimi Code / Codex：平铺 -> ~/.claude/skills/、~/.zcode/skills/、~/.kimi-code/skills/、~/.codex/skills/
+#   Claude Code / ZCode / Kimi Code / Codex / DeepSeek Harness（DSH）：平铺到各宿主 skills 目录。
+#   DSH 默认使用 ~/.dsh/skills/；设置 DSH_HOME 时使用 $DSH_HOME/skills/。
 # 用法：在仓库根目录执行 bash ./sync.sh（维护者环境需 Node >= 22.6）
 set -euo pipefail
 
@@ -19,10 +20,6 @@ sync_flat() {
   for item in "${FLAT_ITEMS[@]}"; do
     rsync -a --delete "$PACK/$item" "$target_root/"
   done
-  if [ -f "$PACK/shared/scripts/package.json" ]; then
-    cp "$PACK/shared/scripts/package.json" "$PACK/shared/scripts/package-lock.json" "$target_root/shared/scripts/"
-    (cd "$target_root/shared/scripts" && npm ci --omit=dev --no-audit --no-fund)
-  fi
   echo "synced (flat)   -> $target_root"
 }
 
@@ -51,8 +48,16 @@ else
   echo "skip: ~/.codex 不存在（宿主未安装）"
 fi
 
-# 安装 CC 原生 session 自动命名 hooks；Codex/ZCode 保留共享投影与可选适配器，
-# 但未提供可附着当前会话的命令时不注册空转 hooks。
+# DeepSeek Harness（DSH）只同步 skills：dsh-skill-filesystem 默认扫描 ~/.dsh/skills，
+# 设置 DSH_HOME 时扫描 $DSH_HOME/skills；目录变化在下一次模型步骤即时生效，无需重启。
+DSH_ROOT="${DSH_HOME:-$HOME/.dsh}"
+if [ -d "$DSH_ROOT" ]; then
+  sync_flat "$DSH_ROOT/skills"
+else
+  echo "skip: $DSH_ROOT 不存在（宿主未安装）"
+fi
+
+# 安装三宿主 session 自动命名 hooks；合并配置，不覆盖已有 hooks（DSH 不安装本套 hooks）。
 install_title_hooks() {
   local host="$1"
   local target_root="$2"
@@ -60,3 +65,5 @@ install_title_hooks() {
     --host "$host" --script "$target_root/shared/scripts/session_title.py"
 }
 if [ -d "$HOME/.claude" ]; then install_title_hooks claude "$HOME/.claude/skills"; fi
+if [ -d "$HOME/.zcode" ]; then install_title_hooks zcode "$HOME/.zcode/skills"; fi
+if [ -d "$HOME/.codex" ]; then install_title_hooks codex "$HOME/.codex/skills"; fi

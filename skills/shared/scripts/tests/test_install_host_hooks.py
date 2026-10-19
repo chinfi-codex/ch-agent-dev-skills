@@ -44,8 +44,9 @@ class InstallHostHooksTest(unittest.TestCase):
         self.assertEqual(len(data["hooks"]["UserPromptSubmit"]), 2)
         managed = [g for g in data["hooks"]["UserPromptSubmit"] if "session_title.py" in str(g)]
         self.assertEqual(len(managed), 1)
-        self.assertIn("PostToolUse", data["hooks"])
-        self.assertEqual(data["hooks"]["PostToolUse"][0]["matcher"], "Write|Edit")
+        self.assertEqual(managed[0]["hooks"][0]["timeout"], 60)
+        self.assertNotIn("PostToolUse", data["hooks"])
+        self.assertNotIn("Stop", data["hooks"])
 
     def test_codex_uses_flat_hooks_and_zcode_uses_events(self):
         codex = self.root / "codex.json"
@@ -56,6 +57,7 @@ class InstallHostHooksTest(unittest.TestCase):
         codex_data = json.loads(codex.read_text(encoding="utf-8"))
         zcode_data = json.loads(zcode.read_text(encoding="utf-8"))
         self.assertIn("SessionStart", codex_data["hooks"])
+        self.assertEqual(codex_data["hooks"]["PostToolUse"][0]["matcher"], "Write|Edit")
         self.assertTrue(zcode_data["hooks"]["enabled"])
         self.assertIn("Stop", zcode_data["hooks"]["events"])
         self.assertEqual(zcode_data["mcp"], {"servers": {"keep": {}}})
@@ -75,7 +77,7 @@ class InstallHostHooksTest(unittest.TestCase):
         ]}}), encoding="utf-8")
         self.assertEqual(self.run_install("claude", config).returncode, 0)
         data = json.loads(config.read_text(encoding="utf-8"))
-        self.assertEqual(len(data["hooks"]["Stop"]), 2)
+        self.assertEqual(len(data["hooks"]["Stop"]), 1)
         self.assertEqual(data["hooks"]["Stop"][0]["matcher"], "keep")
 
     def test_remove_only_owned_hooks(self):

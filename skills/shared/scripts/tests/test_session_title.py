@@ -123,14 +123,22 @@ class SessionTitleTest(unittest.TestCase):
                  "prompt": "/implement issue-003"}
         result = MODULE.refresh("claude", event)
         self.assertEqual(result["status"], "native")
-        self.assertEqual(MODULE.hook_output("claude", "UserPromptSubmit", result)["hookSpecificOutput"]["sessionTitle"],
-                         "[待执行] 订单超时 · issue-003 修复支付回调超时")
+        output = MODULE.hook_output("claude", "UserPromptSubmit", result)["hookSpecificOutput"]
+        self.assertEqual(output["sessionTitle"], "[待执行] 订单超时 · issue-003 修复支付回调超时")
+        self.assertIn("mcp__ccd_session_mgmt__set_session_title", output["additionalContext"])
+        self.assertIn('"session_id": "self"', output["additionalContext"])
         saved = MODULE.load_state("claude")["sessions"]["claude:s1"]
         self.assertEqual(saved["last_title"], result["title"])
         event["session_title"] = "我的手工标题"
         result = MODULE.refresh("claude", event)
         self.assertEqual(result["status"], "paused")
         self.assertEqual(result["reason"], "manual-title")
+        forced = MODULE.refresh("claude", event, force=True)
+        self.assertEqual(forced["status"], "native")
+
+    def test_claude_non_native_event_does_not_use_transcript_sdk(self):
+        self.assertEqual(MODULE.claude_rename({"hook_event_name": "PostToolUse"}, "标题", None),
+                         ("标题", "skipped"))
 
     def test_unbound_hook_does_nothing(self):
         result = MODULE.refresh("claude", {"session_id": "s2", "cwd": str(self.root),
@@ -198,14 +206,18 @@ class SessionTitleTest(unittest.TestCase):
             result = MODULE.codex_rename({"session_id": "thread-1", "cwd": str(self.root)}, "更新标题", "新标题")
             self.assertEqual(result, (None, "skipped"))
 
-    def test_protocol_adapters_require_explicit_attachment(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SESSION_TITLE_CODEX_COMMAND", None)
-            os.environ.pop("SESSION_TITLE_ZCODE_COMMAND", None)
+    def test_protocol_adapters_require_available_app_server(self):
+        with mock.patch.object(MODULE, "default_command", return_value=None):
             self.assertEqual(MODULE.codex_rename({"session_id": "t", "cwd": str(self.root)}, "新标题", None),
                              (None, "unavailable"))
             self.assertEqual(MODULE.zcode_rename({"session_id": "sess_root", "cwd": str(self.root)}, "新标题", None),
                              (None, "unavailable"))
+
+    def test_adapter_reentry_is_skipped(self):
+        with mock.patch.dict(os.environ, {"SESSION_TITLE_ADAPTER_ACTIVE": "1"}):
+            result = MODULE.refresh("zcode", {"session_id": "nested", "cwd": str(self.root),
+                                              "hook_event_name": "SessionStart"})
+        self.assertEqual(result, {"status": "skipped", "reason": "adapter-reentry"})
 
     def test_invalid_or_missing_artifacts_fail_closed(self):
         binding = self.feature_binding()

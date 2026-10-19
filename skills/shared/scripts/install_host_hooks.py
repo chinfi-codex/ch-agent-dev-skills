@@ -14,6 +14,11 @@ from pathlib import Path
 HOSTS = ("claude", "codex", "zcode")
 MARKER = "session_title.py"
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "Stop")
+HOST_EVENTS = {
+    "claude": ("SessionStart", "UserPromptSubmit"),
+    "codex": EVENTS,
+    "zcode": EVENTS,
+}
 
 
 def atomic_json_write(path, data):
@@ -41,7 +46,7 @@ def python_prefix():
 
 def hook_item(host, script):
     command = " ".join(shlex.quote(x) for x in python_prefix() + [str(script), "hook", "--host", host])
-    return {"type": "command", "command": command, "timeout": 15}
+    return {"type": "command", "command": command, "timeout": 60}
 
 
 def is_managed_item(item):
@@ -54,11 +59,9 @@ def is_managed_item(item):
 
 
 def merge_events(existing, host, script, zcode_nested=False):
-    result = dict(existing) if isinstance(existing, dict) else {}
-    for event in EVENTS:
-        old = result.get(event)
-        groups = list(old) if isinstance(old, list) else []
-        groups = [g for g in groups if not is_managed_item(g)]
+    result = remove_events(existing)
+    for event in HOST_EVENTS[host]:
+        groups = list(result.get(event) or [])
         matcher = "startup|resume|fork" if event == "SessionStart" else ("Write|Edit" if event == "PostToolUse" else None)
         group = {"hooks": [hook_item(host, script)]}
         if matcher:
