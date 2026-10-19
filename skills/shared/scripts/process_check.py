@@ -31,6 +31,11 @@ DEFAULT_NON_PRODUCTION = [
     "tests/**", "**/tests/**", "test/**", "**/test/**", "**/test_*", "**/*_test.*",
     "**/*.test.*", "**/*.spec.*", "docs/**", "dev/**", "**/*.md",
 ]
+# 测试文件（见红告警用；比 DEFAULT_NON_PRODUCTION 窄，只含测试）
+TEST_PATTERNS = [
+    "tests/**", "**/tests/**", "test/**", "**/test/**", "**/test_*", "**/*_test.*",
+    "**/*.test.*", "**/*.spec.*",
+]
 
 
 class InputError(Exception):
@@ -299,6 +304,12 @@ def run(args) -> tuple[Report, dict]:
     if semantic:
         rep.add("redline", "REVIEW", "已登记的既有文件改动，需评审复核映射 / 字段范围：" + ", ".join(semantic))
 
+    # 1b. 见红证据：TDD 新增测试须在「做了什么」登记见红记录（先 REVIEW 告警，观察后转 FAIL）
+    added_tests = [p for st, p, _, _ in files if st == "A" and match_any(p, TEST_PATTERNS)]
+    if added_tests and "见红" not in done_sec:
+        rep.add("tdd-red", "REVIEW",
+                "新增测试未见红登记（impl-log「做了什么」须记首次失败输出要点）：" + ", ".join(added_tests))
+
     # 2. 漂移：declared-scope 外的文件须在「漂移与升档」节登记
     non_prod = policy.get("production-exclude") or DEFAULT_NON_PRODUCTION
     prod = [(st, p, a, d) for st, p, a, d in files if not match_any(p, non_prod)]
@@ -355,6 +366,9 @@ def run(args) -> tuple[Report, dict]:
             rep.add("tier", "FAIL", f"tier-target 升至 {_name(target)}，但 impl-log「漂移与升档记录」无对应升档行")
 
     # 4. 证据：按阶段核对执行档位、commit 与 all-passed
+    ev_text = evidence.read_text(encoding="utf-8") if evidence.is_file() else ""
+    if str(fm.get("type") or "").strip() == "bug" and ev_text and not md_section(ev_text, "回归有效性").strip():
+        rep.add("evidence", "FAIL", "type: bug 票缺 evidence「回归有效性」节（revert 修复 → 见红 → 恢复 → 绿）")
     if ev and target is not None:
         executed = tier_of(ev.get("tier-executed"))
         ev_commit = str(ev.get("commit") or "")

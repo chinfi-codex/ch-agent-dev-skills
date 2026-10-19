@@ -101,6 +101,8 @@ allowed-tools:
 - **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`。动态依赖与跨模块交互风险由终点票兜底，跨 feature 的回归由 main 每日回归（`verify-policy.daily-regression`）兜底，这正是前序票允许用闭包替代全量的前提。**唯一例外「模块隔离认定」**：本 feature 全部票的生产 diff 都落在同一叶子模块（按 selection 反向闭包判定不被本 feature 外生产代码 import）、未命中 full 级触发器、不碰共享模块 / 公共接口 → 集成票改按 module-scoped 跑该模块全闭包（不是只跑本票 diff），定档时在票面写明隔离判定依据；有疑义仍 full
 - `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
 
+**判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
+
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
 
 向用户呈现编号清单，一次审全部：

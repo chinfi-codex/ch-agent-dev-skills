@@ -47,6 +47,13 @@ generated: YYYY-MM-DD HH:MM
 - load-flake 清单（如有）：超时单项 + 运行期 load-peak + 串行重跑退出码；load-flake 不算失败、不进归因、不进 `all-passed` 分母
 - 升档记录（如有）：触发原因（escalate-triggers 命中项及其级别 / 超 scoped-max-* 阈值；scoped+ 级另记可枚举性判定依据）+ 升档时间点
 
+## 回归有效性（仅 `type: bug` 票必填）
+
+> 证明回归测试真的能抓住这个 bug：revert 生产修复（保留测试）须见红，恢复后须绿。revert 后不变红 = 测试从未复现 bug，修复不算完成。
+
+- revert 修复后重跑回归测试：命令 + 退出码（须非 0、断言失败）+ 失败输出要点
+- 恢复修复后重跑：命令 + 退出码 `0`
+
 ## 人工确认项（non-gating，不进 all-passed）
 
 - 性能 / 展示类结果：命令、原始输出路径、与参考值对比（只陈述，不判通过）

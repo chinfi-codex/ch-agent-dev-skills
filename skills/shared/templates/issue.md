@@ -2,6 +2,7 @@
 feature-slug: <feature-slug>
 issue-id: issue-001
 title: <一句话标题，动词开头>
+type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5
 status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done
 blocked-by: []          # 例如 [issue-001]；frontier 票此处为空
 verify-tier: scoped     # 交付验证档位：light / scoped / full；由 /issue-split 按 verify-policy 计算并过门②确认，

@@ -176,6 +176,46 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("需求覆盖矩阵", out)
 
+    # ---- 见红告警与 bug 票回归有效性 ----
+
+    def test_added_test_without_red_evidence_warns(self):
+        # 新增测试命中红线 tests/**，登记但不记见红 → 红线通过但收 REVIEW 告警
+        (self.root / "tests/test_new.py").write_text("new\n")
+        sh(self.root, "git", "add", "tests/test_new.py")
+        sh(self.root, "git", "commit", "-qm", "add test")
+        self.head = sh(self.root, "git", "rev-parse", "HEAD")
+        self.write_evidence(target="scoped", executed="scoped")
+        self.log.write_text(LOG_OK.replace("## 做了什么\nx", "## 做了什么\nx；tests/test_new.py 新增登记"),
+                            encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        self.assertIn("tdd-red", out)
+        # 补上见红记录 → 告警消失
+        self.log.write_text(LOG_OK.replace("## 做了什么\nx", "## 做了什么\nx；tests/test_new.py 见红：断言失败，预期 1 实得 0"),
+                            encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("tdd-red", out)
+
+    def test_bug_ticket_requires_revert_section(self):
+        self.issue.write_text(
+            "---\nissue-id: issue-001\ntype: bug\nblocked-by: []\nverify-tier: scoped\ntier-reason: default\n"
+            'declared-scope: ["src/a.py"]\n---\n', encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 1, out)
+        self.assertIn("回归有效性", out)
+        # 补上回归有效性节 → 通过
+        ev_path = self.feat / "impl/issue-001/evidence-issue-001.md"
+        ev_path.write_text(ev_path.read_text(encoding="utf-8")
+                           + "\n## 回归有效性（仅 `type: bug` 票必填）\n\n- revert 后重跑：exit 1（断言失败）\n- 恢复后重跑：exit 0\n",
+                           encoding="utf-8")
+        self.assertEqual(self.check("review")[0], 0)
+        # feature 票（缺省类型）不要求该节
+        self.write_issue(tier="scoped", reason="default")
+        ev_path.write_text(f"```yaml\ncommit: {self.head}\nverify-tier: scoped\ntier-target: scoped\n"
+                           "tier-executed: scoped\nall-passed: true\n```\n", encoding="utf-8")
+        self.assertEqual(self.check("review")[0], 0)
+
     # ---- 需求符合性核对（close 相）----
 
     def write_conformance(self, verdict="conform", commit=None):
