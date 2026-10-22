@@ -11,6 +11,11 @@
 
 退出码：0 = 通过（或初始化成功）；1 = 有 FAIL 发现；2 = 输入 / 配置错误。
 只依赖 Python 3.8+ 标准库。
+
+多分支口径：接口表可选第 6 列「分支」。该列为空的条目在当前检出（工作树）核实；
+填写分支名的条目用 `git show <分支>:<文件>` 在该分支上核实——多现行分支项目
+（如 A 线 / B 线长期并行）的架构差异逐条标注分支即可机器核对，无需切换检出。
+非 git 仓库中的分支条目只 INFO 提示，不 FAIL。
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ import argparse
 import datetime
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,7 +68,9 @@ def info(results, check_id, message):
 
 
 def split_row(line):
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """按未转义的 `|` 切单元格（`\\|` 是单元格内的字面竖线，markdown 惯例）。"""
+    parts = re.split(r"(?<!\\)\|", line.strip().strip("|"))
+    return [p.replace("\\|", "|").strip() for p in parts]
 
 
 def is_retired(cells):
@@ -270,6 +278,18 @@ def iter_locations(cell):
             yield part
 
 
+def git_show(repo, branch, path):
+    """读 <branch>:<path> 内容。返回 (content, None)；不存在/失败返回 (None, 原因)。"""
+    try:
+        r = subprocess.run(["git", "show", f"{branch}:{path}"],
+                           cwd=repo, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"git 不可用（{exc}）"
+    if r.returncode != 0:
+        return None, "分支上不存在"
+    return r.stdout, None
+
+
 def check_code(repo, results, arch_rows, arch_interfaces):
     if arch_rows is not None:
         for row in arch_rows:
@@ -279,11 +299,29 @@ def check_code(repo, results, arch_rows, arch_interfaces):
                 target = repo / loc.split(":", 1)[0]
                 if not target.exists():
                     fail(results, "CODE-2", f"模块「{row[0]}」登记的代码位置不存在：{loc}")
+    git_ok = None
     for row in arch_interfaces:
         if len(row) < 3:
             continue
+        branch = row[5].strip(" `") if len(row) > 5 and row[5] not in PLACEHOLDERS else ""
         for loc in iter_locations(row[2]):
             path_part, _, symbol = loc.rpartition(":")
+            if branch:
+                if git_ok is None:
+                    git_ok = (repo / ".git").exists()
+                    if not git_ok:
+                        info(results, "CODE-1", "非 git 仓库，分支条目的跨分支核实跳过（不 FAIL）")
+                if not git_ok:
+                    break
+                content, err = git_show(repo, branch, path_part)
+                if err is not None:
+                    fail(results, "CODE-1",
+                         f"接口「{row[0]}」登记的文件在分支 {branch} 上不存在：{path_part}")
+                    continue
+                if symbol and symbol.strip() not in content:
+                    fail(results, "CODE-1",
+                         f"接口「{row[0]}」登记的符号在 {branch}:{path_part} 中检索不到：{symbol.strip()}（该分支漂移或已改名）")
+                continue
             target = repo / path_part
             if not target.is_file():
                 fail(results, "CODE-1", f"接口「{row[0]}」登记的文件不存在：{path_part}")

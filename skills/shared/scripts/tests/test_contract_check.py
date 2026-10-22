@@ -106,6 +106,10 @@ def run(*args, cwd=None):
     )
 
 
+def sh(cwd, *args):
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
 def make_repo(root, glossary=GLOSSARY, arch=None, specs=(), issues=(), code_files=()):
     """specs/issues: (relpath, content)；code_files: (relpath, content)。"""
     docs = root / "docs"
@@ -323,6 +327,86 @@ class CheckTest(unittest.TestCase):
             r = run("--check", "--repo", str(root))
             self.assertEqual(r.returncode, 1)
             self.assertIn("SPEC-2", r.stdout)
+
+
+class BranchTest(unittest.TestCase):
+    """接口表第 6 列「分支」：跨分支核实（git show），不切换检出。"""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name)
+        sh(self.root, "git", "init", "-b", "main")
+        sh(self.root, "git", "config", "user.email", "t@t")
+        sh(self.root, "git", "config", "user.name", "t")
+        (self.root / "a.py").write_text("alpha\n", encoding="utf-8")
+        sh(self.root, "git", "add", ".")
+        sh(self.root, "git", "commit", "-m", "init")
+        sh(self.root, "git", "checkout", "-b", "feat/x")
+        (self.root / "a.py").write_text("beta\n", encoding="utf-8")  # feat/x 上 alpha 改名 beta
+        (self.root / "b.py").write_text("only_on_x\n", encoding="utf-8")
+        sh(self.root, "git", "add", ".")
+        sh(self.root, "git", "commit", "-m", "x")
+        sh(self.root, "git", "checkout", "main")  # 工作树回到 main（alpha 版）
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def make_arch(self, rows):
+        body = "\n".join(
+            f"| {name} | sig | {loc} | src | 2026-01-01 | {branch} |" for name, loc, branch in rows
+        )
+        return ("# ARCHITECTURE\n\n## 模块现行态\n\n| 模块 | 职责 | 代码位置 | 成员 |\n| --- | --- | --- | --- |\n| … | … | … | … |\n\n"
+                "## 接口现行态\n\n| 接口 | 签名 | 代码位置 | 来源 | 生效日期 | 分支 |\n| --- | --- | --- | --- | --- | --- |\n"
+                f"{body}\n")
+
+    def write_arch(self, rows):
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "ARCHITECTURE.md").write_text(self.make_arch(rows), encoding="utf-8")
+
+    def test_branch_row_verified_on_named_branch(self):
+        # b.py:only_on_x 仅存在于 feat/x：空分支在工作树核实 → FAIL；标注 feat/x → PASS
+        self.write_arch([("if-x", "b.py:only_on_x", "feat/x")])
+        r = run("--check", "--repo", str(self.root))
+        self.assertNotIn("CODE-1", r.stdout)
+
+    def test_branch_row_fails_when_symbol_absent_on_that_branch(self):
+        # alpha 在 feat/x 已被改名：标注 feat/x 的 a.py:alpha → FAIL；不标分支（工作树 main）→ PASS
+        self.write_arch([("if-a-x", "a.py:alpha", "feat/x"), ("if-a-main", "a.py:alpha", "")])
+        r = run("--check", "--repo", str(self.root))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("if-a-x", r.stdout)
+        self.assertIn("feat/x:a.py", r.stdout)
+        self.assertNotIn("if-a-main」", r.stdout)
+
+    def test_branch_row_fails_when_file_absent_on_named_branch(self):
+        self.write_arch([("if-b-main", "b.py:only_on_x", "main")])
+        r = run("--check", "--repo", str(self.root))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("分支 main 上不存在", r.stdout)
+
+    def test_escaped_pipe_in_cell_does_not_split(self):
+        # 签名列含 \|（markdown 转义竖线）时不得把单元格切散、列不错位
+        arch = ("# ARCHITECTURE\n\n## 接口现行态\n\n"
+                "| 接口 | 签名 | 代码位置 | 来源 | 生效日期 | 分支 |\n"
+                "| --- | --- | --- | --- | --- | --- |\n"
+                "| reply CLI | render --kind round\\|diff\\|published | skills/x/reply.py:def render | s.md | 2026-01-01 | main |\n")
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "ARCHITECTURE.md").write_text(arch, encoding="utf-8")
+        (self.root / "skills/x").mkdir(parents=True)
+        (self.root / "skills/x" / "reply.py").write_text("def render():\n    pass\n", encoding="utf-8")
+        sh(self.root, "git", "add", ".")
+        sh(self.root, "git", "commit", "-m", "add reply on main")  # setUp 结束于 main，分支列指 main 走 git 核实路径
+        r = run("--check", "--repo", str(self.root))
+        self.assertNotIn("CODE-1", r.stdout)
+
+    def test_branch_row_in_non_git_repo_is_info(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "docs").mkdir()
+            (root / "docs" / "ARCHITECTURE.md").write_text(self.make_arch([("if-x", "b.py:only_on_x", "feat/x")]), encoding="utf-8")
+            r = run("--check", "--repo", str(root))
+            self.assertNotIn("[FAIL] CODE-1", r.stdout)
+            self.assertIn("非 git 仓库", r.stdout)
 
 
 if __name__ == "__main__":
