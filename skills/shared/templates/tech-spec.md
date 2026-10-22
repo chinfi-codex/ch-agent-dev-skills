@@ -5,6 +5,7 @@ feature_slug: <feature-slug>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 草稿        # 草稿 | 已确认（待拆解）—— /issue-split 以 status = 已确认（待拆解） 为开工门禁
+supersedes:          # 可空：本 tech-spec 整体取代的旧 tech-spec 文件名（flow-forward 取代链，机器可读；部分取代不填，在 3.2 节写清废弃项）
 upstream:                  # 标准路径：定稿 PRD + pd-review-report；小变更路径：change-request（删 pd-review-report 行）
   prd: <PRD 文件名>                # 小变更路径改写 change-request 文件名
   pd-review-report: <pd-review-report 文件名>
@@ -24,6 +25,11 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 ### 3.1 模块拆解
 ### 3.2 接口变更（新增 / 修改 / 废弃）
+
+<!-- 本节非空 ⇒ /issue-split 会把「更新 ARCHITECTURE.md 接口表」生成承接票的契约 DoD（可自动判定：git diff 命中接口条目）。
+     tech-spec 定稿时不直接回写接口表——接口在代码合并后才成为现行态，由承接票在 worktree 分支内落现行态。
+     本节写的废弃项若取代旧 tech-spec 的接口，frontmatter supersedes 填被整体取代的旧 spec 文件名；部分取代在下方逐条写清废弃对象。 -->
+
 ### 3.3 数据与存储
 ### 3.4 关键流程（主路径 + 失败路径）
 ### 3.5 决策性片段（可选，来自原型 verdict）

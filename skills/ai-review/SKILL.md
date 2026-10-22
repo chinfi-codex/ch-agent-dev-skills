@@ -1,6 +1,6 @@
 ---
 name: ai-review
-version: 0.7.0
+version: 0.7.1
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
@@ -43,6 +43,7 @@ allowed-tools:
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
+- `docs/ARCHITECTURE.md` 是禁写令的唯一例外，且仅限其「接口现行态」表：票 DoD 声明契约更新时，本票在 worktree 分支内就地更新该表（随代码同一 MR 合入，合入后即为现行态）；未声明的票不碰。实现期 diff 实际改动了接口表已登记接口而票未声明（flow-back）：同分支补记该表并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。模块表 / 约束表仍只由文档阶段直写，dev 阶段不碰
 
 ## 完成状态协议
 
@@ -104,7 +105,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -139,9 +140,16 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
 
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。
+
 # /ai-review
 
 你是独立评审员（Reviewer）。你负责：**用 open-code-review（`ocr`）对固定点以来的 diff 评审，解析评审结果为评审报告与 BLOCKER 清单，供回修与主会话合并判断使用**。
+
+复测位置：适用远端测试协议时，评审员只读远端回执；需要独立复测则通过remote_tests提交同一固定提交，禁止在本机执行测试。OCR本地筛文件/静态分析不是测试，不受此限制。
 
 铁律：**只评不改**。不修代码、不修测试、不改票；产出只有一份评审报告（`reviews/**`）。「顺手修了」是违规。
 
@@ -214,6 +222,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - **语义升档触发**：diff 实际含 `verify-policy.escalate-triggers` 的语义命中（full 级：数据迁移 / schema、鉴权权限；scoped+ 级：公共接口 / API 签名、共享模块——这些票须至少 scoped 且选择集含反向闭包），而核对结果的 `tier-target` 低于应有档位 → **BLOCKER（critical）**：该升没升（阈值与集成票类的升档由脚本判定，不在此重复）
 - **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
 - **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
+- **契约 diff 复核**（`docs/ARCHITECTURE.md`「接口现行态」表）：票 DoD 含契约条目时，核对 diff 中该表改动与 tech-spec 3.2 意图一致、现行签名与代码实现一致（以代码为准）、来源列填了上游 tech-spec、未顺手改无关条目——不一致或该更新没更新 → **BLOCKER（critical）**。票未声明契约条目而 diff 改了接口表已登记接口的「代码位置」文件（flow-back 情形）：漏补记接口表或 impl-log 映射缺失 → **BLOCKER（critical）**，视同红线；补记内容同样按上款复核
 - 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 
 **与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判测试执行状态——full 是否已跑、归因是否完成、evidence 是否已更新到最终 commit，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；这些由 `process_check.py --phase merge` 在收口时把关。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
@@ -238,7 +247,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）与旧测试改动映射不成立（需求驱动更新复核不通过）同列 BLOCKER
+- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）、旧测试改动映射不成立（需求驱动更新复核不通过）与契约更新缺失或偏离 tech-spec 3.2 意图（含 flow-back 漏补记）同列 BLOCKER
 - 不以测试执行状态（full 未跑 / 归因未完 / evidence 未更新）开 BLOCKER 或推迟结论；测试代码质量问题照常评
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语

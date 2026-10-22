@@ -18,6 +18,9 @@ dev 阶段的流程核对只在这里做一次：/implement 在发起评审前�
 from __future__ import annotations
 
 import argparse
+import hashlib
+from collections import Counter
+import json
 import fnmatch
 import json
 import re
@@ -250,6 +253,69 @@ def successors(issue_path: Path, issue_id: str):
     return out
 
 
+def remote_receipt_errors(evidence, ev, head, tree):
+    """Validate copied remote evidence without contacting or trusting a live branch tip."""
+    errors = []
+    paths = ev.get("remote-runs")
+    if ev.get("test-location") != "remote" or not isinstance(paths, list) or not paths:
+        return ["缺远端测试位置或 remote-runs 回执列表"]
+    manifests = ev.get("remote-command-manifests")
+    intended = []
+    if not isinstance(manifests, list) or not manifests:
+        return ["缺提交测试前冻结的 remote-command-manifests 命令清单"]
+    try:
+        for relative in manifests:
+            manifest = (evidence.parent / str(relative)).resolve()
+            manifest.relative_to(evidence.parent.resolve())
+            commands = json.loads(manifest.read_text())
+            if not isinstance(commands, list) or not commands:
+                raise ValueError("空命令清单")
+            intended.extend((row["name"], tuple(row["argv"])) for row in commands)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [f"命令清单无效: {exc}"]
+    observed = []
+    for relative in paths:
+        try:
+            path = (evidence.parent / str(relative)).resolve()
+            path.relative_to(evidence.parent.resolve())
+            data = json.loads(path.read_text())
+            if data.get("schema") != "agent-dev.remote-test/v1" or data.get("phase") != "completed":
+                raise ValueError("远端测试未完成")
+            if data.get("commit") != head or data.get("tree") != tree or data.get("final_commit") != head or data.get("dirty") is not False:
+                raise ValueError("远端测试提交/tree不一致或输入被修改")
+            context = data.get("context") or {}
+            if not all(context.get(k) for k in ("instance", "hostname", "fingerprints", "runtime_id", "python")):
+                raise ValueError("缺远端实例/环境身份")
+            if not data.get("python_version") or not data.get("packages_sha256"):
+                raise ValueError("缺运行时指纹")
+            rows = data.get("results")
+            expected = data.get("commands")
+            if not rows or not expected or [r["name"] for r in rows] != [r["name"] for r in expected]:
+                raise ValueError("远端命令未完整执行")
+            observed.extend((row["name"], tuple(row["argv"])) for row in expected)
+            jobs = data.get("jobs")
+            if type(jobs) is not int or jobs < 1:
+                raise ValueError("缺实际槽位数")
+            for row, submitted in zip(rows, expected):
+                actual_argv = [arg.replace("{python}", context["python"]).replace("{jobs}", str(jobs)) for arg in submitted["argv"]]
+                if row.get("argv") != actual_argv:
+                    raise ValueError("实际执行命令与提交清单不一致")
+                if type(row.get("returncode")) is not int or not row.get("argv"):
+                    raise ValueError("缺实际命令/退出码")
+                if row["returncode"] != 0:
+                    raise ValueError("远端命令失败；不能以 all-passed 声明覆盖非零退出码")
+                log = path.parent / row["log"]
+                if Path(row["log"]).name != row["log"]:
+                    raise ValueError("非法日志路径")
+                if hashlib.sha256(log.read_bytes()).hexdigest() != row.get("log_sha256"):
+                    raise ValueError("日志缺失或摘要不符")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            errors.append(f"{relative}: {exc}")
+    if Counter(intended) != Counter(observed):
+        errors.append("验收命令清单与远端实际提交集合不一致")
+    return errors
+
+
 def run(args) -> tuple[Report, dict]:
     issue_path = Path(args.issue)
     if not issue_path.is_file():
@@ -398,6 +464,27 @@ def run(args) -> tuple[Report, dict]:
         if args.phase in ("merge", "close") and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
             if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
                 rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
+
+    # 已有多实例拓扑的判读项目不得以本机测试或口头声明替代远端回执。
+    topology_file = repo / "configuration/deploy/topology.json"
+    remote_required = False
+    if topology_file.is_file():
+        try:
+            declaration = json.loads(topology_file.read_text())
+            remote_required = any(h.get("location") == "server" for h in declaration.get("hosts", {}).values())
+        except (OSError, ValueError, TypeError, AttributeError):
+            rep.add("remote-evidence", "FAIL", "部署拓扑无法解析，不能静默回退本机测试")
+    if remote_required or ev.get("test-location") == "remote":
+        tested = str(ev.get("commit") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", tested):
+            errors = ["缺有效 evidence.commit"]
+        else:
+            # Existing _same_ticket_tree gate above proves permitted reuse against HEAD.
+            errors = remote_receipt_errors(evidence, ev, tested, git(repo, "rev-parse", f"{tested}^{{tree}}").strip())
+        for error in errors:
+            rep.add("remote-evidence", "FAIL", error)
+        if not errors:
+            rep.add("remote-evidence", "PASS", "远端提交/环境/命令与日志完整性一致；验收覆盖与先在失败归因仍须核对")
 
     # 5. 需求符合性核对（仅 close 相）：主会话合并前核对结论落盘，此处只把机器可判的关
     if args.phase == "close":

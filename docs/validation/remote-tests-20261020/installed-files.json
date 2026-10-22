@@ -1,0 +1,377 @@
+[
+  {
+    "host": ".claude",
+    "path": "skills/ai-review/SKILL.md",
+    "sha256": "80ba4cfe1c2498b434bc3fb22c74ac51d41fa40e5c2384bae828e466228bc8e1"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/ai-review/SKILL.md.tmpl",
+    "sha256": "1de6987a1a63f45dc6ed908ee2341722a4494651b5258d2e9ad5c2b83f85fab8"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/implement/SKILL.md",
+    "sha256": "8cd2301928854f29fc547a2386c51aac3ae47bad010b657f15412b32a6763587"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/implement/SKILL.md.tmpl",
+    "sha256": "8e6bf1a80ed32ea6c27fa7911c3eac911e073e9aaf7e3e758a0f5dc78f53e939"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/issue-split/SKILL.md",
+    "sha256": "692a441ebbf78bf5e544bf9efb1ae8e0f09ba9c99aeae80c32bbc2c9984f9b6e"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/setup-dev/SKILL.md",
+    "sha256": "eed09c883e47b55a44d35d396749ef81a66b179da99825ccc114296da64ea4b9"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/setup-dev/SKILL.md.tmpl",
+    "sha256": "bfed1acd3452bc55fbf57019bcadd324d69da6fd50219cea86ba082a64231531"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/fragments/dev-config.md",
+    "sha256": "5543c34f1d5a593db31fbfc580e55c7bb5b2e0bd3c009e6ffc929d6a27832881"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/fragments/supervision-loop.md",
+    "sha256": "248746dac49dd4fc0e3e9717571722e18b5e4401a95e20a38acd71c9601f8de1"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/scripts/process_check.py",
+    "sha256": "9e84ff8a229b2c3ff0be2ea02b2324d505dd9928f51a93baafc42718c1bdecd5"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/templates/evidence.md",
+    "sha256": "af3ccceba4ec1753bd57cbac55c460b6c685d2bd7a124e3d0cb8a6b700a93244"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/tech-spec/SKILL.md",
+    "sha256": "0d9dd76958e41448f06853b95d43dc2c70ec33b2a7622fd8e92c5664095f2e9e"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/references/remote-tests.md",
+    "sha256": "2f50474965a7f33aa43aef84baa298ca196e311bee474e9385b992916182e879"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/scripts/remote_tests.py",
+    "sha256": "71a6cdbf04e2cbf596d136ce1dd6461a25da3d33a6d5d3aef10989674bbe50bc"
+  },
+  {
+    "host": ".claude",
+    "path": "skills/shared/scripts/tests/test_remote_tests.py",
+    "sha256": "568c9e44015f0df4ccb984ffebf34d6de8f6889f1578bd446a6e8b97a74ec267"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/ai-review/SKILL.md",
+    "sha256": "80ba4cfe1c2498b434bc3fb22c74ac51d41fa40e5c2384bae828e466228bc8e1"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/ai-review/SKILL.md.tmpl",
+    "sha256": "1de6987a1a63f45dc6ed908ee2341722a4494651b5258d2e9ad5c2b83f85fab8"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/implement/SKILL.md",
+    "sha256": "8cd2301928854f29fc547a2386c51aac3ae47bad010b657f15412b32a6763587"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/implement/SKILL.md.tmpl",
+    "sha256": "8e6bf1a80ed32ea6c27fa7911c3eac911e073e9aaf7e3e758a0f5dc78f53e939"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/issue-split/SKILL.md",
+    "sha256": "692a441ebbf78bf5e544bf9efb1ae8e0f09ba9c99aeae80c32bbc2c9984f9b6e"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/setup-dev/SKILL.md",
+    "sha256": "eed09c883e47b55a44d35d396749ef81a66b179da99825ccc114296da64ea4b9"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/setup-dev/SKILL.md.tmpl",
+    "sha256": "bfed1acd3452bc55fbf57019bcadd324d69da6fd50219cea86ba082a64231531"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/fragments/dev-config.md",
+    "sha256": "5543c34f1d5a593db31fbfc580e55c7bb5b2e0bd3c009e6ffc929d6a27832881"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/fragments/supervision-loop.md",
+    "sha256": "248746dac49dd4fc0e3e9717571722e18b5e4401a95e20a38acd71c9601f8de1"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/scripts/process_check.py",
+    "sha256": "9e84ff8a229b2c3ff0be2ea02b2324d505dd9928f51a93baafc42718c1bdecd5"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/templates/evidence.md",
+    "sha256": "af3ccceba4ec1753bd57cbac55c460b6c685d2bd7a124e3d0cb8a6b700a93244"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/tech-spec/SKILL.md",
+    "sha256": "0d9dd76958e41448f06853b95d43dc2c70ec33b2a7622fd8e92c5664095f2e9e"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/references/remote-tests.md",
+    "sha256": "2f50474965a7f33aa43aef84baa298ca196e311bee474e9385b992916182e879"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/scripts/remote_tests.py",
+    "sha256": "71a6cdbf04e2cbf596d136ce1dd6461a25da3d33a6d5d3aef10989674bbe50bc"
+  },
+  {
+    "host": ".zcode",
+    "path": "skills/shared/scripts/tests/test_remote_tests.py",
+    "sha256": "568c9e44015f0df4ccb984ffebf34d6de8f6889f1578bd446a6e8b97a74ec267"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/ai-review/SKILL.md",
+    "sha256": "80ba4cfe1c2498b434bc3fb22c74ac51d41fa40e5c2384bae828e466228bc8e1"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/ai-review/SKILL.md.tmpl",
+    "sha256": "1de6987a1a63f45dc6ed908ee2341722a4494651b5258d2e9ad5c2b83f85fab8"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/implement/SKILL.md",
+    "sha256": "8cd2301928854f29fc547a2386c51aac3ae47bad010b657f15412b32a6763587"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/implement/SKILL.md.tmpl",
+    "sha256": "8e6bf1a80ed32ea6c27fa7911c3eac911e073e9aaf7e3e758a0f5dc78f53e939"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/issue-split/SKILL.md",
+    "sha256": "692a441ebbf78bf5e544bf9efb1ae8e0f09ba9c99aeae80c32bbc2c9984f9b6e"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/setup-dev/SKILL.md",
+    "sha256": "eed09c883e47b55a44d35d396749ef81a66b179da99825ccc114296da64ea4b9"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/setup-dev/SKILL.md.tmpl",
+    "sha256": "bfed1acd3452bc55fbf57019bcadd324d69da6fd50219cea86ba082a64231531"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/fragments/dev-config.md",
+    "sha256": "5543c34f1d5a593db31fbfc580e55c7bb5b2e0bd3c009e6ffc929d6a27832881"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/fragments/supervision-loop.md",
+    "sha256": "248746dac49dd4fc0e3e9717571722e18b5e4401a95e20a38acd71c9601f8de1"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/scripts/process_check.py",
+    "sha256": "9e84ff8a229b2c3ff0be2ea02b2324d505dd9928f51a93baafc42718c1bdecd5"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/templates/evidence.md",
+    "sha256": "af3ccceba4ec1753bd57cbac55c460b6c685d2bd7a124e3d0cb8a6b700a93244"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/tech-spec/SKILL.md",
+    "sha256": "0d9dd76958e41448f06853b95d43dc2c70ec33b2a7622fd8e92c5664095f2e9e"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/references/remote-tests.md",
+    "sha256": "2f50474965a7f33aa43aef84baa298ca196e311bee474e9385b992916182e879"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/scripts/remote_tests.py",
+    "sha256": "71a6cdbf04e2cbf596d136ce1dd6461a25da3d33a6d5d3aef10989674bbe50bc"
+  },
+  {
+    "host": ".kimi-code",
+    "path": "skills/shared/scripts/tests/test_remote_tests.py",
+    "sha256": "568c9e44015f0df4ccb984ffebf34d6de8f6889f1578bd446a6e8b97a74ec267"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/ai-review/SKILL.md",
+    "sha256": "80ba4cfe1c2498b434bc3fb22c74ac51d41fa40e5c2384bae828e466228bc8e1"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/ai-review/SKILL.md.tmpl",
+    "sha256": "1de6987a1a63f45dc6ed908ee2341722a4494651b5258d2e9ad5c2b83f85fab8"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/implement/SKILL.md",
+    "sha256": "8cd2301928854f29fc547a2386c51aac3ae47bad010b657f15412b32a6763587"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/implement/SKILL.md.tmpl",
+    "sha256": "8e6bf1a80ed32ea6c27fa7911c3eac911e073e9aaf7e3e758a0f5dc78f53e939"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/issue-split/SKILL.md",
+    "sha256": "692a441ebbf78bf5e544bf9efb1ae8e0f09ba9c99aeae80c32bbc2c9984f9b6e"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/setup-dev/SKILL.md",
+    "sha256": "eed09c883e47b55a44d35d396749ef81a66b179da99825ccc114296da64ea4b9"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/setup-dev/SKILL.md.tmpl",
+    "sha256": "bfed1acd3452bc55fbf57019bcadd324d69da6fd50219cea86ba082a64231531"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/fragments/dev-config.md",
+    "sha256": "5543c34f1d5a593db31fbfc580e55c7bb5b2e0bd3c009e6ffc929d6a27832881"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/fragments/supervision-loop.md",
+    "sha256": "248746dac49dd4fc0e3e9717571722e18b5e4401a95e20a38acd71c9601f8de1"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/scripts/process_check.py",
+    "sha256": "9e84ff8a229b2c3ff0be2ea02b2324d505dd9928f51a93baafc42718c1bdecd5"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/templates/evidence.md",
+    "sha256": "af3ccceba4ec1753bd57cbac55c460b6c685d2bd7a124e3d0cb8a6b700a93244"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/tech-spec/SKILL.md",
+    "sha256": "0d9dd76958e41448f06853b95d43dc2c70ec33b2a7622fd8e92c5664095f2e9e"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/references/remote-tests.md",
+    "sha256": "2f50474965a7f33aa43aef84baa298ca196e311bee474e9385b992916182e879"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/scripts/remote_tests.py",
+    "sha256": "71a6cdbf04e2cbf596d136ce1dd6461a25da3d33a6d5d3aef10989674bbe50bc"
+  },
+  {
+    "host": ".codex",
+    "path": "skills/shared/scripts/tests/test_remote_tests.py",
+    "sha256": "568c9e44015f0df4ccb984ffebf34d6de8f6889f1578bd446a6e8b97a74ec267"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/ai-review/SKILL.md",
+    "sha256": "80ba4cfe1c2498b434bc3fb22c74ac51d41fa40e5c2384bae828e466228bc8e1"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/ai-review/SKILL.md.tmpl",
+    "sha256": "1de6987a1a63f45dc6ed908ee2341722a4494651b5258d2e9ad5c2b83f85fab8"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/implement/SKILL.md",
+    "sha256": "8cd2301928854f29fc547a2386c51aac3ae47bad010b657f15412b32a6763587"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/implement/SKILL.md.tmpl",
+    "sha256": "8e6bf1a80ed32ea6c27fa7911c3eac911e073e9aaf7e3e758a0f5dc78f53e939"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/issue-split/SKILL.md",
+    "sha256": "692a441ebbf78bf5e544bf9efb1ae8e0f09ba9c99aeae80c32bbc2c9984f9b6e"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/setup-dev/SKILL.md",
+    "sha256": "eed09c883e47b55a44d35d396749ef81a66b179da99825ccc114296da64ea4b9"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/setup-dev/SKILL.md.tmpl",
+    "sha256": "bfed1acd3452bc55fbf57019bcadd324d69da6fd50219cea86ba082a64231531"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/fragments/dev-config.md",
+    "sha256": "5543c34f1d5a593db31fbfc580e55c7bb5b2e0bd3c009e6ffc929d6a27832881"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/fragments/supervision-loop.md",
+    "sha256": "248746dac49dd4fc0e3e9717571722e18b5e4401a95e20a38acd71c9601f8de1"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/scripts/process_check.py",
+    "sha256": "9e84ff8a229b2c3ff0be2ea02b2324d505dd9928f51a93baafc42718c1bdecd5"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/templates/evidence.md",
+    "sha256": "af3ccceba4ec1753bd57cbac55c460b6c685d2bd7a124e3d0cb8a6b700a93244"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/tech-spec/SKILL.md",
+    "sha256": "0d9dd76958e41448f06853b95d43dc2c70ec33b2a7622fd8e92c5664095f2e9e"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/references/remote-tests.md",
+    "sha256": "2f50474965a7f33aa43aef84baa298ca196e311bee474e9385b992916182e879"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/scripts/remote_tests.py",
+    "sha256": "71a6cdbf04e2cbf596d136ce1dd6461a25da3d33a6d5d3aef10989674bbe50bc"
+  },
+  {
+    "host": ".dsh",
+    "path": "skills/shared/scripts/tests/test_remote_tests.py",
+    "sha256": "568c9e44015f0df4ccb984ffebf34d6de8f6889f1578bd446a6e8b97a74ec267"
+  }
+]

@@ -109,7 +109,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -144,6 +144,11 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
 
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。
+
 # /setup-dev
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
@@ -155,6 +160,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 ## 工作流
 
 ### Step 0：探查仓库与环境事实（自查，不问人）
+
+若已有多实例部署配置，先读远端测试协议：复用现有主机/实例/运行时，不为远端测试新增或改写agents-config、L1/L2/L3。下述本机预算探查/写入改为只读远端既有预算；缺失即报告，不能自建默认值。只有用户另行要求重新配置项目时才执行对应配置写入步骤。
 
 - git：`git remote -v`（GitLab / GitHub / 无远程）、主分支名、`.gitlab-ci.yml` 是否存在及是否已 include ocr job
 - glab：`glab auth status`（GitLab CLI 登录态）

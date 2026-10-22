@@ -11,11 +11,11 @@ function blocksToText(content = []) {
 }
 
 function currentDirectory(ctx, agent) {
-  try {
-    return ctx.workingDirectory?.get(agent.session) ?? process.cwd()
-  } catch {
-    return process.cwd()
-  }
+  return agent.session.header.cwd
+    ?? agent.session.header.directory
+    ?? agent.session.header.path
+    ?? ctx.workingDirectory?.get(agent.session)
+    ?? process.cwd()
 }
 
 export function eventPayload(ctx, agent, eventName, details = {}) {

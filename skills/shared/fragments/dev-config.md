@@ -18,3 +18,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
+
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。

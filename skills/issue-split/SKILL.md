@@ -154,7 +154,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -188,6 +188,11 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
+
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。
 
 ## 派发协议（宿主无关）
 
@@ -232,7 +237,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 1. **取票**：只读 `./dev/features/<feature-module>/<feature-slug>/issues/` 票文件的 frontmatter（`status` / `blocked-by`），重算 frontier（blocked-by 全部 `done` 的票）；票正文由被派发的实现对话自读，主会话不读
 2. **派发**：按「派发协议」宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；frontier 中 `declared-scope` 两两不相交（含各自 scoped 反向闭包不触碰对方文件）的票按 `dispatch.parallel-max` 并行派发、各自 worktree；有交集或判定有疑义的串行。并行票合入按完成先后，后合者合入前 rebase 一次
 3. **跟踪**：被派发对话的结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）只是线索，不作为成功依据
-4. **收口**：先跑**流程核对**：`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> --phase merge --json <impl/<issue-id>/process-check-merge.json>`——红线登记、漂移登记、档位下限（阈值 / 集成票）、evidence 头 `tier-executed` 达到 `tier-target`、`full-commit` 与 HEAD 的本票文件一致、`all-passed: true`、impl-log 需求覆盖矩阵一次判完，退出码非 0 即退回实现对话补齐，不进合并；主会话不再手工逐字段核对 evidence 头。再核对评审报告头部结论 `pass` / `pass-with-notes`、MR ready（评审结论只判代码，测试执行状态以本步核对为准）。然后**验收复跑**（回执只是主张，不是证据）：主会话亲自在本票 worktree 内重跑 evidence 记录的每条 DoD 验收命令与 `quality-gate.fast`，退出码须全为 0 且输出与 evidence 记录无明显矛盾；worktree 已被实现对话自清时按分支名重建（`git worktree add .worktrees/<issue-id> feat/<feature-slug>-<issue-id>`）。scoped / full 档套件不重跑，以 evidence 档位门记录为准；复跑若涉及重套件（如人工指派的 scoped 抽查），同样经 `test_slots.py run` 包装并后台轮询（形态见 /implement Step 5）。复跑通过后执行**需求符合性核对**（主模型校验，与 ai-review 正交——评审判「写得好不好」，本步判「要的有没有、偏没偏」，专门抓 diff 与退出码里看不见的缺席与偏差）：
+4. **收口**：先跑**流程核对**：`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> --phase merge --json <impl/<issue-id>/process-check-merge.json>`——红线登记、漂移登记、档位下限（阈值 / 集成票）、evidence 头 `tier-executed` 达到 `tier-target`、`full-commit` 与 HEAD 的本票文件一致、`all-passed: true`、impl-log 需求覆盖矩阵一次判完，退出码非 0 即退回实现对话补齐，不进合并；主会话不再手工逐字段核对 evidence 头。再核对评审报告头部结论 `pass` / `pass-with-notes`、MR ready（评审结论只判代码，测试执行状态以本步核对为准）。然后**验收复跑**（回执只是主张，不是证据）：主会话亲自发起复跑（适用远端协议时，通过remote_tests在判读机固定本票提交执行；禁止本机复跑）；重跑 evidence 记录的每条 DoD 验收命令与 `quality-gate.fast`，退出码须全为 0 且输出与 evidence 记录无明显矛盾；worktree 已被实现对话自清时按分支名重建（`git worktree add .worktrees/<issue-id> feat/<feature-slug>-<issue-id>`）。scoped / full 档套件不重跑，以 evidence 档位门记录为准；复跑若涉及重套件（如人工指派的 scoped 抽查），同样经 `test_slots.py run` 包装并后台轮询（形态见 /implement Step 5）。复跑通过后执行**需求符合性核对**（主模型校验，与 ai-review 正交——评审判「写得好不好」，本步判「要的有没有、偏没偏」，专门抓 diff 与退出码里看不见的缺席与偏差）：
    - **反向枚举先行**：先不看 impl-log 覆盖矩阵，从票「要做什么 / 不做什么」+ tech-spec 锚点节独立枚举需求点清单，防止被实现方叙事带偏
    - **逐条核映射**：对照 impl-log「需求覆盖矩阵」，打开映射指向的代码位置核对语义（不只看 evidence 退出码；至少覆盖全部 ★ 关键路径行），逐条判 `已实现 / 语义偏差 / 未实现`；只照抄矩阵不打开代码等于没核
    - **集成票加做 feature 级核对**：对 tech-spec 全节（不只票锚点）枚举 feature 级需求点，对照本 feature 各票覆盖矩阵的并集，抓票间接缝缺口（A 票以为 B 票做）
@@ -282,7 +287,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
+- 补读：`./docs/GLOSSARY.md`、`./docs/ARCHITECTURE.md`（存在才读：tech-spec 3.2 非空时，接口表是生成契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图核对）
 
 ---
 
@@ -309,6 +314,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 **DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。**DoD 只写功能实现度**：性能阈值、展示样式 / 版式类验收写进票的「人工确认项」节（可附采集命令，执行一次落盘、不阻塞交付），不进 DoD（`verify-policy.gate-scope`）。
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。
+
+**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里，条目形态可自动判定——``git diff <base>...HEAD -- docs/ARCHITECTURE.md | grep <接口名>`` → 期望命中接口条目；同一票的多个接口可合并为一条多 grep 的命令。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进 ARCHITECTURE」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
 
 **计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
 
@@ -352,7 +359,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - tech-spec 未确认不开拆；拆解不改变方案内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
-- DoD 不可自动判定的票不允许存在
+- DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
 - 票一旦 confirmed，标题 / DoD / verify-tier / declared-scope 不得由本 skill 单方面修改；变更须重新过门②（实现期按 `verify-policy` 升档不算改票，由 `/implement` 在 evidence / impl-log 记录）
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

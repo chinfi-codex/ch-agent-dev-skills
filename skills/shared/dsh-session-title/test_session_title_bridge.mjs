@@ -22,7 +22,7 @@ async function fixture(t) {
   })
   let current = { title: '旧标题', source: { kind: 'fallback' } }
   let renames = 0
-  const agent = { session: { header: { id: 'session-1', origin: 'interactive' } } }
+  const agent = { session: { header: { id: 'session-1', origin: 'interactive', cwd: root } } }
   const ctx = {
     workingDirectory: { get: () => root },
     sessionTitle: {

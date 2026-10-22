@@ -1,0 +1,84 @@
+{
+  "schema": "agent-dev.remote-test/v1",
+  "id": "skill-e2e",
+  "commit": "844bb6d9f38bdddea257fe4c3d98c74f29bc3002",
+  "tree": "ab560943498b6c3bbca8cbe740205ac8b1ce5822",
+  "branch": "feat/remote-skill-issue-001",
+  "url": "/opt/pandu/state-v3-feat/dev-tests/skill-suite-20261020/e2e-source",
+  "context": {
+    "instance": "judge/test",
+    "state_root": "/opt/pandu/state-v3-feat",
+    "source_root": "/opt/pandu/source-v3-feat",
+    "python": "/opt/pandu/state-v3-feat/runtimes/rt-host-mysql-0e3f9f2ed4720ab1/venv/bin/python",
+    "controller_python": "/usr/bin/python3",
+    "fingerprints": {
+      "env_file": {
+        "path": "/opt/pandu/etc/runtime.env",
+        "sha256": "56c56f5c9b284633d94035ea60aab0a2b4ff0b27d88d8b02689416e85c3932d8"
+      },
+      "executor.config_ref": {
+        "path": "/home/pandu/.dsh/profiles/headless/cordis.patch.yml",
+        "sha256": "03f2e73256060a3d7d8409f75a772d19f012c0ffe407fce6f702c2fd701981a5"
+      },
+      "host_config": {
+        "path": "/opt/pandu/etc/host.json",
+        "sha256": "8c78a3311f22a1556ab229ac94b0ebe98a039dbb42744bcaba3f2e29f79160a3"
+      },
+      "requirements": {
+        "path": "/opt/pandu/deployment/20261012-feat/requirements.lock.txt",
+        "sha256": "6aed7191a92d0470cd19bd03ada5b05cc00c658dc0a073c8e641a7e044dcb8e6"
+      },
+      "runtime_profile": {
+        "path": "/opt/pandu/source-v3-feat/tools/pandu_runtime/profiles/host-mysql.json",
+        "sha256": "952ae8c3a1a4a91048e7214eac405dcb663251641988cc53cc641f8af46a9e76"
+      },
+      "topology": {
+        "path": "/opt/pandu/source-v3-feat/configuration/deploy/topology.json",
+        "sha256": "5cf9f45828273c70693c14a2b366121e4f2eeca2c5a5e4bfe68e0b735f9270ac"
+      }
+    },
+    "runtime_id": "rt-host-mysql-0e3f9f2ed4720ab1",
+    "hostname": "pandu-judge"
+  },
+  "resolve": {
+    "controller": "/opt/pandu/source-v3-feat",
+    "instance": "judge/test",
+    "branch": "feat/remote-skill-issue-001",
+    "url": "https://192.168.100.116:3000/AI/yufeng-pandu-agent.git",
+    "topology_sha256": "5cf9f45828273c70693c14a2b366121e4f2eeca2c5a5e4bfe68e0b735f9270ac"
+  },
+  "commands": [
+    {
+      "name": "transport",
+      "argv": [
+        "{python}",
+        "-c",
+        "import os,socket;assert socket.gethostname()==\"pandu-judge\";assert \"/dev-tests/\" in os.environ[\"TMPDIR\"];print(\"REMOTE_TRANSPORT_OK\")"
+      ]
+    }
+  ],
+  "want": 1,
+  "timeout": 30,
+  "jobs": 1,
+  "phase": "completed",
+  "results": [
+    {
+      "name": "transport",
+      "argv": [
+        "/opt/pandu/state-v3-feat/runtimes/rt-host-mysql-0e3f9f2ed4720ab1/venv/bin/python",
+        "-c",
+        "import os,socket;assert socket.gethostname()==\"pandu-judge\";assert \"/dev-tests/\" in os.environ[\"TMPDIR\"];print(\"REMOTE_TRANSPORT_OK\")"
+      ],
+      "returncode": 0,
+      "seconds": 0.016,
+      "log": "transport.log",
+      "log_sha256": "8096b3a5936f054a36bfc4abdffaa8184d12cc5259d66af99a753424a2eec565"
+    }
+  ],
+  "started_at": 1792499143.3611295,
+  "python_version": "Python 3.14.4",
+  "packages_sha256": "57b85de230817c28fcffaf64ac1da3abc09d27a5c304020f95d0e6a900006057",
+  "dirty": false,
+  "final_commit": "844bb6d9f38bdddea257fe4c3d98c74f29bc3002",
+  "finished_at": 1792499143.6158712
+}

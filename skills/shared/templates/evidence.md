@@ -16,6 +16,10 @@ full-commit: <跑 full 的 commit；须等于 commit，或与之差异仅为不�
 full-ref:     # 集成票复用每日回归时填 dev/full-runs/<date>-<tree8>.md（tree 须与合并候选相同），与 full-commit 二选一
 all-passed: true|false    # 全部验收命令与档位门退出码为 0 时才允许 true
 generated: YYYY-MM-DD HH:MM
+# 有多实例部署配置的项目必填；每个验收/复跑命令均须被远端回执覆盖
+test-location: remote
+remote-runs: [raw/<运行编号>/result.json]
+remote-command-manifests: [raw/<运行编号>/commands.json]
 ```
 
 ## 验收命令执行记录

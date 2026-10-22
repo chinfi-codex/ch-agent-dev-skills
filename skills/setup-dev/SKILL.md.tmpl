@@ -39,6 +39,8 @@ allowed-tools:
 
 ### Step 0：探查仓库与环境事实（自查，不问人）
 
+若已有多实例部署配置，先读远端测试协议：复用现有主机/实例/运行时，不为远端测试新增或改写agents-config、L1/L2/L3。下述本机预算探查/写入改为只读远端既有预算；缺失即报告，不能自建默认值。只有用户另行要求重新配置项目时才执行对应配置写入步骤。
+
 - git：`git remote -v`（GitLab / GitHub / 无远程）、主分支名、`.gitlab-ci.yml` 是否存在及是否已 include ocr job
 - glab：`glab auth status`（GitLab CLI 登录态）
 - ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）

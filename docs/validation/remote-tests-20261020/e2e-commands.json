@@ -1,0 +1,10 @@
+[
+  {
+    "name": "transport",
+    "argv": [
+      "{python}",
+      "-c",
+      "import os,socket;assert socket.gethostname()==\"pandu-judge\";assert \"/dev-tests/\" in os.environ[\"TMPDIR\"];print(\"REMOTE_TRANSPORT_OK\")"
+    ]
+  }
+]

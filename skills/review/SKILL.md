@@ -89,6 +89,7 @@ allowed-tools:
 ```text
 ./docs/
   GLOSSARY.md
+  ARCHITECTURE.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -108,6 +109,7 @@ allowed-tools:
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
+- `ARCHITECTURE.md` 为项目级唯一架构契约文件（结构见 skill 包内 `shared/templates/architecture.md`）：懒创建、原地更新，只记「现行是什么」。写权限分节——模块表由 `/pd-plan` 模块登记时直写；约束表由 `/tech-spec` 定稿时直写（仅跨 feature 级约束）；**接口表只随 feature 分支更新**（由承接票在 worktree 分支内就地更新、随 MR 合入，接口在代码合并后才成为现行态）。一致性巡检见 `shared/references/contract-check.md`（只报告不改文件）
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
@@ -151,7 +153,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -269,6 +271,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 - **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、评审轮次（`reviews/` 下该票报告文件数）、BLOCKER 回修轮数（MR 文件记录）、是否进过 `needs-human`
 - **验证档位统计**：档位分布（各票 `verify-tier` vs evidence 的 `tier-executed`）、升档率（多少票发生升档及原因聚合）、各档验证耗时（evidence 档位门记录）、**逃逸缺陷**（合并后在 main 上才发现的问题，来源 git log 修复提交 / 人反馈；按其原票档位归因）
 - **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 遗留」与各 review report 的 BLOCKER 清单
+- **契约漂移巡检**（`./docs/ARCHITECTURE.md` 存在时；只读，不改文件）：运行 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/contract-check.md`），FAIL 项逐条进问题清单并标注归因（义务未派发 / 补记漏记 / 登记与代码漂移）；巡检发现的契约错漏由本步一并回写修正（属文档阶段裁决处理），复盘报告记录修正项
 - 统计口径随数字给出；取不到标「缺失」
 
 ### Step 3：抽取关键点
@@ -309,7 +312,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 ## 硬约束
 
 - 只读历史产物与 git 历史；`Bash` 只允许 git 只读查询（log / show / diff），禁止任何写操作与实现导向命令
-- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`
+- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`；唯一例外：契约漂移巡检发现的 `docs/ARCHITECTURE.md` 错漏按文档阶段裁决一并回写修正（「由文档阶段与复盘统一处理」的既定分工）
 - 不修改任何历史文档、票、代码；发现历史文档互相矛盾，只在问题清单或「数据缺口」中记录
 - 取不到的数据标「缺失」，禁止编造；统计口径必须随数字给出
 - 关键点与经验条目必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告

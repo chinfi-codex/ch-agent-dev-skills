@@ -65,7 +65,7 @@ allowed-tools:
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、该 feature-slug 最新 PRD（意图核对）
+- 补读：`./docs/GLOSSARY.md`、`./docs/ARCHITECTURE.md`（存在才读：tech-spec 3.2 非空时，接口表是生成契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图核对）
 
 ---
 
@@ -92,6 +92,8 @@ allowed-tools:
 **DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。**DoD 只写功能实现度**：性能阈值、展示样式 / 版式类验收写进票的「人工确认项」节（可附采集命令，执行一次落盘、不阻塞交付），不进 DoD（`verify-policy.gate-scope`）。
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。
+
+**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里，条目形态可自动判定——``git diff <base>...HEAD -- docs/ARCHITECTURE.md | grep <接口名>`` → 期望命中接口条目；同一票的多个接口可合并为一条多 grep 的命令。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进 ARCHITECTURE」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
 
 **计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
 
@@ -135,7 +137,7 @@ allowed-tools:
 
 - tech-spec 未确认不开拆；拆解不改变方案内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
-- DoD 不可自动判定的票不允许存在
+- DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
 - 票一旦 confirmed，标题 / DoD / verify-tier / declared-scope 不得由本 skill 单方面修改；变更须重新过门②（实现期按 `verify-policy` 升档不算改票，由 `/implement` 在 evidence / impl-log 记录）
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

@@ -391,6 +391,33 @@ def candidate_paths_from_event(event, repo):
     return results
 
 
+def infer_handoff_binding(event, repo):
+    """从交接文本中的 feature-slug 与 issue 编号建立可解释绑定。"""
+    prompt = str(event.get("prompt") or "")
+    slug_match = re.search(r"(?:feature-slug|feature_slug)\s*(?:=|：|:)\s*[`'\"]?([^`'\"\s，,；;]+)", prompt)
+    issue_match = re.search(r"\b(issue-\d{3})\b", prompt)
+    if not slug_match or not issue_match:
+        return None
+    slug = slug_match.group(1)
+    issue_id = issue_match.group(1)
+    roots = repo / "dev" / "features"
+    if not roots.is_dir():
+        return None
+    candidates = []
+    for slug_dir in roots.glob("*/" + slug):
+        if not slug_dir.is_dir():
+            continue
+        for path in slug_dir.glob("issues/{}-*.md".format(issue_id)):
+            try:
+                candidates.append(normalize_binding(repo, target=str(path), role="implementation"))
+            except SessionTitleError:
+                pass
+    unique = {(c["feature"], c.get("issue")): c for c in candidates}
+    if len(unique) == 1:
+        return next(iter(unique.values()))
+    return None
+
+
 def infer_binding(event, repo):
     prompt = str(event.get("prompt") or "")
     role = "review" if re.search(r"(?:^|\s)/ai-review(?:\s|$)", prompt) else None
@@ -416,7 +443,7 @@ def infer_binding(event, repo):
         unique[key] = candidate
     if len(unique) == 1:
         return next(iter(unique.values()))
-    return None
+    return infer_handoff_binding(event, repo)
 
 
 def command_from_env(name):

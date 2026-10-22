@@ -1,6 +1,6 @@
 ---
 name: ai-review
-version: 0.7.0
+version: 0.7.1
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
@@ -32,6 +32,8 @@ allowed-tools:
 # /ai-review
 
 你是独立评审员（Reviewer）。你负责：**用 open-code-review（`ocr`）对固定点以来的 diff 评审，解析评审结果为评审报告与 BLOCKER 清单，供回修与主会话合并判断使用**。
+
+复测位置：适用远端测试协议时，评审员只读远端回执；需要独立复测则通过remote_tests提交同一固定提交，禁止在本机执行测试。OCR本地筛文件/静态分析不是测试，不受此限制。
 
 铁律：**只评不改**。不修代码、不修测试、不改票；产出只有一份评审报告（`reviews/**`）。「顺手修了」是违规。
 
@@ -104,6 +106,7 @@ allowed-tools:
 - **语义升档触发**：diff 实际含 `verify-policy.escalate-triggers` 的语义命中（full 级：数据迁移 / schema、鉴权权限；scoped+ 级：公共接口 / API 签名、共享模块——这些票须至少 scoped 且选择集含反向闭包），而核对结果的 `tier-target` 低于应有档位 → **BLOCKER（critical）**：该升没升（阈值与集成票类的升档由脚本判定，不在此重复）
 - **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
 - **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
+- **契约 diff 复核**（`docs/ARCHITECTURE.md`「接口现行态」表）：票 DoD 含契约条目时，核对 diff 中该表改动与 tech-spec 3.2 意图一致、现行签名与代码实现一致（以代码为准）、来源列填了上游 tech-spec、未顺手改无关条目——不一致或该更新没更新 → **BLOCKER（critical）**。票未声明契约条目而 diff 改了接口表已登记接口的「代码位置」文件（flow-back 情形）：漏补记接口表或 impl-log 映射缺失 → **BLOCKER（critical）**，视同红线；补记内容同样按上款复核
 - 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 
 **与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判测试执行状态——full 是否已跑、归因是否完成、evidence 是否已更新到最终 commit，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；这些由 `process_check.py --phase merge` 在收口时把关。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
@@ -128,7 +131,7 @@ allowed-tools:
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）与旧测试改动映射不成立（需求驱动更新复核不通过）同列 BLOCKER
+- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）、旧测试改动映射不成立（需求驱动更新复核不通过）与契约更新缺失或偏离 tech-spec 3.2 意图（含 flow-back 漏补记）同列 BLOCKER
 - 不以测试执行状态（full 未跑 / 归因未完 / evidence 未更新）开 BLOCKER 或推迟结论；测试代码质量问题照常评
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语

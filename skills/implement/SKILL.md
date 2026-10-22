@@ -1,6 +1,6 @@
 ---
 name: implement
-version: 0.7.0
+version: 0.7.1
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally auto-dispatched by the
@@ -30,6 +30,7 @@ allowed-tools:
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
+- `docs/ARCHITECTURE.md` 是禁写令的唯一例外，且仅限其「接口现行态」表：票 DoD 声明契约更新时，本票在 worktree 分支内就地更新该表（随代码同一 MR 合入，合入后即为现行态）；未声明的票不碰。实现期 diff 实际改动了接口表已登记接口而票未声明（flow-back）：同分支补记该表并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。模块表 / 约束表仍只由文档阶段直写，dev 阶段不碰
 
 ## 完成状态协议
 
@@ -91,7 +92,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -125,6 +126,11 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
+
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。
 
 ## 派发协议（宿主无关）
 
@@ -218,9 +224,11 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
 - **见红验证（不可省略）**：新测试在写实现前先单独运行一次——必须失败，且 ① 失败是断言失败，不是语法 / 导入 / 运行错误（error 不算见红）；② 失败输出指向预期行为差异（不是无关报错）。第一次跑就通过 = 在测已有行为或没接到代码路径，重写测试再往下走。见红要点（测试名 + 首次失败输出截取）随 TDD 登记写入 impl-log「做了什么」；没亲眼见过红的测试等于没写
 - **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
-- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
+- 每轮只跑 `quality-gate.fast`（适用远端测试协议时，在判读机运行）（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
 - **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现。scoped+ 级触发器（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 反向闭包；闭包不可枚举时标「闭包不完整」仍 scoped，由集成票与每日回归兜底；选择集大小不是升档理由；升档时同步更新票 `tier-reason`
+- **契约落现行态（票 DoD 含 ARCHITECTURE.md 契约条目时）**：实现完成后在 worktree 分支内就地更新 `docs/ARCHITECTURE.md`「接口现行态」表——新增 / 修改 / 废弃逐条对应 tech-spec 3.2，现行签名以最终代码为准，「来源」列填上游 tech-spec 文件名，「生效日期」填本票实现完成日。这是 dev 阶段唯一允许写的 docs/ 文件（开口规则见 GLOSSARY dev 段）；模块表 / 约束表不碰
+- **flow-back 契约补记**：本票 diff 实际改动了接口表已登记接口的「代码位置」文件，而票未声明契约 DoD → 同分支补记该表对应条目，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与补记原因（评审按契约 diff 复核，漏记视同红线）。没碰已登记接口的票不读不改该文件；发现登记与代码不符但本票未改它 → 记 impl-log「遗留」，由文档阶段统一处理
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 
@@ -240,6 +248,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **测试职责边界按 `verify-policy.gate-scope`**：档位门只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
 - **full 执行时机按 `verify-policy.full-runs`**（默认 `once-at-final`）：full 档票 / 集成票在本步只跑 DoD + fast + scoped 进入评审，完整套件推迟到 Step 8 评审通过后的最终 commit 跑**一次**；evidence 头 `tier-executed: full` 只在该次 full 落盘后填写
 - **先在失败归因按 `verify-policy.attribution` 执行**：`known-failures` 模式下失败先比对落盘的既有失败清单，在清单且签名一致 = 先在失败（显式列出，不进 `all-passed` 分母）；不在清单或签名不符的单项才补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败
+- **远端执行优先**：适用远端测试协议时，先提交输入，通过 `remote_tests.py` 提交命令清单；下述test_slots包装在远端执行器内部完成，禁止本机执行或二次套锁。
 - **重套件执行形态**（scoped / full / 归因补跑；fast 不受限）：一律 `python3 ../shared/scripts/test_slots.py run --label <feature-slug>/<issue-id>/<档> -- <质量门命令>` 包装拿整机槽位（上限见 `host-budget`），并发度 = 分得槽位数（命令内用 `$JOBS`）；**后台执行**、输出与退出码落 worktree `.logs/` 文件后轮询（full 墙钟可超宿主单次命令上限，不得前台久等）；排队超 `host-budget.queue-timeout` 报告而非死等。包装器 stderr 末行摘要的 queue-seconds / run-seconds / jobs 记入 evidence 档位门记录
 - **负载感知的超时处理**：单项超时且包装器记录的运行期 `load-peak` > ncpu → 先串行单独重跑该项一次再归因；重跑通过 = `load-flake`，evidence 列出，不算失败、不进归因；仍败才按归因流程。高负载下的超时不得直接记本票引入，也不得直接记先在失败
 - **bug 票回归有效性（票 frontmatter `type: bug` 必做）**：修复转绿后证明「测试真的能抓住这个 bug」——临时 revert 生产修复（保留回归测试）→ 重跑回归测试，须见红（断言失败，记退出码与失败输出要点）→ 恢复修复 → 重跑须绿。三次结果记入 evidence「回归有效性」节；revert 后不变红 = 测试从未复现 bug，修复不算完成，回到 Step 3 重写复现测试
@@ -278,7 +287,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **合并由主会话执行，无需人审**：
   - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
   - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
-  - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 与冲突文件闭包的 scoped 后再合（不重跑 full）；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合
+  - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 与冲突文件闭包的 scoped 后再合（不重跑 full）；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
 
 ### Step 9：收尾报告
 

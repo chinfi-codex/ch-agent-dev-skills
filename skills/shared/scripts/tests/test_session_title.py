@@ -117,6 +117,13 @@ class SessionTitleTest(unittest.TestCase):
         self.assertEqual(binding["issue"], issue.relative_to(self.root).as_posix())
         self.assertEqual(MODULE.infer_binding({"prompt": "看看订单超时"}, self.root), None)
 
+    def test_handoff_prompt_infers_feature_and_issue(self):
+        issue = self.issue()
+        prompt = "# 交接：订单超时\n\nfeature-slug = `订单超时`，阶段=实现中；继续 issue-003。"
+        binding = MODULE.infer_binding({"prompt": prompt}, self.root)
+        self.assertEqual(binding["issue"], issue.relative_to(self.root).as_posix())
+        self.assertEqual(MODULE.infer_binding({"prompt": "feature-slug = `订单超时`，没有票号"}, self.root), None)
+
     def test_claude_native_title_and_manual_protection(self):
         self.issue(status="confirmed")
         event = {"session_id": "s1", "cwd": str(self.root), "hook_event_name": "UserPromptSubmit",

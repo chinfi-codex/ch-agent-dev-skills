@@ -62,7 +62,7 @@ def merge_events(existing, host, script, zcode_nested=False):
     result = remove_events(existing)
     for event in HOST_EVENTS[host]:
         groups = list(result.get(event) or [])
-        matcher = "startup|resume|fork" if event == "SessionStart" else ("Write|Edit" if event == "PostToolUse" else None)
+        matcher = "startup|resume|fork" if event == "SessionStart" else None
         group = {"hooks": [hook_item(host, script)]}
         if matcher:
             group["matcher"] = matcher

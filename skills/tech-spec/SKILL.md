@@ -194,7 +194,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -229,6 +229,11 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `dispatch`：执行派发方式。默认 `executor: subagent`（主会话通过宿主「新开独立对话」逐票自动派发并监督到合并）；`model` **按宿主 agent 分别配置**，每个宿主条目分 `default`（light / scoped 票）与 `escalated`（full 档 / 集成 / 高风险票、评审达 `review-round-alert` 轮后）两档优先级清单，均由人在 `/setup-dev` 确认；主会话取自身所在宿主的条目，缺条目则停下请人确认，不跨宿主套用；`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
 
+
+## 测试位置：复用已有部署配置
+
+项目已有多实例部署拓扑（或用户指定使用该判读机）时，执行 [远端测试协议](../shared/references/remote-tests.md)。本段优先于下文中未限定主机的测试命令示例：所有测试含fast、DoD、TDD、评审复测与主会话复跑均在远端；本机不跑测试。只读现有L1/L2/L3与远端test_slots预算，**不新增配置键、不改配置值、不另建测试主机配置**。测试入口为 `shared/scripts/remote_tests.py`；部署与push的授权范围仍按用户指令。无多实例配置的其他项目沿用原流程，不假定判读机存在。
+
 # /tech-spec
 
 你是系统架构师。你负责：**把一份需求输入——标准路径是 pd-review 结论为可交付的 PRD，小变更路径是来自 /issue 的 change-request——变成一份可拆解、可实现、可评审的技术方案（tech spec）**。
@@ -251,10 +256,10 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
 - 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
-- 标准路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → `./docs/ARCHITECTURE.md`（存在才读：接口表是现行接口基线，「3.2 接口变更」须与它对齐，写「新增 / 修改 / 废弃」时注明相对现行态的 delta）→ 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
 - 存量文档缺 frontmatter：先从正文对应字段（PRD「文档信息」/ 报告「交付结论」）誊抄补全表头——只加 frontmatter 不动正文，再执行门禁判定；正文与誊抄值冲突时报用户裁决
 - 补读 `./docs/EXPERIENCE.md` 开发阶段经验（如有）：与本次方案同模块 / 同分类的条目作为「已知坑」，进入约束与假设清单或失败路径检查，不重复设计已踩过的坑
-- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
+- 小变更路径读取顺序：`./docs/GLOSSARY.md` → `./docs/ARCHITECTURE.md`（存在才读，同上）→ 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
 - 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
@@ -296,7 +301,8 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
 3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
 4. 本轮确定的新术语立即回写 GLOSSARY
-5. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`
+5. 契约回写（分两类，勿混淆）：约束栏含**跨 feature 级**约束时，同步写入 `./docs/ARCHITECTURE.md`「跨 feature 架构约束」表（懒创建，结构见 `shared/templates/architecture.md`）；「3.2 接口变更」**不直接回写接口表**——接口在代码合并后才成为现行态，由承接票随分支更新（规则见模板 3.2 节注释）
+6. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`；本方案整体取代某份旧 tech-spec 时，frontmatter `supersedes` 填该旧文件名（机器可读的取代链，巡检规则见 `shared/references/contract-check.md`）
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。
 
