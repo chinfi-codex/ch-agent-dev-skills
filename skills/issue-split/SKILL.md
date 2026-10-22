@@ -154,7 +154,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成（如 Windows 权限）退回用主工作区绝对路径读写，仍不得复制。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -224,7 +224,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 按分支名发现，不按路径猜——宿主自管沙箱（如 Codex）会让真实路径偏离约定：
 
 1. `git worktree list --porcelain` 找 branch = `feat/<feature-slug>-<issue-id>` 的注册条目
-2. **salvage 前置（任何会话删 worktree 前必做，巡检外会话同样适用）**：`git -C <path> status --porcelain --ignored` 连 ignored 一起摸——ignored 目录（dev/、reports/、.logs/ 等）是本地真源，随 worktree 删除即永久丢失，git 历史救不回。不可再生且未收录进主工作区的内容（票文档 / 证据捕获 / 测试产物）→ 先打包到主工作区 `./dev/.salvage/<issue-id>-<日期>/` 并附 `_manifest.json`（来源路径 / 内容清单 / 判定理由）；可再生的（依赖目录 / 构建产物 / 下载缓存）不留
+2. **salvage 前置（任何会话删 worktree 前必做，巡检外会话同样适用）**：`git -C <path> status --porcelain --ignored` 连 ignored 一起摸——ignored 目录（dev/、reports/、.logs/ 等）是本地真源，随 worktree 删除即永久丢失，git 历史救不回。**先辨软链**：`<path>/dev` 是指向主工作区的软链（约定形态）时，其内容本就在主工作区，**不得跟随软链打包**（否则把主 dev/ 整树复制进 .salvage，二次膨胀），软链本身随 worktree 删除即可；实体目录才按下述判定。不可再生且未收录进主工作区的内容（票文档 / 证据捕获 / 测试产物）→ 先打包到主工作区 `./dev/.salvage/<issue-id>-<日期>/` 并附 `_manifest.json`（来源路径 / 内容清单 / 判定理由）；可再生的（依赖目录 / 构建产物 / 下载缓存）不留
 3. `git worktree remove <path>`；未跟踪产物拒删时 `--force`（salvage 完成后剩余产物可弃）
 4. `git worktree prune` 清悬空注册
 5. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支；local 模式核对已并入 `main-branch` 后 `git branch -D feat/<feature-slug>-<issue-id>`（有远端同名再 `git push origin --delete`）
@@ -237,7 +237,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 1. **取票**：只读 `./dev/features/<feature-module>/<feature-slug>/issues/` 票文件的 frontmatter（`status` / `blocked-by`），重算 frontier（blocked-by 全部 `done` 的票）；票正文由被派发的实现对话自读，主会话不读
 2. **派发**：按「派发协议」宿主适配机制为 frontier 票新开独立对话跑 `/implement issue-NNN`；frontier 中 `declared-scope` 两两不相交（含各自 scoped 反向闭包不触碰对方文件）的票按 `dispatch.parallel-max` 并行派发、各自 worktree；有交集或判定有疑义的串行。并行票合入按完成先后，后合者合入前 rebase 一次
 3. **跟踪**：被派发对话的结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）只是线索，不作为成功依据
-4. **收口**：先跑**流程核对**：`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> --phase merge --json <impl/<issue-id>/process-check-merge.json>`——红线登记、漂移登记、档位下限（阈值 / 集成票）、evidence 头 `tier-executed` 达到 `tier-target`、`full-commit` 与 HEAD 的本票文件一致、`all-passed: true`、impl-log 需求覆盖矩阵一次判完，退出码非 0 即退回实现对话补齐，不进合并；主会话不再手工逐字段核对 evidence 头。再核对评审报告头部结论 `pass` / `pass-with-notes`、MR ready（评审结论只判代码，测试执行状态以本步核对为准）。然后**验收复跑**（回执只是主张，不是证据）：主会话亲自发起复跑（适用远端协议时，通过remote_tests在判读机固定本票提交执行；禁止本机复跑）；重跑 evidence 记录的每条 DoD 验收命令与 `quality-gate.fast`，退出码须全为 0 且输出与 evidence 记录无明显矛盾；worktree 已被实现对话自清时按分支名重建（`git worktree add .worktrees/<issue-id> feat/<feature-slug>-<issue-id>`）。scoped / full 档套件不重跑，以 evidence 档位门记录为准；复跑若涉及重套件（如人工指派的 scoped 抽查），同样经 `test_slots.py run` 包装并后台轮询（形态见 /implement Step 5）。复跑通过后执行**需求符合性核对**（主模型校验，与 ai-review 正交——评审判「写得好不好」，本步判「要的有没有、偏没偏」，专门抓 diff 与退出码里看不见的缺席与偏差）：
+4. **收口**：先跑**流程核对**：`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> --phase merge --json <impl/<issue-id>/process-check-merge.json>`——红线登记、漂移登记、档位下限（阈值 / 集成票）、evidence 头 `tier-executed` 达到 `tier-target`、`full-commit` 与 HEAD 的本票文件一致、`all-passed: true`、impl-log 需求覆盖矩阵一次判完，退出码非 0 即退回实现对话补齐，不进合并；主会话不再手工逐字段核对 evidence 头。再核对评审报告头部结论 `pass` / `pass-with-notes`、MR ready（评审结论只判代码，测试执行状态以本步核对为准）。然后**验收复跑**（回执只是主张，不是证据）：主会话亲自发起复跑（适用远端协议时，通过remote_tests在判读机固定本票提交执行；禁止本机复跑）；重跑 evidence 记录的每条 DoD 验收命令与 `quality-gate.fast`，退出码须全为 0 且输出与 evidence 记录无明显矛盾；worktree 已被实现对话自清时按分支名重建（`git worktree add .worktrees/<issue-id> feat/<feature-slug>-<issue-id>`，随后补 dev/ 软链 `ln -s ../../dev .worktrees/<issue-id>/dev`）。scoped / full 档套件不重跑，以 evidence 档位门记录为准；复跑若涉及重套件（如人工指派的 scoped 抽查），同样经 `test_slots.py run` 包装并后台轮询（形态见 /implement Step 5）。复跑通过后执行**需求符合性核对**（主模型校验，与 ai-review 正交——评审判「写得好不好」，本步判「要的有没有、偏没偏」，专门抓 diff 与退出码里看不见的缺席与偏差）：
    - **反向枚举先行**：先不看 impl-log 覆盖矩阵，从票「要做什么 / 不做什么」+ tech-spec 锚点节独立枚举需求点清单，防止被实现方叙事带偏
    - **逐条核映射**：对照 impl-log「需求覆盖矩阵」，打开映射指向的代码位置核对语义（不只看 evidence 退出码；至少覆盖全部 ★ 关键路径行），逐条判 `已实现 / 语义偏差 / 未实现`；只照抄矩阵不打开代码等于没核
    - **集成票加做 feature 级核对**：对 tech-spec 全节（不只票锚点）枚举 feature 级需求点，对照本 feature 各票覆盖矩阵的并集，抓票间接缝缺口（A 票以为 B 票做）

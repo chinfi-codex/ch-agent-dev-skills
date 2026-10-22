@@ -109,7 +109,7 @@ allowed-tools:
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成（如 Windows 权限）退回用主工作区绝对路径读写，仍不得复制。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -167,7 +167,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - glab：`glab auth status`（GitLab CLI 登录态）
 - ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）
 - 规则：`<repo>/.opencodereview/rule.json` 是否已存在
-- 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/`
+- 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/` 与 `dev/`；`git ls-files dev` 是否已有跟踪条目（dev/ 一旦入库，每个 worktree checkout 自带一份完整副本，磁盘随票线性膨胀）
 - 测试选择基建：pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力是否可用——决定 `verify-policy.selection` 推荐 dir-map 还是 impact-map
 - 宿主可选模型：**逐个**枚举本机已安装、会用来跑 dev 流程的宿主 agent（如 Claude Code / ZCode / Codex，按 `~/.claude`、`~/.zcode`、`~/.codex` 等配置目录存在判断）各自可供派发选用的模型清单（宿主有模型列举能力时直接取用；无列举能力时按人对该宿主阵容的了解列出候选）——作为 `dispatch.model.<宿主>` 的候选池
 - 整机预算：`~/.cache/agent-dev/slots/budget.json` 是否已存在及其取值（已存在 = 同机其他仓已设定，直接镜像进配置，不重新问）
@@ -197,7 +197,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 按模板落盘（写作前必须先读对应模板）：
 
 - `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含 `dispatch` 节（宿主新开对话派发 + 人确认的宿主可选模型优先级清单）、三档质量门与 `verify-policy`（档位阈值 / 两级升档触发器 / 漂移规则 / selection 机制 / attribution 归因 / 执行形态）、`host-budget`（机器级预算的镜像）
-- `.gitignore` 追加 `.worktrees/`（已存在则跳过）
+- `.gitignore` 追加 `.worktrees/` 与 `dev/`（已存在则跳过）；探查发现 dev/ 已被 git 跟踪 → 显式警示并建议 `git rm -r --cached dev/` 出库（dev/ 不入库是 worktree dev/ 软链约定的前提；入库会让每个 worktree 自带完整副本）
 - **仅当 ocr.mode = ci 时**：
   - 复制 `shared/templates/gitlab-ci-ocr.yml`（相对本 SKILL.md 为 `../shared/templates/gitlab-ci-ocr.yml`）为仓库 `ci/ocr-review.gitlab-ci.yml`，并在项目 `.gitlab-ci.yml` 加 `include: local`；回贴脚本 `ci/ocr-post-review.py` 需人从上游仓库获取放置（模板头部有说明，内网不能现场 curl 外网）
   - 明确列出**人要在 GitLab 后台设置的 CI 变量清单**（`OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN` 掩码 / `OCR_LLM_MODEL` 必需，`GITLAB_API_TOKEN` 掩码可选）——本 skill 不碰 GitLab 后台

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""process_check.py 的红线 / 漂移 / 档位 / 证据 / full-ref / 覆盖矩阵 / 符合性核对契约测试。
+"""process_check.py 的红线 / 漂移 / 档位 / 证据 / full-ref / 覆盖矩阵 / 符合性核对 / worktree dev/ 卫生契约测试。
 
 运行：python3 -m unittest discover -s skills/shared/scripts/tests -v
-每个用例在独立临时目录建合成 git 仓（main + feat 分支 + dev/ 产物）。
+每个用例在独立临时目录建合成 git 仓（main + feat 分支 + dev/ 产物；dev/ 按约定不入库）。
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -64,7 +65,7 @@ class ProcessCheckTest(unittest.TestCase):
         (r / "dev/agents-config.md").write_text(CONFIG, encoding="utf-8")
         (r / "src/a.py").write_text("a\n")
         (r / "tests/test_a.py").write_text("t\n")
-        sh(r, "git", "add", "-A")
+        sh(r, "git", "add", "src", "tests")
         sh(r, "git", "commit", "-qm", "base")
         sh(r, "git", "checkout", "-qb", "feat")
         (r / "src/a.py").write_text("a\nb\n")
@@ -99,9 +100,9 @@ class ProcessCheckTest(unittest.TestCase):
         self.write_evidence(target="full", executed="scoped")
         self.log.write_text(LOG_OK + "| r2 | - | 是 | 集成票升至 full |\n", encoding="utf-8")
 
-    def check(self, phase):
+    def check(self, phase, repo=None):
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "--issue", str(self.issue),
-                            "--repo", str(self.root), "--phase", phase], capture_output=True, text=True)
+                            "--repo", str(repo or self.root), "--phase", phase], capture_output=True, text=True)
         return r.returncode, r.stdout + r.stderr
 
     def test_unregistered_redline_and_drift_fail(self):
@@ -215,6 +216,44 @@ class ProcessCheckTest(unittest.TestCase):
         ev_path.write_text(f"```yaml\ncommit: {self.head}\nverify-tier: scoped\ntier-target: scoped\n"
                            "tier-executed: scoped\nall-passed: true\n```\n", encoding="utf-8")
         self.assertEqual(self.check("review")[0], 0)
+
+    # ---- worktree dev/ 卫生（软链约定）----
+
+    def make_worktree(self, name="issue-001"):
+        wt = self.root / ".worktrees" / name
+        sh(self.root, "git", "worktree", "add", "--detach", str(wt), "HEAD")
+        return wt
+
+    def test_worktree_dev_absent_or_symlink_passes(self):
+        wt = self.make_worktree()
+        code, out = self.check("review", repo=wt)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("worktree-dev", out)
+        # 软链（约定形态）同样通过
+        os.symlink("../../dev", wt / "dev")
+        code, out = self.check("review", repo=wt)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("worktree-dev", out)
+
+    def test_worktree_dev_real_copy_fails(self):
+        wt = self.make_worktree()
+        (wt / "dev").mkdir()
+        (wt / "dev/capture.png").write_bytes(b"x")
+        code, out = self.check("review", repo=wt)
+        self.assertEqual(code, 1, out)
+        self.assertIn("[FAIL] worktree-dev", out)
+        self.assertIn("实体副本", out)
+
+    def test_worktree_dev_tracked_only_warns(self):
+        # dev/ 被入库的存量仓：worktree checkout 自带实体 dev/ → REVIEW 告警而非 FAIL
+        sh(self.root, "git", "add", "dev")
+        sh(self.root, "git", "commit", "-qm", "track dev")
+        self.head = sh(self.root, "git", "rev-parse", "HEAD")
+        self.write_evidence(target="scoped", executed="scoped")
+        wt = self.make_worktree()
+        code, out = self.check("review", repo=wt)
+        self.assertEqual(code, 0, out)
+        self.assertIn("[REVIEW] worktree-dev", out)
 
     # ---- 需求符合性核对（close 相）----
 

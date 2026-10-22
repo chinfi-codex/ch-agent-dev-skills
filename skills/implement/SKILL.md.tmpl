@@ -69,6 +69,7 @@ allowed-tools:
 ### Step 1：开 worktree 隔离
 
 - 基准 `agents-config.main-branch`：`git worktree add .worktrees/<issue-id> -b feat/<feature-slug>-<issue-id>`
+- **紧接建 dev/ 软链**（约定见「Dev Artifact 路径约定」，防实体副本膨胀）：`ln -s ../../dev .worktrees/<issue-id>/dev`（宿主自管沙箱改用主工作区 dev/ 绝对路径作目标），此后 worktree 内 `./dev/` 读写自动落主工作区。`<worktree>/dev` 已存在：是软链直接复用；是实体目录 → 停下报告（已有真实副本，按清场序列 salvage 规则处置后再建链），不静默覆盖、不自行删除；软链建不成（如 Windows 权限）→ 全程用主工作区绝对路径读写 dev/。恢复场景 worktree 已存在：缺软链即补
 - **基线冻结**（`verify-policy.base-freeze`）：开工 base commit 记入 impl-log；实现与评审期间不追集成分支、不因 main 前进而 rebase，只在 Step 8 合入前 rebase 一次
 - 宿主自管会话沙箱（如 Codex 的 `~/.codex/worktrees/`）时：以沙箱为隔离，不再嵌套 `.worktrees/<issue-id>`；分支仍按 `feat/<feature-slug>-<issue-id>` 命名，收口清场由主会话按分支名发现
 - 全部工作发生在 worktree 内；主工作区不放任何本票改动

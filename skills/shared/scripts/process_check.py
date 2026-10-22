@@ -486,7 +486,25 @@ def run(args) -> tuple[Report, dict]:
         if not errors:
             rep.add("remote-evidence", "PASS", "远端提交/环境/命令与日志完整性一致；验收覆盖与先在失败归因仍须核对")
 
-    # 5. 需求符合性核对（仅 close 相）：主会话合并前核对结论落盘，此处只把机器可判的关
+    # 5. worktree dev/ 卫生：约定是「无 dev/」或「指向主工作区 dev/ 的软链」；实体副本 = 磁盘随票线性膨胀、清场丢真源
+    # .git 为文件说明 --repo 是 worktree 而非主工作区（主工作区的 dev/ 本来就是真源，不查）
+    if (repo / ".git").is_file():
+        dev_entry = repo / "dev"
+        if dev_entry.is_symlink():
+            pass
+        elif dev_entry.is_dir():
+            if git(repo, "ls-files", "--", "dev").strip():
+                rep.add("worktree-dev", "REVIEW",
+                        "worktree 内 dev/ 是 git 跟踪的实体目录——dev/ 入库使每个 worktree 自带完整副本，"
+                        "建议 dev/ 出库（git rm -r --cached dev）后改软链约定")
+            else:
+                rep.add("worktree-dev", "FAIL",
+                        "worktree 内 dev/ 是未跟踪实体副本——约定为指向主工作区 dev/ 的软链；"
+                        "先把未收录内容按 salvage 规则收回主工作区，再删副本建软链（ln -s ../../dev <worktree>/dev）")
+        elif dev_entry.exists():
+            rep.add("worktree-dev", "FAIL", "worktree 内 dev/ 是非常规文件类型，应为指向主工作区 dev/ 的软链")
+
+    # 6. 需求符合性核对（仅 close 相）：主会话合并前核对结论落盘，此处只把机器可判的关
     if args.phase == "close":
         conf = config.get("conformance") or {}
         mode = str(conf.get("mode") or "always")
