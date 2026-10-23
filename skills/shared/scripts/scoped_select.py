@@ -21,7 +21,10 @@
 
 用法：
   python3 scoped_select.py --repo <仓> [--base REV | --changed F ...] [--list | --run]
-      [--jobs N] [--timeout S] [--map PATH] [--scan DIR ...] [--test-dir DIR] [--fallback-run]
+      [--jobs N] [--timeout S] [--map PATH] [--scan DIR ...] [--test-dir DIR]
+      [--categories PATH] [--fallback-run]
+  --categories：测试分类清单（可选），只读 `gate: helper` 分类的 tests 名单——helper 用例
+      不进测试清单与选择集（它们由公开入口间接覆盖，单独执行会误报）。
 退出码：--list 恒 0；--run 有失败即 1，deferred 恒 0。只依赖 Python 3.8+ 标准库。
 """
 import argparse
@@ -248,6 +251,54 @@ def load_dir_map(path):
     return entries
 
 
+def load_helper_tests(path):
+    """读分类清单中 gate: helper 的 tests 名单（块式与内联 {gate: helper, tests: [...]} 两种形态）；
+    文件缺失或解析不到返回空集。helper 用例由公开入口间接覆盖，不进测试清单。"""
+    if not path or not path.is_file():
+        return set()
+    helpers = set()
+    lines = path.read_text(encoding='utf-8').splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        line = raw.split('#', 1)[0].rstrip()
+        m_inline = re.search(r'gate:\s*["\']?helper["\']?', line)
+        if m_inline:
+            m_tests = re.search(r'tests:\s*\[([^\]]*)\]', line)
+            if m_tests:  # 内联形态：{gate: helper, tests: [a.py, b.py]}
+                helpers.update(t.strip().strip("\"'") for t in m_tests.group(1).split(',') if t.strip())
+                i += 1
+                continue
+            # 块形态：gate: helper 行之后找缩进更深的 tests: 列表
+            j = i + 1
+            while j < len(lines):
+                sub = lines[j].split('#', 1)[0].rstrip()
+                if not sub.strip():
+                    j += 1
+                    continue
+                indent = len(sub) - len(sub.lstrip(' '))
+                if re.match(r'^\s*tests:\s*$', sub):
+                    j += 1
+                    while j < len(lines):
+                        item = lines[j].split('#', 1)[0].rstrip()
+                        m_item = re.match(r'^\s+-\s+(\S+)\s*$', item)
+                        if m_item and (len(item) - len(item.lstrip(' '))) > indent:
+                            helpers.add(m_item.group(1).strip("\"'"))
+                            j += 1
+                            continue
+                        break
+                    break
+                if indent <= (len(line) - len(line.lstrip(' '))) and sub.strip().endswith(':'):
+                    break  # 下一个分类块，未遇 tests:
+                if re.match(r'^\S', sub):
+                    break
+                j += 1
+            i = j
+            continue
+        i += 1
+    return helpers
+
+
 def dir_map_matches(entries, changed_rel):
     hit = []
     for e in entries:
@@ -258,12 +309,14 @@ def dir_map_matches(entries, changed_rel):
     return hit
 
 
-def select(repo, changed, scan_roots=('tools', 'skills'), test_dir='tools/tests', map_path=None):
+def select(repo, changed, scan_roots=('tools', 'skills'), test_dir='tools/tests', map_path=None,
+           categories_path=None):
     """返回选择结果字典（不执行）。"""
     repo = Path(repo).resolve()
     files = scan_files(repo, scan_roots)
     graph = Graph(repo, files)
-    tests = test_files(repo, test_dir)
+    helpers = load_helper_tests(categories_path or (repo / 'tools' / 'test_categories.yaml'))
+    tests = [t for t in test_files(repo, test_dir) if t not in helpers]
     test_rels = {f'{test_dir}/{t}' for t in tests}
     dir_map = load_dir_map(map_path or (repo / 'dev' / 'scoped-map.yaml'))
     direct, seeds, text, mapped, reasons = set(), set(), {}, {}, []
@@ -358,6 +411,7 @@ def main(argv=None):
     ap.add_argument('--map', dest='map_path', help='dir-map 路径，默认 <repo>/dev/scoped-map.yaml')
     ap.add_argument('--scan', action='append', default=[], help='import 图扫描根（可重复，默认 tools skills）')
     ap.add_argument('--test-dir', default='tools/tests', help='测试目录，默认 tools/tests')
+    ap.add_argument('--categories', help='测试分类清单路径（读 gate: helper 名单；默认探测 <repo>/tools/test_categories.yaml）')
     ap.add_argument('--fallback-run', action='store_true',
                     help='闭包不可证明时仍全量执行（默认 deferred 不执行，由集成票/每日回归兜底）')
     args = ap.parse_args(argv)
@@ -365,12 +419,13 @@ def main(argv=None):
     repo = Path(args.repo).resolve()
     scan_roots = tuple(args.scan) or ('tools', 'skills')
     map_path = Path(args.map_path) if args.map_path else None
+    categories = Path(args.categories) if args.categories else None
     if args.changed:
         base, changed = None, sorted(args.changed)
     else:
         base = args.base or default_base(repo)
         changed = changed_files(repo, base)
-    result = {'base': base, **select(repo, changed, scan_roots, args.test_dir, map_path)}
+    result = {'base': base, **select(repo, changed, scan_roots, args.test_dir, map_path, categories)}
     result['execution_scope'] = ('full_fallback' if not result['enumerable'] else
                                  'selected' if result['selected'] else 'empty')
 
@@ -386,7 +441,10 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    names = result['selected'] if result['enumerable'] else test_files(repo, args.test_dir)
+    names = result['selected']
+    if not result['enumerable']:
+        helpers = load_helper_tests(categories or (repo / 'tools' / 'test_categories.yaml'))
+        names = [t for t in test_files(repo, args.test_dir) if t not in helpers]
     ran = run_tests(repo, args.test_dir, names, max(1, args.jobs), args.timeout)
     result['ran'] = ran
     result['broken'] = [r['name'] for r in ran if r['exit'] != 0]

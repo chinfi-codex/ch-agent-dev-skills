@@ -90,6 +90,22 @@ class SyntheticRepo(unittest.TestCase):
         self.assertEqual(result['selected'], ['d_smoke.py'])
         self.assertEqual(result['direct'], ['d_smoke.py'])
 
+    def test_helper_tests_excluded_via_categories(self):
+        # 块形态分类清单：gate: helper 的 tests 不进测试清单与选择集
+        build(self.root, {'tools/test_categories.yaml':
+                          'schema: v1\ncategories:\n  helper:\n    gate: helper\n    tests:\n'
+                          '      - b_smoke.py\n  env-x:\n    gate: env\n    tests:\n      - a_smoke.py\n'})
+        result = self.pick('tools/helper.py')
+        self.assertEqual(result['selected'], [])
+        self.assertEqual(result['total'], 6)  # b_smoke.py 被排除
+        # 内联形态：{gate: helper, tests: [...]}
+        build(self.root, {'tools/test_categories.yaml':
+                          'categories:\n  helper: {gate: helper, tests: [a_smoke.py]}\n'})
+        self.assertEqual(self.pick('skills/s1/scripts/cli.py')['selected'], [])
+        # 无分类清单时不排除
+        (self.root / 'tools/test_categories.yaml').unlink()
+        self.assertEqual(self.pick('tools/helper.py')['selected'], ['b_smoke.py'])
+
     def test_dir_map_covers_data_files(self):
         # dir-map 命中的数据文件：入选且视为可证明覆盖（不再触发 uncertain/defer）
         build(self.root, {'dev/scoped-map.yaml':
