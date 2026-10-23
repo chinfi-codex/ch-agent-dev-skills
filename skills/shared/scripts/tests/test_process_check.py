@@ -217,6 +217,26 @@ class ProcessCheckTest(unittest.TestCase):
                            "tier-executed: scoped\nall-passed: true\n```\n", encoding="utf-8")
         self.assertEqual(self.check("review")[0], 0)
 
+    def test_scoped_deferred_accepted_when_closure_incomplete(self):
+        # 选择集不可枚举：DoD+fast 照跑（tier-executed: light）+ deferred 标记 → 豁免 scoped 短档
+        self.write_evidence(target="scoped", executed="light", extra="scoped-deferred: closure-incomplete\n")
+        code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        self.assertIn("scoped-deferred", out)
+        self.assertEqual(self.check("merge")[0], 0)
+        # 无 deferred 标记的 light 仍 FAIL
+        self.write_evidence(target="scoped", executed="light")
+        code, out = self.check("review")
+        self.assertEqual(code, 1, out)
+        self.assertIn("本阶段要求", out)
+        # full 档票评审前可用 deferred 豁免 scoped，但 merge 相最终 full 不免跑
+        self.make_integration()
+        self.write_evidence(target="full", executed="light", extra="scoped-deferred: closure-incomplete\n")
+        self.assertEqual(self.check("review")[0], 0)
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("本阶段要求 full", out)
+
     # ---- worktree dev/ 卫生（软链约定）----
 
     def make_worktree(self, name="issue-001"):

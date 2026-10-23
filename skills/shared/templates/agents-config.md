@@ -91,17 +91,31 @@ verify-policy:
                            #   impact-map = coverage / 静态导入闭包反查（diff → 依赖这些模块的测试，含调用方模块的测试；
                            #                hub 形态仓库必选本档——dir-map 会漏掉沿 import 链传导的影响面，给出全绿假信号；
                            #                scoped+ 级触发器处理也依赖本档的闭包）
+                           #   impact-map + dir-map 组合（推荐）：代码变更走反向闭包，数据 / 配置文件走仓内声明映射表
+                           #                （默认 dev/scoped-map.yaml，命中即视为可证明覆盖）；仓库元信息 / dev/ / docs/
+                           #                等无行为消费者的文件不要求覆盖证明
                            #   module-scoped = 按需求涉及模块选择该模块的全部测试（模块目录映射 + 该模块的反向闭包测试），
                            #                不跑全仓——用于「模块隔离认定」成立的集成票与 C 类仓末票；
                            #                选择面比 scoped 宽（整个模块而非本票 diff）、比 full 窄（不跨无关模块）
-  # 先在失败归因：套件基线长期存在与本票无关的失败时，档位门只对可归因于本票 diff 的失败判红
-  attribution: known-failures
-    # known-failures（推荐默认）：维护落盘的既有失败清单（测试名 + 失败签名 + 首录日期 + 来源 evidence）；
-    #   失败先比对清单——在清单且签名一致 = 先在失败，evidence 显式列出但不进 all-passed 分母；
-    #   不在清单或签名不符 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑；
-    #   清单由 full 档执行顺带刷新（全量结果即新基线），条目修复后销记
+  selection-map: null       # dir-map 映射表路径（仓内相对路径，默认 dev/scoped-map.yaml）；
+                           #   选择器为共享脚本 shared/scripts/scoped_select.py（--map 覆盖、--scan 扫描根、--test-dir 测试目录）
+  # scoped 执行条件：选择集可枚举（闭包可证明）才票内跑；不可枚举（full fallback，跑了等于变相每票 full）
+  #   → 票内不跑选择集，evidence 头记 `scoped-deferred: closure-incomplete` + 原因，tier-executed 如实记 light，
+  #   套件级验证由集成票 full 与每日回归兜底；不因此升档、tier-target 不变，DoD + fast + 评审照常
+  # 先在失败隔离：套件基线长期存在与本票无关的失败时，隔离清单内用例 skip 执行，
+  # 不产生 exit 1——套件退出码恢复语义（exit 1 = 有新东西坏了），档位门只对清单外失败归因
+  attribution: quarantine
+    # quarantine（推荐默认）：维护落盘隔离清单（默认 dev/known-failures.yaml）——
+    #   清单内用例在 full / scoped 中以 skip（标 quarantined）执行，不进 all-passed 分母，evidence 只列隔离数；
+    #   入册条件：base 侧同签名稳定失败；每条必须写 name + returncode + signature + owner +
+    #   去向（修复票 / 永久删除决议）+ 首录日期，无去向不入册；
+    #   清单由每日 full 顺带刷新（转绿销记、新先在追加），env-skip 项不做整体替换（环境缺失的轮次保留历史条目）；
+    #   每日 full 另以「只跑隔离项、不判红」抽查签名漂移（隔离项转绿该销记 / 失败形态变了该重新评估，都要可见）；
+    #   超 quarantine-max-age-days 未处理的条目在每日回归记录列出，主会话监督循环呈现给人；
+    #   清单外失败 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑
     # two-sided（保守档）：每条失败 branch / base 同命令各跑一遍对照——归因成本翻倍（全套 ×2），
     #   仅套件小或清单机制未建时使用
+  quarantine-max-age-days: 14        # 隔离条目超期告警天数（进每日回归记录）
   # 测试职责边界：AI 交付门只保证功能实现度；性能与展示由人工确认
   gate-scope:
     categories-file: null     # 测试分类清单路径（仓库内，测试名 → 类别）；未配置时全部用例视为 functional
@@ -113,7 +127,7 @@ verify-policy:
     env-skip: true            # 分类清单中声明了外部依赖（环境变量 / 外部服务）的用例，依赖缺失时显式 skip，
                               #   evidence 列出 skip 清单与缺失项；不算失败（免归因），也不算通过
   # 档位原因：定档 / 升档时写入票 frontmatter `tier-reason`（命中的触发器名 / 阈值项 / integration），
-  #   process_check.py 输出、/board 统计，用于观察并调整触发器
+  #   process_check.py 输出与每日回归记录统计，用于观察并调整触发器
   # full 次数：同一张票的 full 只在「评审通过后的最终 commit」上跑一次（仅 full 档票：迁移 / 鉴权 / 超阈值 / 集成票）
   full-runs: once-at-final
     # Step 5 先跑 DoD + fast + scoped 进评审；评审通过后在最终 commit 跑一次 full（full 档票 / 集成票）
@@ -125,11 +139,13 @@ verify-policy:
   daily-regression:
     enabled: true
     record-dir: dev/full-runs      # 每次落盘 <date>-<tree8>.md：tree / 上次通过以来的合入区间 / 结果 / 归因 / 二分结论 / 耗时 / jobs
+                                   #   / 隔离数与签名漂移抽查结果 / 超期隔离条目清单（超 quarantine-max-age-days）
     worktree: .worktrees/daily-full
     skip-if-unchanged: true        # main tree 与最近一次记录相同 → 当日跳过
     max-gap-days: 3                # 存在进行中 feature 且最近记录早于此天数 → 主会话在空闲时补跑一次（定时漏跑兜底）
     # 新失败（清单外）：在「上次通过 tree..本次 tree」合入区间内二分（每步只跑失败项）→ 定位到合入提交 → 其票置
-    #   needs-human 并开回修票；合入不暂停。先在失败按 attribution 判定，清单由本次结果刷新
+    #   needs-human 并开回修票；合入不暂停。清单内用例 skip（quarantine），清单由本次结果顺带刷新（转绿销记、
+    #   新先在追加须带 owner / 去向 / 首录日期），并以「只跑隔离项、不判红」抽查签名漂移
   # 基线冻结：票开工时固定 base（记 impl-log），实现与评审期间不追集成分支；只在合入前 rebase 一次
   #   （无冲突且本票文件 blob 不变 → 复用证据；有冲突 → 冲突文件闭包 scoped）
   base-freeze: true

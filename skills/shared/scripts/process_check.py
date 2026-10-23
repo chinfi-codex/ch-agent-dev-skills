@@ -442,7 +442,14 @@ def run(args) -> tuple[Report, dict]:
         if executed is None:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:
-            rep.add("evidence", "FAIL", f"tier-executed {_name(executed)} < 本阶段要求 {_name(need)}")
+            # scoped-deferred：选择集不可枚举时票内不跑选择集（跑了等于变相每票 full），DoD + fast 照跑，
+            # 套件级验证由集成票 full 与每日回归兜底；full 档最终 full 不免跑（need=full 时不豁免）
+            if (executed >= TIERS["light"] and need <= TIERS["scoped"]
+                    and str(ev.get("scoped-deferred") or "").strip() == "closure-incomplete"):
+                rep.add("evidence", "REVIEW",
+                        "scoped 选择集不可枚举已延期（scoped-deferred）：由集成票 full / 每日回归兜底，评审复核 DoD + fast 结论与延期原因")
+            else:
+                rep.add("evidence", "FAIL", f"tier-executed {_name(executed)} < 本阶段要求 {_name(need)}")
         full_ref = str(ev.get("full-ref") or "").strip()
         if executed == TIERS["full"] and not ev.get("full-commit") and not full_ref:
             rep.add("evidence", "FAIL", "tier-executed: full 但缺 full-commit / full-ref（档位虚标）")

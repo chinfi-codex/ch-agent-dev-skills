@@ -1,0 +1,23 @@
+# 隔离清单（quarantine list）：基线长期红 → 退出码恢复语义的治理账本
+# 路径：默认 dev/known-failures.yaml（随 agents-config verify-policy.attribution = quarantine）
+# 语义：清单内用例在 full / scoped 中以 skip（标 quarantined）执行，不产生 exit 1、不进 all-passed 分母。
+# 入册条件（三条同时满足，缺一不入册）：
+#   1. base 侧同签名稳定失败（同命令、同 returncode、归一化签名一致）；
+#   2. 每条写清 owner（谁负责跟）与 destination（去向：修复票号 / 永久删除决议）；
+#   3. 首录日期（first-seen）——超 quarantine-max-age-days（默认 14）未处理的条目
+#      进每日回归记录的超期清单，由主会话监督循环呈现给人。
+# 维护：每日 full 顺带刷新（转绿销记、新先在追加须带齐三字段）；
+#   每日 full 另以「只跑隔离项、不判红」抽查签名漂移（转绿该销记、失败形态变了该重新评估）；
+#   env-skip 项不做整体替换（环境缺失的轮次保留历史条目）。
+
+generated: YYYY-MM-DD
+source: <首录来源 evidence / full 记录路径>
+
+failures:
+  - name: <测试名（与套件输出一致）>
+    returncode: 1
+    signature: <归一化失败签名（去时间戳 / 路径 / 易变字段后的关键报错）>
+    owner: <负责人或角色>
+    destination: <去向：issue-NNN 修复票 | permanent-delete 决议（须注明决议日期与理由）>
+    first-seen: YYYY-MM-DD
+    note: <一句话：为什么在册、当前判断>

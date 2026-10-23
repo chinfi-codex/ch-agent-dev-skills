@@ -91,6 +91,33 @@
 ## 3. 不建议引入的
 
 - **覆盖率硬指标**（VoltAgent >90%）：与本仓库风险驱动路线冲突，superpowers 也把「只为覆盖率存在的测试」列为反模式。
-- **无条件 TDD 铁律**（superpowers 全文版）：本仓库票粒度小、有大量协议文件/模板类票，pstack 的条件式 TDD 更匹配；2.1 只补见红验证，不补铁律。
+- **无条件 TDD 铁律**（superpowers 全文版）：本仓库票粒度小、有大量协议文件/模板类票，pstack 的条件式更匹配；2.1 只补见红验证，不补铁律。
 - **真实 LLM 行为测试进 CI**：superpowers 自己也只敢把静态门禁放 CI，行为测试在独立仓库 nightly 跑；本仓库同理，2.3 用人工触发即可。
 - **评审者全面重跑测试**（pstack shipping 全文版）：成本与 once-at-final 设计冲突，只取集成票抽查（2.7）。
+
+## 4. 补：ECC（affaan-m/ECC，~287k★）与回归测试专项
+
+> 2026-10-23 追加。ECC = agent harness 优化系统（71 agents / 311 skills，npm 包 + 插件分发），总循环 `plan → test → implement → review → verify → remember → improve`。
+
+### 4.1 ECC 的回归机制（七个受访项目里最重）
+
+- **bug 级**：`ai-regression-testing` skill——"write tests for bugs that were found, not for code that works"；`test-collaboration` 强制每张 bug 修复创建/链接 TEST-ID 或显式人工出口，"Record before-fix failure and after-fix success"、"Code-only fixes are incomplete"。
+- **模块级**：`module-regression` 的 REGRESSION.md 账本——每模块记下游消费者 + 可执行验收命令；"Verdict = exit code. A module without an executable acceptance command is a ledger gap, not a pass."；无法机械确认的边标 `unverified` 且**阻塞全绿结论**直到人确认。
+- **套件级**：CI 每 PR 全量矩阵（多 OS × Node + pm lane）+ 80% 覆盖率硬门 + 发布 exact-SHA 关卡；**无 nightly**。套件运行时治理精细（33 路矩阵裁成两类 lane、flaky 平台串行、lane 测试清单动态派生防漂移）。
+- **张力**：ECC 内部有两个声音——copilot-instructions 要 80% 覆盖，regression skill 说 "Don't aim for 100% coverage — aim for regression prevention"。
+
+### 4.2 回归必要性判断（跨项目结论）
+
+| 层级 | 各项目一致性 | 必要性 |
+|---|---|---|
+| bug 级闭环（先复现测试、修复验证、留证据） | superpowers / pstack / ECC 完全一致 | **必要**，零争议；本仓库已落地（04e60c3） |
+| 改动面级（账本 / 闭包 / 选择集） | 三家各有一套：ECC 账本、superpowers 全套件、本仓库反向闭包 | **必要**，但实现应与依赖分析能力匹配 |
+| 套件级全量 | 三个项目三个答案：ECC 每 PR 全量（npm 产品仓）、superpowers 不进 CI 只 nightly（技能文档仓）、pstack 不跑全量靠真实表面验证（插件仓） | **= f(分发形态 × 出错代价 × 单次成本)**，无普世答案 |
+
+对本仓库的映射：
+
+- 每票全量**不必要**——本仓库 320 份 evidence 实测 97% 空转（req-full-regression-frequency.md），与 pstack/superpowers 的缺席互相印证；C+D+F 分层正确。
+- ECC 账本验证了 R2 quarantine 方向：known-failures 升级隔离清单 ≈ REGRESSION.md 的"last green commit + 退出码即裁决"。
+- 一处可更严：模块隔离认定「闭包不完整」现状是标记录案、由每日回归兜底；ECC 对 unverified 边是**阻塞全绿直到人确认**。隔离认定争议处理可参考（代价是偶尔阻塞）。
+- 若哪天把 skills 打包成分发产品（npm/plugin 市场），套件级标准才需向 ECC 模式（每 PR 全量 + 发布关卡）迁移。
+

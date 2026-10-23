@@ -1,6 +1,6 @@
 # 需求说明：full 回归降频与基线治理（C+D+F 三层方案）
 
-> 状态：待实现 · 提出：2026-10-15 · 方案改订：2026-10-15（merge-train → 每日回归 → C+D+F；R1 已落地，R2 待实现）· 仓库：ch-agent-dev-skills（skill 规则仓）
+> 状态：已实现 · 提出：2026-10-15 · 方案改订：2026-10-15（merge-train → 每日回归 → C+D+F；R1 已落地）· R2 落地：2026-10-23（告警通路偏差：/board 已删除，超期条目改由每日回归记录列出 + 主会话监督循环 6a 呈现）· 仓库：ch-agent-dev-skills（skill 规则仓）
 > 姊妹需求：[req-host-test-budget.md](req-host-test-budget.md)（本机测试算力预算，已实现）；本需求的每日回归经 `test_slots.py run` 包装执行
 
 ## 1. 背景与数据
@@ -32,7 +32,7 @@ dev 流水线（/issue-split → /implement → /ai-review → 主会话合并�
 ## 2. 目标
 
 1. 票内 full 只留给迁移 / 鉴权、超阈值和集成票；跨 feature 回归由 main 每工作日一次 full 兜底（已落地）
-2. 先在失败不再产生 exit 1，full 退出码重新有意义（quarantine，R2，待实现）
+2. 先在失败不再产生 exit 1，full 退出码重新有意义（quarantine，R2，已落地）
 3. 定档 / 升档原因可统计（`tier-reason`，字段已落地，统计待实现）
 
 非目标：本机并发 / 算力调度（姊妹需求，已实现）；评审流程（已在 472e568 完成）。
@@ -49,7 +49,7 @@ dev 流水线（/issue-split → /implement → /ai-review → 主会话合并�
 - **漏跑兜底（E）**：有进行中 feature 且最近记录早于 `max-gap-days`（默认 3）→ 主会话空闲时补跑一次
 - **tier-reason**：票 frontmatter 新字段，/issue-split 定档、/implement 升档时写；process_check 输出
 
-### R2 基线隔离（quarantine）
+### R2 基线隔离（quarantine）——已落地（2026-10-23）
 
 - `known-failures` 清单升级为隔离清单：列入的用例在 full / scoped 中以 skip（标 quarantined）执行，不再产生 exit 1；evidence 列出隔离数
 - 入清单条件：base 侧同签名稳定失败；每条必须写 owner 或去向（修复票 / 永久删除决议）
@@ -65,10 +65,14 @@ dev 流水线（/issue-split → /implement → /ai-review → 主会话合并�
 
 ## 4. 剩余工作与涉及文件
 
-R1 已在本次提交落地（agents-config、dev-config、supervision-loop 6a、implement、issue-split、ai-review、setup-dev、evidence / issue 模板、process_check.py 的 full-ref 与 tier-reason，测试 `skills/shared/scripts/tests/test_process_check.py`）。剩余：
+R1 已在本次提交落地（agents-config、dev-config、supervision-loop 6a、implement、issue-split、ai-review、setup-dev、evidence / issue 模板、process_check.py 的 full-ref 与 tier-reason，测试 `skills/shared/scripts/tests/test_process_check.py`）。
 
-- R2 quarantine：`agents-config.md` 的 `attribution` 注释改为隔离语义；`implement` Step 5 归因段；`evidence.md` 隔离数字段；清单格式（owner / 去向 / 首录日期）
+R2 已于 2026-10-23 落地：`agents-config.md` 模板 `attribution: quarantine` 隔离语义 + `quarantine-max-age-days`、dev-config fragment 归因段、implement Step 5 归因段、evidence 模板 `quarantined` 字段与隔离记录行、每日回归记录含签名漂移抽查与超期条目、supervision-loop 6a 超期条目呈现、新增清单格式模板 `shared/templates/quarantine-list.yaml`、setup-dev 配置引导（存量清单迁移补登去向）。
+
+剩余：
+
 - R3 统计：`skills/board/board.py`（board 当前已从仓库移除，恢复后再做）
+- 判读仓迁移：`dev/known-failures.yaml` 46 条存量逐条补登 owner / 去向（无去向不入册），`dev/agents-config.md` 的 `attribution` 改 `quarantine`
 - 改完运行 `node --experimental-strip-types skills/scripts/gen-skill-docs.ts`；需要 `bash sync.sh` 分发时先问人
 
 ## 5. 验收
