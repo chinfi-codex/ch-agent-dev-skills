@@ -1,0 +1,7 @@
+跨 agent 聚合 —— 在制 3 · 近 24 小时：派发 10 · 合并 4 · 等你 1
+
+  ⚙ claude·opus-4.6   等你 1：issue-007（等人）   合并 1 · 派发 2
+  ⚙ codex·gpt-5.2   在制 1：issue-003（4 分钟前活跃）   合并 1 · 派发 4 · 打回 1
+  ⚙ zcode·glm-4.7   在制 1：issue-005（⚠ 42 分钟无动静）   合并 1 · 派发 2
+  ⚙ kimi·kimi-v2   在制 1：issue-102（评审中）   派发 1
+  ⚙ zcode·deepseek-v4   空闲   合并 1 · 派发 1

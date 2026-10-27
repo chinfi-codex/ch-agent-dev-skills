@@ -1,0 +1,32 @@
+{
+  "name": "@ch-agent/dsh-progress-panel",
+  "version": "0.1.0",
+  "description": "DSH 插件：多宿主开发进度面板（右侧栏页签）——按分支嵌套的票树 + 活性探针，数据来自 progress.py payload",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "progress", "dashboard"],
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "README.md"],
+  "engines": {
+    "dsh": ">=0.1.7-rc.1",
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    }
+  }
+}
