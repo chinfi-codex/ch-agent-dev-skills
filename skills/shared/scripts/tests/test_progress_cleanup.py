@@ -166,6 +166,13 @@ class CleanupFixture(unittest.TestCase):
             progress.cleanup_command(args)
         self.assertIn("重新预检", out.getvalue())
         self.assertTrue(wt.exists())
+    def test_issue_key_resolves_branch_for_preview(self):
+        branch, wt = self.merged_worktree()
+        plan = progress.cleanup_plan(self.repo, issue="issue-001-sample")
+        self.assertTrue(plan["eligible"], plan.get("reason"))
+        self.assertEqual(plan["branch"], branch)
+        self.assertEqual(plan["issue"], "issue-001")
+
     def test_active_descendant_blocks_cleanup(self):
         parent, wt = self.merged_worktree()
         self.write_issue("issue-002", "in-progress")

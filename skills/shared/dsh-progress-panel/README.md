@@ -11,6 +11,13 @@ DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。�
 - `client.js` 浏览器半端：`window.__ModuleLoader__.load` 自注册；右侧栏 tab 类型 + body + title 三件套；tab 定义的 `guide` 数组在「开始」页提供「开发进度」工具卡（点击原生切换到进度页签）；切换对话时继承右侧栏展开状态（用户主动折叠则不强制重开）；10s 轮询，任务行折叠、票详情、清理确认弹窗
 - `../scripts/progress_cleanup.py`：清理原语与确认指纹；`tests/test_progress_cleanup.py` 覆盖安全边界
 
+## 工作区与会话联动
+
+- 客户端通过 `uiWorkspace.selection` + `workspaces/sessions` 确定当前工作区；未选择工作区时不加载、不展示进度数据。切换工作区会重建面板，切换会话只移动焦点。
+- 服务端仅接受 `config.repo` / `config.repos` 中登记的仓库（本机 profile 配置，不写死在插件包内），按 repo 缓存 payload；清理请求也必须带同一 repo，未登记路径返回 403。
+- 当前会话先按 session id 匹配 session-title 绑定，再用标题中的 issue / feature 兜底；命中后展开祖先、滚动到条目并高亮。
+- 「复制下钻提问」与「清理」统一放在票详情动作排；清理入口不再按状态隐藏，所有票/分支都可预检，但执行仍受下方安全边界约束。
+
 ## 清理边界
 
 - 只给 `status=done` 的残留分支入口；在途票、needs-human、评审中与集成分支不能从面板清理。若分支仍被在途/待派发票延展（git 祖先链判定），预检同样拒绝执行，保护基线冻结中的工作。

@@ -617,6 +617,7 @@ def load_session_bindings(repo):
             feat = str(v.get("feature") or "")
             feat_short = feat.split("features/", 1)[-1] if "features/" in feat else feat
             out.append({
+                "session_id": sid,
                 "host": host,
                 "role": v.get("role") or "",
                 "paused": bool(v.get("paused")),
@@ -1244,6 +1245,7 @@ def build_tree_payload(repo, stall_min, now=None):
         def ticket_node(it, r):
             p = (it.get("probe") or {})
             return {"kind": "ticket", "id": it["id"], "key": it["key"], "title": it["title"][:44],
+                    "feature": it["feature"],
                     "status": it["status"], "age_ts": p.get("ts"), "round": (p.get("round") or "")[:56],
                     "verify_fails": it["verify_fails"], "review_rounds": it.get("review_rounds", 0),
                     "human_note": it.get("human_note", ""),
@@ -1254,7 +1256,7 @@ def build_tree_payload(repo, stall_min, now=None):
         displayed = {r["name"] for r in fbrs}
         for r in sorted(fbrs, key=lambda r: -r["ts"]):
             nodes_by_name[r["name"]] = {"kind": "branch", "name": r["name"], "iid": r["iid"],
-                                        "status": r["status"],
+                                        "feature": slug, "status": r["status"],
                                         "hint": "集成" if r["hint"] == "integration" else "残留可删",
                                         "ahead": r["ahead"], "behind": r["behind"], "dirty": r["dirty"],
                                         "ts": r["ts"], "children": []}
@@ -1299,6 +1301,7 @@ def build_tree_payload(repo, stall_min, now=None):
         return out
 
     return {"repo": Path(repo).resolve().name, "stall_min": stall_min,
+            "sessions": bindings,
             "generated": now, "hygiene": sum(1 for _, _, issues in features
                                              for it in issues if it["status"] not in CANON_S and it["status"] != "done"),
             "main": {"name": main, "sha": mb["sha"], "ts": mb["ts"]} if mb else None,
@@ -1329,7 +1332,7 @@ def cleanup_merge_targets(repo, ticket, main):
     return list(dict.fromkeys(targets))
 
 
-def cleanup_plan(repo, branch):
+def cleanup_plan(repo, branch=None, issue=None):
     """破坏性操作使用更严格的票归属：feature 名无法消歧时不给执行资格。"""
     import progress_cleanup as pc
     repo = Path(repo).resolve()
@@ -1344,12 +1347,42 @@ def cleanup_plan(repo, branch):
             it = dict(it)
             it["feature_dir"] = str(feat)
             tix_multi.setdefault(it["id"], []).append(it)
+    issue_ticket = None
+    if issue:
+        exact = [it for items in tix_multi.values() for it in items if it["key"] == issue]
+        by_id = [it for items in tix_multi.values() for it in items if it["id"] == issue]
+        matches = exact or by_id
+        if len(matches) == 1:
+            issue_ticket = matches[0]
+        elif not matches:
+            return {"ok": False, "eligible": False, "error": f"未找到票 {issue}"}
+        else:
+            return {"ok": False, "eligible": False, "error": f"票号不唯一，无法确定清理对象：{issue}"}
+    if not branch:
+        if not issue_ticket:
+            return {"ok": False, "eligible": False, "error": "需要 branch 或 issue 才能预检"}
+        candidates = []
+        for name, b0 in branches.items():
+            m0 = ISSUE_ID_RE.search(name)
+            if not m0 or m0.group(0).lower() != issue_ticket["id"]:
+                continue
+            hint0 = f"{name} {b0.get('worktree') or ''}"
+            if any(part in hint0 for part in issue_ticket["feature"].split("/")):
+                candidates.append(name)
+        if len(candidates) == 1:
+            branch = candidates[0]
+        elif not candidates:
+            return {"ok": False, "eligible": False, "error": f"{issue_ticket['id']} 没有可对应的本地分支"}
+        else:
+            return {"ok": False, "eligible": False, "error": f"{issue_ticket['id']} 对应多个分支，无法唯一预检"}
     m = ISSUE_ID_RE.search(branch)
     b = branches.get(branch)
     hint = f"{branch} {(b or {}).get('worktree') or ''}"
     cands = tix_multi.get(m.group(0).lower(), []) if m else []
     matched = [c for c in cands if any(part in hint for part in c["feature"].split("/"))]
-    if len(matched) == 1:
+    if issue_ticket:
+        ticket = issue_ticket
+    elif len(matched) == 1:
         ticket = matched[0]
     elif not matched and len(cands) == 1:
         ticket = cands[0]
@@ -1389,7 +1422,7 @@ def cleanup_plan(repo, branch):
 def cleanup_command(args):
     import progress_cleanup as pc
     try:
-        plan = cleanup_plan(pick_repo(args), args.branch)
+        plan = cleanup_plan(pick_repo(args), args.branch, getattr(args, "issue", None))
         if not args.apply:
             print(json.dumps(pc.public_plan(plan), ensure_ascii=False))
             return
@@ -1402,7 +1435,7 @@ def cleanup_command(args):
         result = pc.execute_plan(plan)
         if result["worktree_removed"] or result["branch_deleted"] or result["dev_files_removed"]:
             feat_dir = Path(plan["_feature_dir"])
-            note = (f"插件清场 {args.branch}：worktree 移除={result['worktree_removed']}；"
+            note = (f"插件清场 {plan['branch']}：worktree 移除={result['worktree_removed']}；"
                     f"本地分支删除={result['branch_deleted']}；dev 过程文件 {result['dev_files_removed']} 个；"
                     f"salvage={result['salvage_dir'] or '无需'}")
             with open(feat_dir / JOURNAL_NAME, "a", encoding="utf-8") as f:
@@ -1462,7 +1495,8 @@ def main():
 
     p7 = sub.add_parser("cleanup", help="已完成票收尾清场：默认预检，--apply 需携带预检 confirm")
     p7.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
-    p7.add_argument("--branch", required=True, help="要清理的本地分支")
+    p7.add_argument("--branch", help="要清理的本地分支（与 --issue 二选一）")
+    p7.add_argument("--issue", help="按票文件 stem 或票号预检对应分支")
     p7.add_argument("--apply", action="store_true", help="执行清理；缺省只输出预检")
     p7.add_argument("--confirm", help="预检返回的确认指纹；执行前会重新计算并比对")
     p7.set_defaults(func=cleanup_command)

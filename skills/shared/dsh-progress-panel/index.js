@@ -1,38 +1,44 @@
 /**
- * ch-progress-panel —— 服务端半端：payload + 收尾清场 API。
- * GET  /api/ch-progress/payload
- * POST /api/ch-progress/cleanup/preview  { branch }
- * POST /api/ch-progress/cleanup/apply    { branch, confirm } + x-ch-progress-action: apply
+ * ch-progress-panel —— 服务端半端：按当前工作区提供 payload 与收尾清场。
+ * GET  /api/ch-progress/payload?repo=<已登记仓库>
+ * POST /api/ch-progress/cleanup/preview  { repo, branch | issue }
+ * POST /api/ch-progress/cleanup/apply    { repo, branch | issue, confirm } + x-ch-progress-action: apply
  *
- * 清场规则由 ../scripts/progress_cleanup.py 执行：done 票限定、确认指纹重验、
- * dev 软链不跟随、salvage 前置、合并目标判定、dev 过程文件保留引用。
+ * repo 仅接受 profile config.repo / config.repos 中登记的根目录，拒绝客户端任意路径。
  */
 import { spawn } from 'node:child_process'
+import { realpathSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'ch-progress-panel'
-
-/** 沙箱 ctx 只暴露 inject 声明的服务——漏声明则 ctx.webServer 为 undefined，路由静默失败 */
 export const inject = ['webServer']
 
 const DEFAULT_SCRIPT = fileURLToPath(new URL('../scripts/progress.py', import.meta.url))
 
 export function apply(ctx, config) {
+  const fallbackRepo = (config && config.repo) || process.env.CH_PROGRESS_REPO || process.cwd()
   const cfg = {
-    repo: (config && config.repo) || process.env.CH_PROGRESS_REPO || process.cwd(),
+    repo: fallbackRepo,
+    repos: [...new Set([fallbackRepo, ...((config && Array.isArray(config.repos) ? config.repos : []) || [])])],
     script: (config && config.script) || DEFAULT_SCRIPT,
     stallMin: (config && config.stallMin) || 30,
   }
   const log = (m) => { try { ctx.logger?.info?.(`[ch-progress-panel] ${m}`) } catch { /* 日志失败不致命 */ } }
+  const canonical = (p) => { try { return realpathSync(p) } catch { return resolvePath(p) } }
+  const allowedRepos = new Set(cfg.repos.map(canonical))
+  const resolveRepo = (input) => {
+    const repo = canonical(input || cfg.repo)
+    return allowedRepos.has(repo) ? repo : null
+  }
 
-  let cache = null
-  let cacheAt = 0
+  const cache = new Map()  // repo -> { at, data }
   let cleanupRunning = false
 
-  function runProgress(args) {
+  function runProgress(repo, args) {
     return new Promise((resolve) => {
       const p = spawn('python3', [cfg.script, ...args], {
-        cwd: cfg.repo, timeout: 180000, killSignal: 'SIGTERM',
+        cwd: repo, timeout: 180000, killSignal: 'SIGTERM',
       })
       let out = ''
       let err = ''
@@ -44,28 +50,27 @@ export function apply(ctx, config) {
   }
 
   function parseResult(r) {
-    try {
-      return { ...JSON.parse(r.out), _exit: r.code }
-    } catch {
-      return { ok: false, error: (r.err || r.out || `progress.py exit ${r.code}`).slice(0, 500), _exit: r.code }
+    try { return JSON.parse(r.out) } catch {
+      return { ok: false, error: (r.err || r.out || `progress.py exit ${r.code}`).slice(0, 500) }
     }
   }
 
-  async function payload() {
+  async function payload(repo) {
     const now = Date.now()
-    if (cache && now - cacheAt < 20000) return cache
-    const r = await runProgress(['payload', '--repo', cfg.repo, '--stall-min', String(cfg.stallMin)])
+    const cached = cache.get(repo)
+    if (cached && now - cached.at < 20000) return cached.data
+    const r = await runProgress(repo, ['payload', '--repo', repo, '--stall-min', String(cfg.stallMin)])
     if (r.code !== 0) {
       log(`payload 失败：${(r.err || `exit ${r.code}`).slice(0, 300)}`)
       return { ok: false, error: (r.err || `progress.py exit ${r.code}`).slice(0, 400) }
     }
     try {
-      cache = JSON.parse(r.out)
-      cacheAt = now
+      const data = JSON.parse(r.out)
+      cache.set(repo, { at: now, data })
+      return data
     } catch (e) {
       return { ok: false, error: 'payload JSON 解析失败：' + e.message }
     }
-    return cache
   }
 
   function readBody(req) {
@@ -100,25 +105,31 @@ export function apply(ctx, config) {
     }
     let body
     try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { ok: false, error: e.message }) }
+    const repo = resolveRepo(body.repo)
+    if (!repo) return sendJson(res, 403, { ok: false, error: '当前工作区未登记为进度数据源' })
     const branch = typeof body.branch === 'string' ? body.branch : ''
-    if (!branch || branch.length > 300 || branch.includes('\0')) {
-      return sendJson(res, 400, { ok: false, error: 'branch 参数无效' })
+    const issue = typeof body.issue === 'string' ? body.issue : ''
+    if ((!branch && !issue) || (branch && issue)) {
+      return sendJson(res, 400, { ok: false, error: 'branch 与 issue 必须且只能提供一个' })
+    }
+    if ((branch && (branch.length > 300 || branch.includes('\0'))) || (issue && issue.length > 300)) {
+      return sendJson(res, 400, { ok: false, error: '清理对象参数无效' })
     }
     cleanupRunning = true
     try {
-      const args = ['cleanup', '--repo', cfg.repo, '--branch', branch]
+      const args = ['cleanup', '--repo', repo]
+      if (branch) args.push('--branch', branch)
+      else args.push('--issue', issue)
       if (mode === 'apply') {
         if (typeof body.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(body.confirm)) {
           return sendJson(res, 400, { ok: false, error: '缺少有效的预检确认指纹' })
         }
         args.push('--apply', '--confirm', body.confirm)
       }
-      const result = parseResult(await runProgress(args))
-      delete result._exit
+      const result = parseResult(await runProgress(repo, args))
       if (mode === 'apply') {
-        cache = null
-        cacheAt = 0
-        log(`清理 ${branch}：${JSON.stringify(result).slice(0, 350)}`)
+        cache.delete(repo)
+        log(`清理 ${result.branch || branch || issue}：${JSON.stringify(result).slice(0, 350)}`)
       }
       return sendJson(res, 200, result)
     } finally {
@@ -131,25 +142,27 @@ export function apply(ctx, config) {
       kind: 'prefix',
       path: '/api/ch-progress',
       handler: async (req, res) => {
-        const path = new URL(req.url, 'http://127.0.0.1').pathname
+        const url = new URL(req.url, 'http://127.0.0.1')
         try {
-          if (req.method === 'GET' && path === '/api/ch-progress/payload') {
-            const data = await payload()
+          if (req.method === 'GET' && url.pathname === '/api/ch-progress/payload') {
+            const repo = resolveRepo(url.searchParams.get('repo'))
+            if (!repo) return sendJson(res, 403, { ok: false, error: '当前工作区未登记为进度数据源' })
+            const data = await payload(repo)
             return sendJson(res, data && data.ok === false ? 500 : 200, data)
           }
-          if (req.method === 'POST' && path === '/api/ch-progress/cleanup/preview') {
+          if (req.method === 'POST' && url.pathname === '/api/ch-progress/cleanup/preview') {
             return await cleanup(req, res, 'preview')
           }
-          if (req.method === 'POST' && path === '/api/ch-progress/cleanup/apply') {
+          if (req.method === 'POST' && url.pathname === '/api/ch-progress/cleanup/apply') {
             return await cleanup(req, res, 'apply')
           }
-          return sendJson(res, 404, { ok: false, error: `unknown ${req.method} ${path}` })
+          return sendJson(res, 404, { ok: false, error: `unknown ${req.method} ${url.pathname}` })
         } catch (e) {
           return sendJson(res, 500, { ok: false, error: e?.message ?? String(e) })
         }
       },
     }), 'ch-progress-panel: /api/ch-progress 路由')
-    log(`数据源就绪：repo=${cfg.repo}`)
+    log(`数据源就绪：${[...allowedRepos].join(', ')}`)
   } catch (e) {
     log(`HTTP 路由没挂上：${e?.message ?? e}`)
   }

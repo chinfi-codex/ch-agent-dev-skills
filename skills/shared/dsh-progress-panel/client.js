@@ -82,6 +82,12 @@ window.__ModuleLoader__.load({
 [data-cpp] .cpp-drill:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14));}
 [data-cpp] .cpp-err{margin:10px;padding:10px;border-radius:10px;background:rgba(242,88,94,.1);color:#f2585e;font-size:11.5px;white-space:pre-wrap;}
 [data-cpp] .cpp-loading{padding:18px 12px;color:var(--cpp-dim);font-size:11.5px;}
+[data-cpp] .cpp-empty{padding:18px 12px;color:var(--cpp-dim);font-size:11.5px;}
+[data-cpp] .cpp-row.cpp-node-focused,[data-cpp] .cpp-node-focused > .cpp-row{background:rgba(79,143,247,.18);border-color:rgba(79,143,247,.52);box-shadow:inset 2px 0 0 #4f8ff7;}
+[data-cpp] .cpp-node-focused{border-radius:8px;}
+[data-cpp] .cpp-detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;}
+[data-cpp] .cpp-detail-actions .cpp-drill{margin-top:0;}
+[data-cpp] .cpp-detail-actions .cpp-cleanup-detail{color:#f0a83c;}
 [data-cpp] .cpp-modal-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.52);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;}
 [data-cpp] .cpp-modal{width:min(480px,100%);max-height:82vh;overflow-y:auto;border-radius:16px;background:var(--dsw-alias-bg-layer-1,#1b1d21);border:1px solid var(--cpp-line);box-shadow:0 28px 80px rgba(0,0,0,.5);padding:18px;color:var(--dsw-alias-label-primary,#e8eaed);}
 [data-cpp] .cpp-modal h2{font-size:16px;font-weight:550;margin:0 0 5px;}
@@ -126,7 +132,7 @@ window.__ModuleLoader__.load({
     const nodeKey = (n) => n.kind + ':' + (n.slug || n.key || n.name)
     const depthOf = (n) => Math.round(n.prefix.length / 3)
     const hasKids = (list, i) => i + 1 < list.length && depthOf(list[i + 1]) > depthOf(list[i])
-    const canCleanup = (n) => n.kind === 'branch' && n.status === 'done'
+    const canCleanup = (n) => n.kind === 'branch' || n.kind === 'ticket'
 
     function Guide({ prefix }) {
       const segs = []
@@ -140,11 +146,11 @@ window.__ModuleLoader__.load({
     const Chev = ({ open, hidden }) =>
       h('span', { className: 'cpp-chev' + (open ? ' is-open' : '') + (hidden ? ' is-hidden' : ''), 'aria-hidden': true }, '›')
 
-    function FeatureRow({ n, kids, folded, onFold }) {
+    function FeatureRow({ n, kids, folded, onFold, focused }) {
       const c = n.counts
       const inflight = (c.run || 0) + (c.review || 0) + (c.mr || 0) + (c.human || 0)
       const seg = (cls, v) => (v ? h('i', { key: cls, className: cls, style: { width: (100 * v / c.total) + '%' } }) : null)
-      return h('div', { className: 'cpp-row is-feat' },
+      return h('div', { className: 'cpp-row is-feat' + (focused ? ' cpp-node-focused' : ''), 'data-node-key': nodeKey(n) },
         h(Guide, { prefix: n.prefix }),
         kids
           ? h('button', { className: 'cpp-chev', 'aria-label': (folded ? '展开' : '折叠') + n.slug, onClick: onFold }, Chev({ open: !folded }))
@@ -159,13 +165,13 @@ window.__ModuleLoader__.load({
           h('span', { className: 'cpp-fcount' }, c.done + '/' + c.total)))
     }
 
-    function TicketRow({ n, open, onToggle }) {
+    function TicketRow({ n, open, onToggle, onCleanup, focused }) {
       const stalled = n.status === 'in-progress' && n.age_ts && (Date.now() - n.age_ts * 1000) >= (n.stallMin || 30) * 60000
       const bits = []
       if (n.ahead || n.behind) bits.push('↑' + n.ahead + '↓' + n.behind)
       if (n.dirty) bits.push('脏' + n.dirty)
       if (n.status === 'in-progress' && n.age_ts) bits.push(stalled ? '⚠ ' + ageText(n.age_ts, '无动静') : ageText(n.age_ts))
-      return h('div', {},
+      return h('div', { className: focused ? 'cpp-node-focused' : '', 'data-node-key': nodeKey(n) },
         h('button', { className: 'cpp-row', 'aria-expanded': !!open, onClick: onToggle },
           h(Guide, { prefix: n.prefix }),
           h('span', { className: 'cpp-chev' + (open ? ' is-open' : ''), 'aria-hidden': true }, '›'),
@@ -174,17 +180,17 @@ window.__ModuleLoader__.load({
           h('span', { className: 'cpp-rtitle', title: n.title }, n.title),
           bits.length ? h('span', { className: 'cpp-rmeta' + (stalled ? ' is-warn' : '') }, bits.join(' · ')) : null,
           h('span', { className: 'cpp-status ' + (DOT[n.status] || '') }, LABEL[n.status] || n.status)),
-        open ? Detail({ n }) : null)
+        open ? Detail({ n, onCleanup }) : null)
     }
 
-    function BranchRow({ n, kids, folded, onFold, onCleanup }) {
+    function BranchRow({ n, kids, folded, onFold, onCleanup, focused }) {
       const stalled = n.status === 'in-progress' && n.ts && (Date.now() - n.ts * 1000) >= (n.stallMin || 30) * 60000
       const idx = n.iid ? n.name.indexOf(n.iid) : -1
       const meta = []
       if (n.ahead || n.behind) meta.push('↑' + n.ahead + '↓' + n.behind)
       if (n.dirty) meta.push('脏' + n.dirty)
       meta.push(ageText(n.ts))
-      return h('div', { className: 'cpp-row', title: n.name },
+      return h('div', { className: 'cpp-row' + (focused ? ' cpp-node-focused' : ''), title: n.name, 'data-node-key': nodeKey(n) },
         h(Guide, { prefix: n.prefix }),
         kids
           ? h('button', { className: 'cpp-chev', 'aria-label': (folded ? '展开' : '折叠') + n.name, onClick: onFold }, Chev({ open: !folded }))
@@ -204,7 +210,7 @@ window.__ModuleLoader__.load({
           : null)
     }
 
-    function Detail({ n }) {
+    function Detail({ n, onCleanup }) {
       const lines = []
       if (n.branch) {
         const b = n.branch
@@ -230,7 +236,13 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'cpp-detail' },
         h('div', { className: 'cpp-dtitle' }, n.title),
         lines.map((t, i) => h('div', { key: i, className: 'cpp-dline' }, t)),
-        h('button', { className: 'cpp-drill', onClick: drill, title: '复制下钻提问，粘到会话即可' }, '复制下钻提问'))
+        h('div', { className: 'cpp-detail-actions' },
+          h('button', { className: 'cpp-drill', onClick: drill, title: '复制下钻提问，粘到会话即可' }, '复制下钻提问'),
+          h('button', {
+            className: 'cpp-drill cpp-cleanup-detail',
+            onClick: () => onCleanup({ branch: n.branch?.name, issue: n.key }),
+            title: '按开发收尾规则预检；是否可执行以预检为准',
+          }, '清理')))
     }
 
     function CleanupModal({ state, onClose, onApply, onRetry }) {
@@ -278,7 +290,7 @@ window.__ModuleLoader__.load({
             state.phase === 'confirm' ? h('button', { className: 'cpp-btn danger', onClick: onApply, autoFocus: true }, '确认清理') : null)))
     }
 
-    function Tree({ data, openMap, foldMap, onToggle, onFold, onCleanup, onRefresh }) {
+    function Tree({ data, openMap, foldMap, onToggle, onFold, onCleanup, onRefresh, focusKey }) {
       const list = data.tree || []
       const rows = []
       const main = data.main || {}
@@ -294,12 +306,12 @@ window.__ModuleLoader__.load({
         const stall = { ...n, stallMin: data.stall_min }
         if (n.kind === 'feature') {
           const kids = hasKids(list, i)
-          rows.push(h(FeatureRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)) }))
+          rows.push(h(FeatureRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)), focused: focusKey === nodeKey(n) }))
         } else if (n.kind === 'ticket') {
-          rows.push(h(TicketRow, { key: nodeKey(n), n: stall, open: !!openMap[n.key], onToggle: () => onToggle(n.key) }))
+          rows.push(h(TicketRow, { key: nodeKey(n), n: stall, open: !!openMap[n.key], onToggle: () => onToggle(n.key), onCleanup, focused: focusKey === nodeKey(n) }))
         } else {
           const kids = hasKids(list, i)
-          rows.push(h(BranchRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)), onCleanup }))
+          rows.push(h(BranchRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)), onCleanup, focused: focusKey === nodeKey(n) }))
         }
         const collapsible = n.kind !== 'ticket' && hasKids(list, i)
         if (collapsible && foldMap[nodeKey(n)]) {
@@ -313,7 +325,30 @@ window.__ModuleLoader__.load({
       return h('div', {}, rows)
     }
 
-    function Panel() {
+    function focusTarget(data, currentSession) {
+      if (!currentSession?.id || !data?.tree) return null
+      const binding = (data.sessions || []).find((b) =>
+        b.session_id === currentSession.id || String(b.session_id).endsWith(':' + currentSession.id))
+      const title = binding?.title || currentSession.title || ''
+      const issue = (binding?.issue || title.match(/issue-\d+[a-z0-9]*/i)?.[0] || '').toLowerCase()
+      const feature = binding?.feature || ''
+      const matchesFeature = (n) => feature && (
+        n.feature === feature || n.slug === feature ||
+        (n.feature || '').endsWith('/' + feature) || (n.slug || '').endsWith('/' + feature))
+      if (issue) {
+        const tickets = data.tree.filter((n) => n.kind === 'ticket' && n.id === issue)
+        const ticket = tickets.find(matchesFeature) || tickets[0]
+        if (ticket) return nodeKey(ticket)
+        const branches = data.tree.filter((n) => n.kind === 'branch' && n.iid === issue)
+        const branch = branches.find(matchesFeature) || branches[0]
+        if (branch) return nodeKey(branch)
+      }
+      const feat = data.tree.find((n) => n.kind === 'feature' && (
+        matchesFeature(n) || (title && n.slug && title.includes(n.slug))))
+      return feat ? nodeKey(feat) : null
+    }
+
+    function Panel({ repo, currentSession }) {
       const [data, setData] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [openMap, setOpenMap] = React.useState({})
@@ -323,37 +358,71 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let alive = true
-        const load = () => jget('/payload')
+        setData(null)
+        setError(null)
+        const load = () => jget('/payload?repo=' + encodeURIComponent(repo))
           .then((d) => { if (alive) { setData(d); setError(null) } })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         load()
         const t = setInterval(load, 10000)
         return () => { alive = false; clearInterval(t) }
-      }, [reload])
+      }, [reload, repo])
 
-      const beginCleanup = (branch) => {
-        setCleanup({ branch, phase: 'preview' })
-        jpost('/cleanup/preview', { branch })
+      const focusKey = React.useMemo(() => focusTarget(data, currentSession), [data, currentSession])
+      const dataReady = !!data
+      React.useEffect(() => {
+        if (!focusKey || !data?.tree) return
+        const list = data.tree
+        const index = list.findIndex((n) => nodeKey(n) === focusKey)
+        if (index < 0) return
+        const stack = []
+        for (let i = 0; i < index; i++) {
+          const depth = depthOf(list[i])
+          stack[depth] = list[i]
+          stack.length = depth + 1
+        }
+        const ancestors = stack.slice(0, depthOf(list[index]))
+        if (ancestors.length) {
+          setFoldMap((m) => {
+            const next = { ...m }
+            ancestors.forEach((n) => { next[nodeKey(n)] = false })
+            return next
+          })
+        }
+        const timer = setTimeout(() => {
+          const escaped = window.CSS?.escape ? CSS.escape(focusKey) : focusKey.replace(/"/g, '\"')
+          document.querySelector(`[data-node-key="${escaped}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        }, 100)
+        return () => clearTimeout(timer)
+      }, [focusKey, dataReady])
+
+      const beginCleanup = (target) => {
+        const request = typeof target === 'string'
+          ? { repo, branch: target }
+          : target.branch ? { repo, branch: target.branch } : { repo, issue: target.issue }
+        const label = request.branch || request.issue
+        setCleanup({ branch: label, target, request, phase: 'preview' })
+        jpost('/cleanup/preview', request)
           .then((plan) => {
             if (!plan.eligible) {
-              setCleanup((s) => s?.branch === branch ? { ...s, phase: 'error', error: plan.reason || plan.error || '该节点不可清理' } : s)
+              setCleanup((s) => s?.request === request ? { ...s, phase: 'error', error: plan.reason || plan.error || '该节点不可清理' } : s)
             } else {
-              setCleanup((s) => s?.branch === branch ? { ...s, phase: 'confirm', plan } : s)
+              setCleanup((s) => s?.request === request ? { ...s, phase: 'confirm', plan } : s)
             }
           })
-          .catch((e) => setCleanup((s) => s?.branch === branch ? { ...s, phase: 'error', error: String(e.message ?? e) } : s))
+          .catch((e) => setCleanup((s) => s?.request === request ? { ...s, phase: 'error', error: String(e.message ?? e) } : s))
       }
       const applyCleanup = () => {
         if (!cleanup?.plan) return
-        const { branch, plan } = cleanup
+        const { request, plan } = cleanup
         setCleanup((s) => ({ ...s, phase: 'apply' }))
-        jpost('/cleanup/apply', { branch, confirm: plan.confirm }, true)
+        jpost('/cleanup/apply', { ...request, confirm: plan.confirm }, true)
           .then((result) => {
-            setCleanup((s) => s?.branch === branch ? { ...s, phase: 'result', result } : s)
+            setCleanup((s) => s?.request === request ? { ...s, phase: 'result', result } : s)
             setReload((n) => n + 1)
           })
           .catch((e) => {
-            setCleanup((s) => s?.branch === branch ? { ...s, phase: 'result', result: { ok: false, error: String(e.message ?? e) } } : s)
+            setCleanup((s) => s?.request === request ? { ...s, phase: 'result', result: { ok: false, error: String(e.message ?? e) } } : s)
             setReload((n) => n + 1)
           })
       }
@@ -362,10 +431,10 @@ window.__ModuleLoader__.load({
         h('style', null, CSS),
         h('div', { className: 'cpp-body' },
           error
-            ? h('div', { className: 'cpp-err' }, '数据源不可达：' + error + '\n（服务端半端未启动或 repo 配置有误）')
+            ? h('div', { className: 'cpp-err' }, '数据源不可达：' + error + '\n（当前工作区未登记或服务异常）')
             : data
               ? h(Tree, {
-                  data, openMap, foldMap,
+                  data, openMap, foldMap, focusKey,
                   onToggle: (k) => setOpenMap((m) => ({ ...m, [k]: !m[k] })),
                   onFold: (k) => setFoldMap((m) => ({ ...m, [k]: !m[k] })),
                   onCleanup: beginCleanup,
@@ -376,8 +445,31 @@ window.__ModuleLoader__.load({
           state: cleanup,
           onClose: () => { if (cleanup.phase !== 'apply') setCleanup(null) },
           onApply: applyCleanup,
-          onRetry: () => beginCleanup(cleanup.branch),
+          onRetry: () => beginCleanup(cleanup.target),
         }) : null)
+    }
+
+    function WorkspacePanel({ readWorkspace }) {
+      const [current, setCurrent] = React.useState(() => readWorkspace())
+      const signature = React.useRef(JSON.stringify(current))
+      React.useEffect(() => {
+        const timer = setInterval(() => {
+          const next = readWorkspace()
+          const sig = JSON.stringify(next)
+          if (sig !== signature.current) {
+            signature.current = sig
+            setCurrent(next)
+          }
+        }, 400)
+        return () => clearInterval(timer)
+      }, [readWorkspace])
+      if (current.pending) return h('div', { className: 'cpp-empty' }, '读取工作区…')
+      if (!current.workspace) return h('div', { className: 'cpp-empty' }, '未选择工作区')
+      return h(Panel, {
+        key: current.workspace.path,
+        repo: current.workspace.path,
+        currentSession: current.session,
+      })
     }
 
     function ProgressGuideArtwork({ size = 26 }) {
@@ -393,7 +485,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'sidebarRightTabs', 'sidebarRight'],
+      inject: ['slots', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace', 'workspaces', 'sessions'],
       apply(ctx) {
         const style = document.createElement('style')
         style.setAttribute('data-plugin-css', '@ch-agent/dsh-progress-panel')
@@ -403,6 +495,19 @@ window.__ModuleLoader__.load({
 
         const slots = (typeof ctx.get === 'function' ? ctx.get('slots') : undefined) || ctx.slots
         const KEY = 'ch-progress'
+        const readWorkspace = () => {
+          const selection = ctx.uiWorkspace.selection.getSnapshot()
+          const sessionId = selection?.sessionId
+          if (!sessionId) return { workspace: null, session: null }
+          const session = ctx.sessions.list.getSnapshot().byId?.[sessionId]
+          const list = ctx.workspaces.list.getSnapshot()
+          const workspace = (list.items || []).find((w) => w.sessionIds?.includes(sessionId))
+          if (!workspace) return { workspace: null, session: null, pending: list.phase !== 'ready' }
+          return {
+            workspace: { id: workspace.workspaceId, path: workspace.path, title: workspace.title },
+            session: { id: sessionId, title: session?.title || session?.customTitle || '' },
+          }
+        }
         ctx.effect(() => ctx.sidebarRightTabs.register({
           id: KEY, kind: KEY, priority: 'builtin', title: () => '进度',
           guide: [{
@@ -414,7 +519,7 @@ window.__ModuleLoader__.load({
         }), 'ch-progress-panel: tab type')
         slots.inject('sidebar.right.pane.tab', () => slots.register(
           { name: 'sidebar.right.pane.tab', key: KEY },
-          () => h(Panel),
+          () => h(WorkspacePanel, { readWorkspace }),
         ))
         slots.inject('sidebar.right.pane.tab.title', () => slots.register(
           { name: 'sidebar.right.pane.tab.title', key: KEY },
