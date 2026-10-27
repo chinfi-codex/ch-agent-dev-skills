@@ -288,20 +288,23 @@ def load_issues(repo, feature_dir, events, wt_index=None):
         m = ISSUE_ID_RE.search(f.stem)
         iid = m.group(0).lower() if m else f.stem
         st = fm.get("status", "未知")
+        closed_as = st if st in {"superseded", "cancelled", "deferred"} else None
         st = "done" if st in CLOSED_ALIASES else STATUS_ALIAS.get(st, st)
         title = fm.get("title") or (f.stem[m.end():].lstrip("-_") if m else f.stem)
         it = {
             "id": iid,
             "key": f.stem,
+            "issue_path": str(f),
             "title": title,
             "status": st,
+            "closed_as": closed_as,
             "feature": f"{feature_dir.parent.name}/{feature_dir.name}",
             "blocked_by": fm.get("blocked-by") or [],
             "verify_fails": fm.get("verify-fails", 0) or 0,
             "fm": fm,
         }
-        if it["status"] == "done":
-            done_ids.add(it["id"])
+        if it["status"] == "done" and not closed_as:
+            done_ids.add(it["id"])  # 退役/取消不等于完成，不解锁下游依赖
         raw.append(it)
     for it in raw:
         if it["status"] in ("in-progress", "in-review", "mr-submitted", "needs-human"):
@@ -1318,7 +1321,7 @@ def payload_command(args):
 
 def cleanup_merge_targets(repo, ticket, main):
     """授权合并目标：主干 + 特性集成分支 + agents-config 明确定义的 query 工作分支。"""
-    targets = [main]
+    targets = []
     cfg = Path(repo) / "dev" / "agents-config.md"
     if cfg.exists():
         text = cfg.read_text(encoding="utf-8")
@@ -1329,6 +1332,7 @@ def cleanup_merge_targets(repo, ticket, main):
                 targets.append(codes[1])
         if re.search(r"^## query 分支", text, re.M):
             targets.append("query")
+    targets.append(main)
     return list(dict.fromkeys(targets))
 
 
@@ -1372,10 +1376,10 @@ def cleanup_plan(repo, branch=None, issue=None):
         if len(candidates) == 1:
             branch = candidates[0]
         elif not candidates:
-            return {"ok": False, "eligible": False, "error": f"{issue_ticket['id']} 没有可对应的本地分支"}
+            branch = None  # issue-only：无分支也可只清 dev 过程文件
         else:
             return {"ok": False, "eligible": False, "error": f"{issue_ticket['id']} 对应多个分支，无法唯一预检"}
-    m = ISSUE_ID_RE.search(branch)
+    m = ISSUE_ID_RE.search(branch) if branch else None
     b = branches.get(branch)
     hint = f"{branch} {(b or {}).get('worktree') or ''}"
     cands = tix_multi.get(m.group(0).lower(), []) if m else []
@@ -1394,7 +1398,7 @@ def cleanup_plan(repo, branch=None, issue=None):
         repo, branch, ticket, (b or {}).get("worktree"),
         cleanup_merge_targets(repo, ticket, main) if ticket else [main], current_branch,
     )
-    if plan.get("eligible"):
+    if plan.get("eligible") and plan.get("branch"):
         # done 不等于可删：在途/待派发票可能仍把该分支当作工作基线（基线冻结）
         active_children = []
         for other, ob in branches.items():
@@ -1432,12 +1436,14 @@ def cleanup_command(args):
         if not args.confirm or args.confirm != plan.get("confirm"):
             print(json.dumps({"ok": False, "error": "预检后状态已变化或确认凭据不符，请重新预检"}, ensure_ascii=False))
             sys.exit(1)
-        result = pc.execute_plan(plan)
+        result = pc.execute_plan(plan, getattr(args, "action", None))
         if result["worktree_removed"] or result["branch_deleted"] or result["dev_files_removed"]:
             feat_dir = Path(plan["_feature_dir"])
-            note = (f"插件清场 {plan['branch']}：worktree 移除={result['worktree_removed']}；"
+            merge_note = (f"；合并保留={result['merged_into']}@{result['merge_commit']}"
+                          if result.get("merge_commit") else "")
+            note = (f"插件清场 {plan.get('branch') or (plan['issue'] + '（仅 dev）')}（{result['action']}）：worktree 移除={result['worktree_removed']}；"
                     f"本地分支删除={result['branch_deleted']}；dev 过程文件 {result['dev_files_removed']} 个；"
-                    f"salvage={result['salvage_dir'] or '无需'}")
+                    f"salvage={result['salvage_dir'] or '无需'}{merge_note}")
             with open(feat_dir / JOURNAL_NAME, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
                     "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -1447,6 +1453,29 @@ def cleanup_command(args):
         print(json.dumps(result, ensure_ascii=False))
         if not result["ok"]:
             sys.exit(1)
+    except pc.CleanupError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        sys.exit(1)
+
+
+# ---------- 关闭需求（生命周期，不做文件清理） ----------
+
+def close_command(args):
+    import progress_cleanup as pc
+    try:
+        repo = pick_repo(args)
+        matches = []
+        for feat in find_features(repo):
+            for it in load_issues(repo, feat, load_events(feat), {}):
+                if it["key"] == args.issue or it["id"] == args.issue:
+                    it = dict(it)
+                    it["feature_dir"] = str(feat)
+                    matches.append(it)
+        if len(matches) != 1:
+            print(json.dumps({"ok": False, "error": f"票号不存在或不唯一：{args.issue}"}, ensure_ascii=False))
+            sys.exit(1)
+        result = pc.close_issue(matches[0], args.reason)
+        print(json.dumps(result, ensure_ascii=False))
     except pc.CleanupError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         sys.exit(1)
@@ -1499,11 +1528,19 @@ def main():
     p7.add_argument("--issue", help="按票文件 stem 或票号预检对应分支")
     p7.add_argument("--apply", action="store_true", help="执行清理；缺省只输出预检")
     p7.add_argument("--confirm", help="预检返回的确认指纹；执行前会重新计算并比对")
+    p7.add_argument("--action", choices=["close", "discard", "merge", "dev-only"],
+                    help="close=已完成收尾；discard=中途搁置丢弃；merge=中途搁置合并保留；dev-only=无分支仅清 dev")
     p7.set_defaults(func=cleanup_command)
 
     p5 = sub.add_parser("demo", help="生成演示工作区")
     p5.add_argument("dir")
     p5.set_defaults(func=demo_command)
+
+    p8 = sub.add_parser("close", help="关闭需求：状态改 deferred + digest，不删除分支/worktree/dev")
+    p8.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
+    p8.add_argument("--issue", required=True, help="票文件 stem 或票号")
+    p8.add_argument("--reason", default="中途搁置，用户确认关闭", help="关闭原因（写入 digest）")
+    p8.set_defaults(func=close_command)
 
     args = ap.parse_args()
     if not args.cmd:

@@ -1,6 +1,6 @@
 # @ch-agent/dsh-progress-panel
 
-DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。按分支嵌套的票树（git 祖先链定父子）+ 活性探针 + 宿主会话绑定徽章；已完成票的残留分支提供「清理」操作。
+DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。按分支嵌套的票树（git 祖先链定父子）+ 活性探针 + 宿主会话绑定徽章；残留分支与中途搁置需求均提供「清理」操作。
 
 ## 结构
 
@@ -18,11 +18,14 @@ DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。�
 - 当前会话先按 session id 匹配 session-title 绑定，再用标题中的 issue / feature 兜底；命中后展开祖先、滚动到条目并高亮。
 - 「复制下钻提问」与「清理」统一放在票详情动作排；清理入口不再按状态隐藏，所有票/分支都可预检，但执行仍受下方安全边界约束。
 
+- **关闭需求（独立生命周期操作）**：票详情提供「关闭需求」，确认后仅把 `status` 改为 `deferred` 并追加 `digest`（含原因），不删除分支、worktree 或 dev 文件；`deferred/cancelled/superseded` 不作为 `blocked-by` 的完成依据，避免误解锁下游。
+
 ## 清理边界
 
-- 只给 `status=done` 的残留分支入口；在途票、needs-human、评审中与集成分支不能从面板清理。若分支仍被在途/待派发票延展（git 祖先链判定），预检同样拒绝执行，保护基线冻结中的工作。
-- 执行链：预检 → 用户确认 → 重新计算 HEAD/文件内容/worktree 状态并比对 confirm → salvage → `git worktree remove --force` → `git worktree prune` → 已并入授权目标的本地分支才删除 → dev 过程文件清理。任何变化先停止。
-- 合并目标支持 `main-branch`、agents-config 的特性集成分支和明确定义的 `query` 工作分支；未合入的分支保留。
+- 清理入口全状态可见。`done` 走普通收尾；非 done（除 `proposed` 未开工）按「中途搁置」提供两个选择：**丢弃开发**（保存补丁后删除 worktree 和本地分支）或**合并保留**（先尝试合入已提交内容，成功后再清理）。活跃后代分支仍禁止清理。
+- **无本地分支（issue-only）**：只清理该票 `dev/impl/<issue>/` 中明确可判的过程文件，不删除代码、分支或票状态；`proposed` 仍不可清理，dev 无安全候选时提示无可清理文件，不生成空清理。
+- 共同前置：confirm 指纹重验 + salvage。中途搁置未合入时额外保存完整 `branch.patch`；未提交改动保存 `uncommitted.patch` 和文件副本，不参与合并。合并保留要求目标 worktree 干净，冲突自动 abort，原 worktree 和分支保留；合并成功不自动把票置为 done，后续仍按正常验收收口。
+- 执行链：预检 → 用户选择 → 后台重验 → salvage → 按选择合并或直接进入 worktree 删除 → `git worktree prune` → 本地分支处理 → dev 过程文件清理。普通 done 未合入的分支仍保留，不删远端分支。
 - dev 软链不跟随。实体 dev 与主工作区逐文件比对，未收录内容写入 `dev/.salvage/<issue>-<时间>/`，含 `_manifest.json` 和未提交补丁。内容去重；同设备硬链接，跨设备才复制。
 - dev 只清可再生缓存、merge 中间物等明确候选；被 impl-log / evidence / 评审等 Markdown 引用的文件保留。票文件、impl-log、评审报告不在删除范围。
 - 成功后向本 feature 的 `progress.jsonl` 追加一条 `digest` 留痕。

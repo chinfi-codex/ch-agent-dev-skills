@@ -25,7 +25,7 @@ class CleanupFixture(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "test")
-        (self.repo / ".gitignore").write_text("dev/\n.logs/\nnode_modules/\n", encoding="utf-8")
+        (self.repo / ".gitignore").write_text("dev/\n.logs/\nnode_modules/\n.worktrees/\n", encoding="utf-8")
         (self.repo / "code.py").write_text("VALUE = 1\n", encoding="utf-8")
         (self.repo / "dev").mkdir()
         (self.repo / "dev" / "agents-config.md").write_text("main-branch: main\n", encoding="utf-8")
@@ -145,13 +145,70 @@ class CleanupFixture(unittest.TestCase):
         self.assertFalse(result["branch_deleted"])
         self.assertEqual(self.git("rev-parse", "--verify", branch).returncode, 0)
 
-    def test_active_ticket_not_eligible(self):
+    def test_proposed_ticket_not_eligible(self):
         branch, wt = self.merged_worktree()
-        plan = self.plan(branch, wt, status="in-progress")
+        plan = self.plan(branch, wt, status="proposed")
         self.assertFalse(plan["eligible"])
         with self.assertRaises(pc.CleanupError):
             pc.execute_plan(plan)
         self.assertTrue(wt.exists())
+
+    def add_unmerged_commit(self, branch, wt, name="later.py", content="LATER = True\n"):
+        self.git("checkout", "-q", branch, cwd=wt)
+        (wt / name).write_text(content, encoding="utf-8")
+        self.git("add", ".", cwd=wt)
+        self.git("commit", "-q", "-m", "paused work", cwd=wt)
+
+    def test_abandoned_discard_saves_full_patch(self):
+        branch, wt = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt)
+        (wt / "code.py").write_text("VALUE = 99\n", encoding="utf-8")
+        plan = self.plan(branch, wt, status="in-progress")
+        self.assertTrue(plan["eligible"], plan.get("reason"))
+        self.assertEqual(plan["mode"], "abandon")
+        result = pc.execute_plan(plan, "discard")
+        self.assertTrue(result["worktree_removed"])
+        self.assertTrue(result["branch_deleted"])
+        self.assertTrue(result["branch_patch_saved"])
+        salvage = Path(result["salvage_dir"])
+        self.assertIn("LATER = True", (salvage / "branch.patch").read_text())
+        self.assertIn("VALUE = 99", (salvage / "uncommitted.patch").read_text())
+        self.assertFalse(wt.exists())
+        missing = subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--verify", branch], capture_output=True)
+        self.assertNotEqual(missing.returncode, 0)
+        subprocess.run(["git", "-C", str(self.repo), "apply", "--check", str(salvage / "branch.patch")],
+                       check=True, capture_output=True)
+
+    def test_abandoned_merge_preserve_merges_then_cleans(self):
+        branch, wt = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt)
+        (wt / "code.py").write_text("VALUE = 99\n", encoding="utf-8")
+        plan = self.plan(branch, wt, status="in-progress")
+        result = pc.execute_plan(plan, "merge")
+        self.assertEqual(result["merged_into"], "main")
+        self.assertTrue(result["merge_commit"])
+        self.assertTrue(result["worktree_removed"])
+        self.assertTrue(result["branch_deleted"])
+        self.assertTrue((self.repo / "later.py").is_file())
+        self.assertFalse(wt.exists())
+        self.assertTrue((Path(result["salvage_dir"]) / "branch.patch").is_file())
+        self.assertTrue((Path(result["salvage_dir"]) / "uncommitted.patch").is_file())
+
+    def test_merge_conflict_preserves_original_worktree_and_branch(self):
+        branch, wt = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt, "conflict.py", "BRANCH = True\n")
+        (self.repo / "conflict.py").write_text("MAIN = True\n", encoding="utf-8")
+        self.git("add", "conflict.py")
+        self.git("commit", "-q", "-m", "main conflicts")
+        plan = self.plan(branch, wt, status="in-progress")
+        result = pc.execute_plan(plan, "merge")
+        self.assertFalse(result["ok"])
+        self.assertIn("原 worktree 与分支保留", result["error"])
+        self.assertTrue(wt.exists())
+        self.assertEqual(self.git("rev-parse", "--verify", branch).returncode, 0)
+        self.assertEqual((self.repo / "conflict.py").read_text(), "MAIN = True\n")
+        self.assertTrue(result["salvage_dir"])
+        self.assertTrue((Path(result["salvage_dir"]) / "branch.patch").is_file())
 
     def test_changed_content_invalidates_confirmation(self):
         branch, wt = self.merged_worktree()
@@ -172,6 +229,89 @@ class CleanupFixture(unittest.TestCase):
         self.assertTrue(plan["eligible"], plan.get("reason"))
         self.assertEqual(plan["branch"], branch)
         self.assertEqual(plan["issue"], "issue-001")
+
+    def test_issue_only_dev_cleanup_without_branch(self):
+        self.write_issue("issue-002", "needs-human")
+        impl = self.feature_dir / "impl" / "issue-002"
+        impl.mkdir()
+        (impl / "impl-log.md").write_text("# impl-log\n保留 keep.orig\n", encoding="utf-8")
+        (impl / "keep.orig").write_text("referenced\n", encoding="utf-8")
+        (impl / "old.orig").write_text("delete\n", encoding="utf-8")
+        plan = progress.cleanup_plan(self.repo, issue="issue-002-sample")
+        self.assertTrue(plan["eligible"], plan.get("reason"))
+        self.assertEqual(plan["mode"], "dev-only")
+        self.assertIsNone(plan["branch"])
+        self.assertIn("仅清理 dev", "；".join(plan["will"]))
+        args = SimpleNamespace(repo=str(self.repo), branch=None, issue="issue-002-sample",
+                               apply=True, confirm=plan["confirm"], action="dev-only")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            progress.cleanup_command(args)
+        result = json.loads(out.getvalue())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["action"], "dev-only")
+        self.assertEqual(result["dev_files_removed"], 1)
+        self.assertFalse(result["worktree_removed"])
+        self.assertFalse(result["branch_deleted"])
+        self.assertFalse((impl / "old.orig").exists())
+        self.assertTrue((impl / "keep.orig").is_file())
+        self.assertTrue((impl / "impl-log.md").is_file())
+        event = json.loads((self.feature_dir / "progress.jsonl").read_text().splitlines()[-1])
+        self.assertIn("仅 dev", event["note"])
+        self.assertNotIn("None", event["note"])
+
+    def test_issue_only_requires_dev_candidates(self):
+        self.write_issue("issue-002", "needs-human")
+        plan = progress.cleanup_plan(self.repo, issue="issue-002-sample")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("dev", plan["reason"])
+
+    def test_proposed_issue_only_not_eligible(self):
+        self.write_issue("issue-002", "proposed")
+        impl = self.feature_dir / "impl" / "issue-002"
+        impl.mkdir()
+        (impl / "old.orig").write_text("delete\n", encoding="utf-8")
+        plan = progress.cleanup_plan(self.repo, issue="issue-002-sample")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("proposed", plan["reason"])
+
+    def test_close_issue_marks_deferred_without_unblocking_dependents(self):
+        self.write_issue("issue-002", "needs-human")
+        self.write_issue("issue-003", "confirmed")
+        dependent = self.feature_dir / "issues" / "issue-003-sample.md"
+        dependent.write_text(dependent.read_text().replace(
+            "status: confirmed", "status: confirmed\nblocked-by: [issue-002]"), encoding="utf-8")
+        args = SimpleNamespace(repo=str(self.repo), issue="issue-002-sample", reason="中途测试关闭")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            progress.close_command(args)
+        result = json.loads(out.getvalue())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["previous_status"], "needs-human")
+        self.assertEqual(result["status"], "deferred")
+        text = (self.feature_dir / "issues" / "issue-002-sample.md").read_text()
+        self.assertIn("status: deferred", text)
+        issues = progress.load_issues(self.repo, self.feature_dir, [], {})
+        child = next(it for it in issues if it["id"] == "issue-003")
+        self.assertFalse(child["ready"])
+        event = json.loads((self.feature_dir / "progress.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(event["event"], "digest")
+        self.assertIn("中途测试关闭", event["note"])
+
+    def test_close_issue_rejects_done(self):
+        args = SimpleNamespace(repo=str(self.repo), issue="issue-001-sample", reason="重复关闭")
+        with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            progress.close_command(args)
+        self.assertIn("无需重复关闭", out.getvalue())
+        self.assertIn("status: done", (self.feature_dir / "issues" / "issue-001-sample.md").read_text())
+
+    def test_close_issue_supports_yaml_fence(self):
+        path = self.feature_dir / "issues" / "issue-004-fenced.md"
+        path.write_text("# 非标票\n\n```yaml\nissue-id: issue-004\nstatus: in-progress\n```\n", encoding="utf-8")
+        args = SimpleNamespace(repo=str(self.repo), issue="issue-004-fenced", reason="关闭非标票")
+        with contextlib.redirect_stdout(io.StringIO()):
+            progress.close_command(args)
+        text = path.read_text()
+        self.assertIn("status: deferred", text)
+        self.assertNotIn("status: in-progress", text)
 
     def test_active_descendant_blocks_cleanup(self):
         parent, wt = self.merged_worktree()

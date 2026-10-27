@@ -1,10 +1,12 @@
 /**
  * ch-progress-panel —— 服务端半端：按当前工作区提供 payload 与收尾清场。
  * GET  /api/ch-progress/payload?repo=<已登记仓库>
+ * POST /api/ch-progress/close          { repo, issue, reason } + x-ch-progress-action: close
  * POST /api/ch-progress/cleanup/preview  { repo, branch | issue }
  * POST /api/ch-progress/cleanup/apply    { repo, branch | issue, confirm } + x-ch-progress-action: apply
  *
  * repo 仅接受 profile config.repo / config.repos 中登记的根目录，拒绝客户端任意路径。
+ * 清理支持 done 收尾、中途搁置 discard / merge，以及无分支 issue-only dev 清理。
  */
 import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
@@ -95,6 +97,31 @@ export function apply(ctx, config) {
     res.end(JSON.stringify(obj))
   }
 
+  async function closeIssue(req, res) {
+    if (cleanupRunning) return sendJson(res, 409, { ok: false, error: '另一项清理正在执行，请稍候' })
+    if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
+      return sendJson(res, 415, { ok: false, error: '关闭需求只接受 application/json' })
+    }
+    if (req.headers['x-ch-progress-action'] !== 'close') {
+      return sendJson(res, 403, { ok: false, error: '缺少关闭需求动作确认头' })
+    }
+    let body
+    try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { ok: false, error: e.message }) }
+    const repo = resolveRepo(body.repo)
+    if (!repo) return sendJson(res, 403, { ok: false, error: '当前工作区未登记为进度数据源' })
+    const issue = typeof body.issue === 'string' ? body.issue : ''
+    if (!issue || issue.length > 300) return sendJson(res, 400, { ok: false, error: 'issue 参数无效' })
+    const reason = typeof body.reason === 'string' ? body.reason.slice(0, 400) : ''
+    cleanupRunning = true
+    try {
+      const result = parseResult(await runProgress(repo, ['close', '--repo', repo, '--issue', issue, '--reason', reason]))
+      if (result.ok) cache.delete(repo)
+      return sendJson(res, 200, result)
+    } finally {
+      cleanupRunning = false
+    }
+  }
+
   async function cleanup(req, res, mode) {
     if (cleanupRunning) return sendJson(res, 409, { ok: false, error: '另一项清理正在执行，请稍候' })
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
@@ -124,7 +151,11 @@ export function apply(ctx, config) {
         if (typeof body.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(body.confirm)) {
           return sendJson(res, 400, { ok: false, error: '缺少有效的预检确认指纹' })
         }
+        if (body.action !== undefined && !['close', 'discard', 'merge', 'dev-only'].includes(body.action)) {
+          return sendJson(res, 400, { ok: false, error: 'action 必须是 close / discard / merge / dev-only' })
+        }
         args.push('--apply', '--confirm', body.confirm)
+        if (body.action) args.push('--action', body.action)
       }
       const result = parseResult(await runProgress(repo, args))
       if (mode === 'apply') {
@@ -149,6 +180,9 @@ export function apply(ctx, config) {
             if (!repo) return sendJson(res, 403, { ok: false, error: '当前工作区未登记为进度数据源' })
             const data = await payload(repo)
             return sendJson(res, data && data.ok === false ? 500 : 200, data)
+          }
+          if (req.method === 'POST' && url.pathname === '/api/ch-progress/close') {
+            return await closeIssue(req, res)
           }
           if (req.method === 'POST' && url.pathname === '/api/ch-progress/cleanup/preview') {
             return await cleanup(req, res, 'preview')
