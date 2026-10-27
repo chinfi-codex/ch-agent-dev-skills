@@ -1,0 +1,8 @@
+分支树 —— 主干 main @ad25c13 · feat 分支 5 个（在制 2 · 无主残留 1）
+
+  main  ad25c13  3 分钟前推进
+  ├─ feat/session-login-issue-003 · 在跑 · codex·gpt-5.2 第 2 次派发 · ↑1↓1 · 脏 1 文件 · 4 分钟前
+  ├─ feat/session-login-issue-005 · 在跑 · zcode·glm-4.7 · ↑1↓1 · ⚠ 42 分钟前
+  ├─ feat/session-login-issue-008 · 待合并 · codex·gpt-5.2 · ↑1↓1 · 44 分钟前
+  ├─ feat/session-login-issue-004 · ✓ 已完成 · 分支残留可删 · 3 分钟前
+  └─ feat/session-login-issue-099 · ? 无对应票（残留？） · 3 分钟前

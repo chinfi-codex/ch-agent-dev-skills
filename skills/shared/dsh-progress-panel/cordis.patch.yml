@@ -1,0 +1,7 @@
+# ch-agent 进度面板：服务端半端（HTTP 数据源），客户端半端在 client.js 自注册。
+# 仓库内不写本机绝对路径；在 profile 的 cordis.patch.yml 用同 id 覆盖 config.repo / config.repos。
+- insert:
+    - id: ch-progress-panel
+      name: '@ch-agent/dsh-progress-panel'
+      config:
+        stallMin: 30

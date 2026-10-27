@@ -140,6 +140,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
 - 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-module` 与 `feature-slug`——被派发方全靠落盘文件工作
+- 派发前置写入：启动实现对话前，主会话按「监督循环 · 状态与事件写入契约」在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts）并追加 `dispatch` 事件——归属在派发瞬间落盘，不靠事后补登
 - 模型选择：取 `agents-config.dispatch.model.<当前宿主>`——light / scoped 票用 `default` 清单，full 档票 / 集成票 / 高风险票及评审达 `review-round-alert` 轮后用 `escalated` 清单，各取第一个当前可用模型；评审对话同档。当前宿主无条目 → 停下请人确认后写入配置，不跨宿主套用、不自行挑选
 
 ### 宿主适配
@@ -286,7 +287,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
 - **合并由主会话执行，无需人审**：
-  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted`，把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
+  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted` 并追加 `mr-submitted` 事件到 `./dev/features/<feature-module>/<feature-slug>/progress.jsonl`（行格式见「监督循环 · 状态与事件写入契约」），再把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
   - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
   - 合并冲突：先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 与冲突文件闭包的 scoped 后再合（不重跑 full）；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
 

@@ -1,0 +1,23 @@
+【pandu】auth/password-reset —— 事件流（10-24 09:40 → 11:10，共 3 条）
+  09:40  dispatch     issue-101  → zcode·deepseek-v4
+  10:40  merged       issue-101  9aa001
+  11:10  dispatch     issue-102  → kimi·kimi-v2（1.5 小时前）
+
+【pandu】auth/session-login —— 事件流（10-24 07:55 → 12:10，共 16 条）
+  07:55  dispatch     issue-001  → codex·gpt-5.2
+  08:10  dispatch     issue-002  → zcode·glm-4.7
+  08:25  dispatch     issue-004  → claude·opus-4.6
+  08:40  dispatch     issue-008  → codex·gpt-5.2
+  09:10  merged       issue-001  c3d4e5f
+  09:25  merged       issue-002  7a8b9c0
+  09:55  merged       issue-004  1d2e3f4
+  10:00  dispatch     issue-003  → codex·gpt-5.2
+  10:15  dispatch     issue-007  → claude·opus-4.6
+  10:35  dispatch     issue-005  → zcode·glm-4.7
+  11:00  verify-fail  issue-003  第 1 次 复跑 test_checkout 失败，打回（1.7 小时前）
+  11:05  dispatch     issue-003  → codex·gpt-5.2 （第 2 次）（1.6 小时前）
+  11:55  returned     issue-008  评审 pass-with-notes（47 分钟前）
+  11:58  mr-submitted issue-008  MR !12（44 分钟前）
+  12:05  needs-human  issue-007  BLOCKER 分歧：会话过期策略（37 分钟前）
+  12:10  digest                  无人值守心跳：3/8 合并 · 2 在跑 · 1 等你（32 分钟前）
+

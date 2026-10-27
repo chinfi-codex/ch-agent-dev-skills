@@ -6,6 +6,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文
 - 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-module` 与 `feature-slug`——被派发方全靠落盘文件工作
+- 派发前置写入：启动实现对话前，主会话按「监督循环 · 状态与事件写入契约」在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts）并追加 `dispatch` 事件——归属在派发瞬间落盘，不靠事后补登
 - 模型选择：取 `agents-config.dispatch.model.<当前宿主>`——light / scoped 票用 `default` 清单，full 档票 / 集成票 / 高风险票及评审达 `review-round-alert` 轮后用 `escalated` 清单，各取第一个当前可用模型；评审对话同档。当前宿主无条目 → 停下请人确认后写入配置，不跨宿主套用、不自行挑选
 
 ### 宿主适配

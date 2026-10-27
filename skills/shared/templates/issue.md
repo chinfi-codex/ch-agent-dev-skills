@@ -3,13 +3,18 @@ feature-slug: <feature-slug>
 issue-id: issue-001
 title: <一句话标题，动词开头>
 type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5
-status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done
+status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done / deferred（关闭需求，可重开）
 blocked-by: []          # 例如 [issue-001]；frontier 票此处为空
 verify-tier: scoped     # 交付验证档位：light / scoped / full；由 /issue-split 按 verify-policy 计算并过门②确认，
                         # 实现期只升不降（升档规则见 agents-config.verify-policy）；集成票（无后继票）一律 full
 tier-reason: default    # 定档原因：命中的触发器名 / 阈值项 / integration / default；升档时更新
 declared-scope: []      # 声明将触碰的生产代码路径 / glob 清单；实测漂移按 verify-policy 漂移规则处理
 verify-fails: 0         # 主会话收口打回计数（验收复跑失败 / 需求符合性核对未过，见「监督循环」收口）；达 2 票置 needs-human
+dispatch:               # 派发归属，主会话派发时写入（见「监督循环」状态与事件写入契约）；未派发票留空
+  host:                 # 执行宿主
+  model:                # 实际执行模型
+  dispatched-at:        # 最近一次派发时间
+  attempts: 0           # 派发次数，打回重派 +1
 tracker-iid:            # tracker: gitlab 时回写 GitLab issue IID
 tracker-url:
 created: YYYY-MM-DD
