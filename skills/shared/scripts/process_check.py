@@ -10,7 +10,8 @@ dev 阶段的流程核对只在这里做一次：/implement 在发起评审前�
 
 用法：
   python3 process_check.py --issue <票文件> --repo <票 worktree 或仓库> \
-      --phase review|merge|close [--base REV] [--head REV] [--json OUT]
+      --phase review|merge|close|promote [--base REV] [--head REV] [--json OUT]
+  ci-only main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json>
 
 退出码：0 = 全部通过；1 = 有 FAIL 项；2 = 输入 / 配置错误。
 只依赖 Python 3.8+ 标准库；只读仓库与 dev/ 产物，唯一写入是 --json 指定的文件。
@@ -490,6 +491,38 @@ def run(args) -> tuple[Report, dict]:
             if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
                 rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
 
+    if args.phase == "promote":
+        if str(policy.get("full-execution") or "ticket") != "ci-only":
+            rep.add("ci-verdict", "FAIL", "promote 仅用于 full-execution: ci-only；ticket 模式按原 main 放行流程")
+        if not args.ci_verdict:
+            rep.add("ci-verdict", "FAIL", "main 放行缺 --ci-verdict；不得把票级 close 当作 main 放行")
+        else:
+            verdict_path = Path(args.ci_verdict)
+            try:
+                verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                verdict = {}
+                rep.add("ci-verdict", "FAIL", f"CI 判决不可读：{exc}")
+            expected_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+            checks = (
+                (verdict.get("schema") == "pandu.test-verdict/v1", "schema 非法"),
+                (verdict.get("status") == "completed", "status 不是 completed"),
+                (verdict.get("pass") is True, "pass 不是 true"),
+                (verdict.get("commit") == head, "commit 与 HEAD 不一致"),
+                (verdict.get("tree") == expected_tree, "tree 与 HEAD 不一致"),
+                (bool(verdict.get("ref")), "缺 ref"),
+                (bool(verdict.get("run_id")), "缺 run_id"),
+                (verdict.get("ran_n", 0) > 0, "没有实际执行测试"),
+                (verdict.get("skipped_env_n") == 0, "仍有 skipped-env 未决项"),
+                (not verdict.get("new_failures"), "仍有新增失败"),
+                (not verdict.get("unattributed_failures"), "仍有未归因失败"),
+            )
+            for ok, message in checks:
+                if not ok:
+                    rep.add("ci-verdict", "FAIL", f"main 放行判决无效：{message}")
+            if not rep.failed:
+                rep.add("ci-verdict", "PASS", "CI 判决与 HEAD commit / tree 一致且全部必跑项通过")
+
     # 已有多实例拓扑的判读项目不得以本机测试或口头声明替代远端回执。
     topology_file = repo / "configuration/deploy/topology.json"
     remote_required = False
@@ -576,8 +609,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 档位 / 证据 / 需求符合性）")
     ap.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     ap.add_argument("--repo", required=True, help="票 worktree（或含该分支的仓库）路径")
-    ap.add_argument("--phase", choices=["review", "merge", "close"], required=True,
-                    help="review=评审前置门；merge=转 ready 前；close=主会话收口（含符合性核对）")
+    ap.add_argument("--phase", choices=["review", "merge", "close", "promote"], required=True,
+                    help="review=评审前置门；merge=转 ready 前；close=需求分支收口；promote=main 放行（需 CI 判决）")
+    ap.add_argument("--ci-verdict", help="promote 所需的 pandu.test-verdict/v1 JSON")
     ap.add_argument("--base", help="固定点；默认 merge-base(main-branch, head)")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--impl-log")

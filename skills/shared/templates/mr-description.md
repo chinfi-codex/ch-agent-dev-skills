@@ -14,7 +14,7 @@
 ## 证据摘要
 
 - 验收命令 N/N 通过，详见 `evidence-<issue-id>.md`（all-passed: true）
-- 全量质量门通过
+- 质量门：`full-execution: ticket` 时填票内 full 结果；`ci-only` 时填循环内验证 + `full-deferred: ci`，main 放行另附 `--phase promote` 核对通过的 CI run / tree，禁止写“票内全量已通过”
 - commit：`<hash>`
 
 ## 评审结论

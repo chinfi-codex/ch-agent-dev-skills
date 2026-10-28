@@ -39,12 +39,25 @@ def save(path, value):
     tmp.replace(path)
 
 
-def commands_ok(rows):
+def full_execution(repo):
+    path = Path(repo)/'dev/agents-config.md'
+    text = path.read_text(encoding='utf-8') if path.is_file() else ''
+    match = re.search(r'^\s*full-execution:\s*(ticket|ci-only)\s*(?:#.*)?$', text, re.M)
+    return match.group(1) if match else 'ticket'
+
+
+def full_argv(argv):
+    return any(re.search(r'(^|[/\s])tools/check\.py($|\s)', value) for value in argv)
+
+
+def commands_ok(rows, ci_only=False):
     if not isinstance(rows, list) or not rows:
         raise ValueError('commands must be a nonempty JSON list')
     names = set()
     for row in rows:
-        if isinstance(row, dict) and isinstance(row.get('name'), str) and row['name'].strip().lower() == 'full':
+        if (ci_only and isinstance(row, dict)
+                and ((isinstance(row.get('name'), str) and row['name'].strip().lower() == 'full')
+                     or (isinstance(row.get('argv'), list) and full_argv(row['argv'])))):
             raise ValueError('full tests must run through the branch CI workflow, not remote_tests')
         if not isinstance(row, dict) or not re.fullmatch(r'[a-zA-Z0-9_-]+', row.get('name', '')):
             raise ValueError('invalid command name')
@@ -155,7 +168,8 @@ def start(args):
     sha = call(['git','rev-parse','HEAD'],cwd=repo)
     tree = call(['git','rev-parse','HEAD^{tree}'],cwd=repo)
     subprocess.run(['git','check-ref-format',f'refs/heads/{branch}'],check=True)
-    rows = commands_ok(json.loads(Path(args.commands).read_text()))
+    rows = commands_ok(json.loads(Path(args.commands).read_text()),
+                       ci_only=full_execution(repo) == 'ci-only')
     ssh, payload, git_remote = resolve_local(repo,args.instance,branch)
     context = remote(ssh,RESOLVE,payload)  # Resolve before any push.
     if call(['git','remote','get-url',git_remote['name']],cwd=repo)!=git_remote['url']:
