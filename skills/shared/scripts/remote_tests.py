@@ -44,6 +44,8 @@ def commands_ok(rows):
         raise ValueError('commands must be a nonempty JSON list')
     names = set()
     for row in rows:
+        if isinstance(row, dict) and isinstance(row.get('name'), str) and row['name'].strip().lower() == 'full':
+            raise ValueError('full tests must run through the branch CI workflow, not remote_tests')
         if not isinstance(row, dict) or not re.fullmatch(r'[a-zA-Z0-9_-]+', row.get('name', '')):
             raise ValueError('invalid command name')
         if row['name'] in names:

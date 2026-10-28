@@ -27,6 +27,11 @@ class RemoteTests(unittest.TestCase):
             with self.assertRaises(ValueError):rt.commands_ok(rows)
         self.assertEqual(rt.commands_ok([{'name':'x','argv':['echo','a;$(whoami)']}])[0]['argv'][1],'a;$(whoami)')
 
+    def test_full_commands_must_use_ci(self):
+        for name in ('full', 'FULL', ' full '):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'full.*CI'):
+                rt.commands_ok([{'name':name,'argv':['{python}','tools/check.py']}])
+
     def test_resolution_reuses_declared_legacy_and_no_config_write(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);p=root/'configuration/deploy/topology.json';p.parent.mkdir(parents=True)

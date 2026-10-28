@@ -438,7 +438,25 @@ def run(args) -> tuple[Report, dict]:
     if ev and target is not None:
         executed = tier_of(ev.get("tier-executed"))
         ev_commit = str(ev.get("commit") or "")
+        full_execution = str(policy.get("full-execution") or "ticket").strip()
+        full_deferred = str(ev.get("full-deferred") or "").strip()
+        ci_only = full_execution == "ci-only"
+        if full_execution not in ("ticket", "ci-only"):
+            rep.add("evidence", "FAIL", f"verify-policy.full-execution 非法：{full_execution!r}")
+        if full_deferred == "ci" and not ci_only:
+            rep.add("evidence", "FAIL", "CI-only 配置未启用：full-deferred: ci 需要 verify-policy.full-execution: ci-only")
+        if ci_only and full_deferred not in ("", "ci"):
+            rep.add("evidence", "FAIL", f"CI-only 的 full-deferred 非法：{full_deferred!r}")
+        if ci_only and (ev.get("full-commit") or ev.get("full-ref")):
+            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得用 full-commit / full-ref 冒充分支 CI 判决")
+        if ci_only and executed == TIERS["full"]:
+            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得记录本票执行 full")
+        defer_to_ci = ci_only and full_deferred == "ci"
         need = target if args.phase in ("merge", "close") else min(target, TIERS["scoped"])
+        if defer_to_ci:
+            need = min(need, TIERS["scoped"])
+            rep.add("evidence", "REVIEW",
+                    "full-deferred: ci：票级只核循环内验证；feature / main 放行另核分支 CI 同 tree 判决")
         if executed is None:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:

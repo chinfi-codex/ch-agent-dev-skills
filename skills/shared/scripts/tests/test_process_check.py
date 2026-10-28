@@ -169,6 +169,39 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("不是 pass", out)
 
+    def enable_ci_only(self):
+        path = self.root / "dev/agents-config.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "verify-policy:\n", "verify-policy:\n  full-execution: ci-only\n"), encoding="utf-8")
+
+    def test_ci_only_defers_ticket_full_to_branch_ci(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 0, out)
+        self.assertIn("full-deferred", out)
+
+    def test_ci_only_rejects_missing_deferred_and_legacy_full_evidence(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target="full", executed="scoped")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("本阶段要求 full", out)
+        self.write_evidence(target="full", executed="scoped",
+                            extra=f"full-deferred: ci\nfull-commit: {self.head}\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("CI-only", out)
+
+    def test_ci_deferred_requires_opt_in(self):
+        self.make_integration()
+        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("CI-only", out)
+
     # ---- 需求覆盖矩阵 ----
 
     def test_matrix_section_missing_fails(self):

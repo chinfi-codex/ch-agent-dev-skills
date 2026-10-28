@@ -6,7 +6,7 @@
 
 - L1 的 hosts/ssh、remote、instances/naming 提供寻址；远端现有 `parameters.resolve` 解析 L1/L2，运行时按现有 profile/requirements 派生。L3、host.json、拓扑、agents-config、机器预算均保持原结构与原值。不得运行 track/render-host/initialize 来凑齐测试参数。
 - 实例按任务指定或现有跟踪分支匹配；多个候选时明确选择，不能从目录扫描或旧会话猜。开发分支可在对应非生产实例隔离测试，不改变实例所跟踪的分支。L1的allow/deny只约束部署跟踪分支；票分支隔离测试不调用track，不把部署白名单误用到测试ref。开发分支推送仍须授权，封装拒绝main/master推送。
-- 本机只编辑、提交、生成文档、解析静态结果和取回日志。**全部测试**（TDD见红/变绿、fast lint、DoD、scoped、full、归因、性能/展示、独立评审复测、主会话验收）在判读机执行；远端不可用或缺平台能力时报告阻塞/未执行，不回退本机。流程文档的静态核对可以本机执行，它不等于测试。
+- 本机只编辑、提交、生成文档、解析静态结果和取回日志。**全部测试**（TDD见红/变绿、fast lint、DoD、scoped、归因、性能/展示、独立评审复测、主会话验收）在判读机执行；远端不可用或缺平台能力时报告阻塞/未执行，不回退本机。流程文档的静态核对可以本机执行，它不等于测试。**full 不走本封装**：pandu 的 full 只能由已登记分支 push 触发判读机 Gitea Actions，在被 push 分支的精确提交上执行；`remote_tests.py` 对 `name: full` 在 SSH 与 push 前直接拒绝。
 - 推送必须已有用户授权；授权覆盖当前同名开发/集成分支时直接执行，不反复询问。`--push` 只做普通同名推送，无强推、删分支或自动部署授权。未授权时只检查远端已有提交。推送前检查仓库 CI 触发规则；若会触发未授权部署或竞争任务，先解决触发边界，不能把 push 当作无副作用传输。
 
 ## 执行
@@ -15,8 +15,7 @@
 2. 写命令清单 JSON，每行 `name` 与 `argv`。命令必须只使用构造数据/测试专属状态；普通测试不写共享部署配置或在线服务。例：
 
 ```json
-[{"name":"regression","argv":["{python}","tools/tests/a1_capability_gap_regression_smoke.py"]},
- {"name":"full","argv":["{python}","tools/check.py","--quiet","--jobs","{jobs}"]}]
+[{"name":"regression","argv":["{python}","tools/tests/a1_capability_gap_regression_smoke.py"]}]
 ```
 
 ```bash
