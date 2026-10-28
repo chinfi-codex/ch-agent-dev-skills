@@ -38,6 +38,19 @@ class RemoteTests(unittest.TestCase):
             rt.commands_ok([{'name':'regression','argv':['{python}','tools/check.py','--quiet']}], ci_only=True)
         with self.assertRaisesRegex(ValueError, 'full.*CI'):
             rt.commands_ok([{'name':'regression','argv':['bash','-lc','python3 tools/check.py --quiet']}], ci_only=True)
+        for command in ("python3 'tools/check.py' --quiet",
+                        'python3 tools/check.py; echo done',
+                        'python3 tools/check.py&&echo done'):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, 'full.*CI'):
+                rt.commands_ok([{'name':'regression','argv':['bash','-lc',command]}], ci_only=True)
+
+    def test_full_execution_accepts_yaml_quoted_values(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root/'dev').mkdir()
+            for value in ('ci-only', "'ci-only'", '"ci-only"'):
+                (root/'dev/agents-config.md').write_text(f'verify-policy:\n  full-execution: {value}\n')
+                self.assertEqual(rt.full_execution(root), 'ci-only')
 
     def test_ci_only_full_is_rejected_before_remote_resolution_or_push(self):
         with tempfile.TemporaryDirectory() as td:

@@ -42,12 +42,19 @@ def save(path, value):
 def full_execution(repo):
     path = Path(repo)/'dev/agents-config.md'
     text = path.read_text(encoding='utf-8') if path.is_file() else ''
-    match = re.search(r'^\s*full-execution:\s*(ticket|ci-only)\s*(?:#.*)?$', text, re.M)
+    match = re.search(r'^\s*full-execution:\s*[\'\"]?(ticket|ci-only)[\'\"]?\s*(?:#.*)?$', text, re.M)
     return match.group(1) if match else 'ticket'
 
 
 def full_argv(argv):
-    return any(re.search(r'(^|[/\s])tools/check\.py($|\s)', value) for value in argv)
+    for value in argv:
+        try:
+            words = list(shlex.shlex(value, posix=True, punctuation_chars=True))
+        except ValueError:
+            words = [value]
+        if any(word == 'tools/check.py' or word.endswith('/tools/check.py') for word in words):
+            return True
+    return False
 
 
 def commands_ok(rows, ci_only=False):
