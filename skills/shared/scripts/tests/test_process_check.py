@@ -232,6 +232,14 @@ class ProcessCheckTest(unittest.TestCase):
         code, out = self.check('promote', extra=['--ci-verdict', incomplete])
         self.assertEqual(code, 1, out)
         self.assertIn('pass', out)
+        overdue = self.write_ci_verdict(quarantine_overdue_n=1)
+        code, out = self.check('promote', extra=['--ci-verdict', overdue])
+        self.assertEqual(code, 1, out)
+        self.assertIn('超期隔离', out)
+        missing_hash = self.write_ci_verdict(quarantined_n=1)
+        code, out = self.check('promote', extra=['--ci-verdict', missing_hash])
+        self.assertEqual(code, 1, out)
+        self.assertIn('配置哈希', out)
 
     def test_promote_rejects_missing_verdict_and_legacy_mode(self):
         self.make_integration()

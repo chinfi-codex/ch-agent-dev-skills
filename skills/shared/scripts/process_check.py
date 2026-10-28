@@ -517,6 +517,9 @@ def run(args) -> tuple[Report, dict]:
                 (not verdict.get("new_failures"), "仍有新增失败"),
                 (not verdict.get("unattributed_failures"), "仍有未归因失败"),
                 (verdict.get("attribution_status") in ("not-needed", "completed"), "失败归因尚未完成"),
+                (verdict.get("quarantine_overdue_n", 0) == 0, "仍有超期隔离条目"),
+                (not verdict.get("quarantined_n") or bool(verdict.get("quarantine_config_sha256")),
+                 "隔离项缺配置哈希"),
             )
             for ok, message in checks:
                 if not ok:
