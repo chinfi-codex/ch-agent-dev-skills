@@ -510,12 +510,13 @@ def run(args) -> tuple[Report, dict]:
                 (verdict.get("pass") is True, "pass 不是 true"),
                 (verdict.get("commit") == head, "commit 与 HEAD 不一致"),
                 (verdict.get("tree") == expected_tree, "tree 与 HEAD 不一致"),
-                (bool(verdict.get("ref")), "缺 ref"),
+                (verdict.get("ref") == git(repo, "symbolic-ref", "HEAD").strip(), "ref 与当前分支不一致"),
                 (bool(verdict.get("run_id")), "缺 run_id"),
                 (verdict.get("ran_n", 0) > 0, "没有实际执行测试"),
                 (verdict.get("skipped_env_n") == 0, "仍有 skipped-env 未决项"),
                 (not verdict.get("new_failures"), "仍有新增失败"),
                 (not verdict.get("unattributed_failures"), "仍有未归因失败"),
+                (verdict.get("attribution_status") in ("not-needed", "completed"), "失败归因尚未完成"),
             )
             for ok, message in checks:
                 if not ok:

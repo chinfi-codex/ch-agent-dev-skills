@@ -207,6 +207,7 @@ class ProcessCheckTest(unittest.TestCase):
         value = {
             'schema': 'pandu.test-verdict/v1', 'status': 'completed', 'pass': True,
             'new_failures': [], 'unattributed_failures': [], 'skipped_env_n': 0,
+            'attribution_status': 'not-needed',
             'quarantined_n': 0, 'commit': self.head,
             'tree': sh(self.root, 'git', 'rev-parse', 'HEAD^{tree}'),
             'ref': 'refs/heads/feat', 'run_id': '12345', 'ran_n': 1,
