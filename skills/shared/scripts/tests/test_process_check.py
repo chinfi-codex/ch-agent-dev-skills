@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -217,27 +218,41 @@ class ProcessCheckTest(unittest.TestCase):
         path.write_text(json.dumps(value), encoding='utf-8')
         return str(path)
 
+    def promote_args(self, verdict_path):
+        proof = {
+            'schema': 'pandu.ci-run-proof/v1', 'run_id': '12345',
+            'event': 'push', 'status': 'completed', 'conclusion': 'success',
+            'commit': self.head, 'branch': 'feat', 'verdict_pass': True,
+            'verdict_sha256': hashlib.sha256(Path(verdict_path).read_bytes()).hexdigest(),
+        }
+        path = self.root / 'dev/ci-run-proof.json'
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        return ['--ci-verdict', verdict_path, '--ci-run-proof', str(path)]
+
     def test_ci_only_promote_requires_matching_green_verdict(self):
         self.make_integration()
         self.enable_ci_only()
         self.write_evidence(target='full', executed='scoped', extra='full-deferred: ci\n')
         verdict = self.write_ci_verdict()
         code, out = self.check('promote', extra=['--ci-verdict', verdict])
+        self.assertEqual(code, 1, out)
+        self.assertIn('ci-run-proof', out)
+        code, out = self.check('promote', extra=self.promote_args(verdict))
         self.assertEqual(code, 0, out)
         stale = self.write_ci_verdict(tree='0'*40)
-        code, out = self.check('promote', extra=['--ci-verdict', stale])
+        code, out = self.check('promote', extra=self.promote_args(stale))
         self.assertEqual(code, 1, out)
         self.assertIn('tree', out)
         incomplete = self.write_ci_verdict(status='incomplete', **{'pass': False})
-        code, out = self.check('promote', extra=['--ci-verdict', incomplete])
+        code, out = self.check('promote', extra=self.promote_args(incomplete))
         self.assertEqual(code, 1, out)
         self.assertIn('pass', out)
         overdue = self.write_ci_verdict(quarantine_overdue_n=1)
-        code, out = self.check('promote', extra=['--ci-verdict', overdue])
+        code, out = self.check('promote', extra=self.promote_args(overdue))
         self.assertEqual(code, 1, out)
         self.assertIn('超期隔离', out)
         missing_hash = self.write_ci_verdict(quarantined_n=1)
-        code, out = self.check('promote', extra=['--ci-verdict', missing_hash])
+        code, out = self.check('promote', extra=self.promote_args(missing_hash))
         self.assertEqual(code, 1, out)
         self.assertIn('配置哈希', out)
 
@@ -250,7 +265,7 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertIn('ci-verdict', out)
         (self.root / 'dev/agents-config.md').write_text(CONFIG, encoding='utf-8')
         verdict = self.write_ci_verdict()
-        code, out = self.check('promote', extra=['--ci-verdict', verdict])
+        code, out = self.check('promote', extra=self.promote_args(verdict))
         self.assertEqual(code, 1, out)
         self.assertIn('ci-only', out)
 

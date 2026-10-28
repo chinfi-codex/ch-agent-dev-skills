@@ -149,7 +149,7 @@ allowed-tools:
 
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
-- **main 放行（仅 `full-execution: ci-only` 且合并目标为 main）**：先运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json>`，核对 CI 判决与实际 HEAD commit / tree、pass、run_id、必跑项完成状态；未通过不得合并 main。合入需求分支只做 close，不冒充 main 放行
+- **main 放行（仅 `full-execution: ci-only` 且合并目标为 main）**：先运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI 判决与实际 HEAD commit / tree、pass、run_id、必跑项完成状态；未通过不得合并 main。合入需求分支只做 close，不冒充 main 放行
 - **合并由主会话执行，无需人审**：
   - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted` 并追加 `mr-submitted` 事件到 `./dev/features/<feature-module>/<feature-slug>/progress.jsonl`（行格式见「监督循环 · 状态与事件写入契约」），再把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
   - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾

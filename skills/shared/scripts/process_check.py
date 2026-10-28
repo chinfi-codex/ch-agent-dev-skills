@@ -11,7 +11,8 @@ dev 阶段的流程核对只在这里做一次：/implement 在发起评审前�
 用法：
   python3 process_check.py --issue <票文件> --repo <票 worktree 或仓库> \
       --phase review|merge|close|promote [--base REV] [--head REV] [--json OUT]
-  ci-only main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json>
+  ci-only main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json> \
+      --ci-run-proof <trusted-gitea-run-proof.json>
 
 退出码：0 = 全部通过；1 = 有 FAIL 项；2 = 输入 / 配置错误。
 只依赖 Python 3.8+ 标准库；只读仓库与 dev/ 产物，唯一写入是 --json 指定的文件。
@@ -524,6 +525,31 @@ def run(args) -> tuple[Report, dict]:
             for ok, message in checks:
                 if not ok:
                     rep.add("ci-verdict", "FAIL", f"main 放行判决无效：{message}")
+            proof = {}
+            if not args.ci_run_proof:
+                rep.add("ci-run-proof", "FAIL", "main 放行缺受控监督生成的 --ci-run-proof")
+            else:
+                try:
+                    proof = json.loads(Path(args.ci_run_proof).read_text(encoding="utf-8"))
+                    verdict_digest = hashlib.sha256(verdict_path.read_bytes()).hexdigest()
+                except (OSError, ValueError) as exc:
+                    verdict_digest = ""
+                    rep.add("ci-run-proof", "FAIL", f"真实 run 证明不可读：{exc}")
+                current_ref = git(repo, "symbolic-ref", "HEAD").strip()
+                proof_checks = (
+                    (proof.get("schema") == "pandu.ci-run-proof/v1", "run 证明 schema 非法"),
+                    (proof.get("run_id") == str(verdict.get("run_id")), "run_id 与真实 run 证明不一致"),
+                    (proof.get("commit") == head, "真实 run commit 与 HEAD 不一致"),
+                    (proof.get("branch") in (current_ref, current_ref.removeprefix("refs/heads/")),
+                     "真实 run 分支与当前分支不一致"),
+                    (proof.get("status") == "completed", "真实 run 尚未完成"),
+                    (proof.get("conclusion") == "success", "真实 run 不是 success"),
+                    (proof.get("verdict_pass") is True, "真实 run 的 verdict 未通过"),
+                    (proof.get("verdict_sha256") == verdict_digest, "verdict 文件与真实 run 证据哈希不一致"),
+                )
+                for ok, message in proof_checks:
+                    if not ok:
+                        rep.add("ci-run-proof", "FAIL", f"main 放行真实 run 证明无效：{message}")
             if not rep.failed:
                 rep.add("ci-verdict", "PASS", "CI 判决与 HEAD commit / tree 一致且全部必跑项通过")
 
@@ -616,6 +642,7 @@ def main(argv=None) -> int:
     ap.add_argument("--phase", choices=["review", "merge", "close", "promote"], required=True,
                     help="review=评审前置门；merge=转 ready 前；close=需求分支收口；promote=main 放行（需 CI 判决）")
     ap.add_argument("--ci-verdict", help="promote 所需的 pandu.test-verdict/v1 JSON")
+    ap.add_argument("--ci-run-proof", help="受控监督通过真实 Gitea API 生成的 pandu.ci-run-proof/v1 JSON")
     ap.add_argument("--base", help="固定点；默认 merge-base(main-branch, head)")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--impl-log")
