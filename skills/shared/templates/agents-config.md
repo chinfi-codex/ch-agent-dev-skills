@@ -110,11 +110,11 @@ verify-policy:
     - "红线邻接（redlines glob 命中文件的同目录）"   # scoped+ 级
   # scoped+ 级处理：按 selection 反查变更文件的反向依赖闭包（含调用方测试）——
   #   闭包完整可枚举（无动态加载 / 反射 / subprocess 间接调用变更模块）→ scoped，选择集 = 全闭包；
-  #   闭包不可枚举（存在上述动态依赖）→ 仍 scoped（可枚举部分 + 按目录约定补齐），evidence 标
-  #   「闭包不完整」，不可见的动态依赖由每日回归兜底，不为此跑票内 full。
-  # 选择集大小不是升档理由：闭包即精确选择集，大闭包跑大闭包；占比 ≥ 50% 时在 evidence 记录
-  # （作为「本票影响面广」的评审信号），不升 full——动态依赖与跨模块交互风险由集成票
-  # （DAG 终点票）的 full 与每日回归统一兜底，不由每票重复全量。
+  #   闭包不可枚举（存在上述动态依赖）→ 仍 scoped，但票内整包延期，evidence 标
+  #   「闭包不完整」，不可见的动态依赖由集成票 full / CI 兜底，不为此跑票内 full。
+  # 选择集大小不是升档理由：direct（直接改动 / 新增的测试）全部先跑且不可延期，indirect 闭包受
+  # scoped-budget-seconds 限制；占比 ≥ 50% 时在 evidence 记录（作为「本票影响面广」的评审信号），
+  # 不升 full——动态依赖、延期项与跨模块交互风险由集成票 full / CI 统一兜底，不由每票重复全量。
   # 漂移规则（实测 diff 超出票的 declared-scope 时）：
   #   仍同模块、未触发 escalate-triggers、未超阈值 → 不升档，impl-log「漂移与升档记录」登记漂移文件清单即可
   #   触发 escalate-triggers 或超 scoped-max-* 阈值 → 升档（只升不降），立即按新档补验证并在 evidence 记录
@@ -142,16 +142,23 @@ verify-policy:
                            #                选择面比 scoped 宽（整个模块而非本票 diff）、比 full 窄（不跨无关模块）
   selection-map: null       # dir-map 映射表路径（仓内相对路径，默认 dev/scoped-map.yaml）；
                            #   选择器为共享脚本 shared/scripts/scoped_select.py（--map 覆盖、--scan 扫描根、--test-dir 测试目录）
+  scoped-budget-seconds: 1200 # indirect 闭包墙钟预算（默认 20 分钟；0 = 不限时、恢复完整闭包全跑）；
+                           #   direct 不参与预算且不得延期；到点只停发新 indirect，在途项按单项超时自然结束；
+                           #   机器报告须落本票 impl/raw/，evidence 以 scoped-ref 引用，不允许手写延期标记替代
   # scoped 执行条件：选择集可枚举（闭包可证明）才票内跑；不可枚举（full fallback，跑了等于变相每票 full）
   #   → 票内不跑选择集，evidence 头记 `scoped-deferred: closure-incomplete` + 原因，tier-executed 如实记 light，
   #   套件级验证由集成票 full 与每日回归兜底；不因此升档、tier-target 不变，DoD + fast + 评审照常
+  # 可枚举但 indirect 超预算：选择器输出 selected-partial + 完整 selected / ran / deferred_tests / broken 分区；
+  #   仅 direct 与已执行项全绿、延期项全是未启动 indirect 时，evidence 才可记 `scoped-deferred: budget-partial`
+  #   + scoped-ref，tier-executed 仍记 light；process_check 核同 base / tree、预算与分区，full / main 放行不豁免
   # 先在失败隔离：套件基线长期存在与本票无关的失败时，隔离清单内用例 skip 执行，
   # 不产生 exit 1——套件退出码恢复语义（exit 1 = 有新东西坏了），档位门只对清单外失败归因
   attribution: quarantine
     # quarantine（推荐默认）：维护落盘隔离清单（默认 dev/known-failures.yaml）——
     #   清单内用例在 full / scoped 中以 skip（标 quarantined）执行，不进 all-passed 分母，evidence 只列隔离数；
     #   入册条件：base 侧同签名稳定失败；每条必须写 name + returncode + signature + owner +
-    #   去向（修复票 / 永久删除决议）+ 首录日期，无去向不入册；
+    #   去向（修复票 / 永久删除决议）+ 首录日期，无去向不入册；未执行慢项不是「先在失败」，
+    #   不得入册冒充 quarantine，只能按 scoped-budget-seconds 形成 budget-partial 延期记录；
     #   清单由每日 full 顺带刷新（转绿销记、新先在追加），env-skip 项不做整体替换（环境缺失的轮次保留历史条目）；
     #   每日 full 另以「只跑隔离项、不判红」抽查签名漂移（隔离项转绿该销记 / 失败形态变了该重新评估，都要可见）；
     #   超 quarantine-max-age-days 未处理的条目在每日回归记录列出，主会话监督循环呈现给人；
@@ -193,6 +200,8 @@ verify-policy:
   #   （无冲突且本票文件 blob 不变 → 复用证据；有冲突 → 冲突文件闭包 scoped）
   base-freeze: true
   # 执行形态（耗时契约，档位语义不因此缩水）：
+  #   - scoped 先跑 direct 再跑 indirect；indirect 使用 scoped-budget-seconds，停止重复长跑不等于通过，
+  #     必须由选择器落机器报告、由 process_check 复核；不为已知慢红 / 超时同族反复跑第三轮整套
   #   - 独立用例型套件应并行执行（并发度按机器自定；共享端口 / 文件等资源的用例标记 serial 除外）
   #   - 单项超时分层：默认上限 + slow 白名单（实测头部慢项登记）——避免个别卡死项烧满统一上限
   #   - full 档仍全量跑（slow 项不剔），慢项排前起跑压墙钟；同 tree 已跑过 full 的证据可复用，不重复执行

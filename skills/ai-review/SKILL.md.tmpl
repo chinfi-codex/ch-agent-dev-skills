@@ -105,6 +105,7 @@ allowed-tools:
 - **测试改动映射**：核对结果列出的「已登记的既有文件改动」逐条对照 impl-log「红线接触记录」——`mechanical-refresh` 白名单内的确只动所列字段；「需求驱动更新」的「测试 → 票 DoD 条目 / tech-spec 节锚点」映射成立、冲突说明成立、改动限于被变更行为覆盖的断言与夹具 → 正常；映射不上或借机放宽无关断言 → **BLOCKER（critical）**，视同红线
 - **语义升档触发**：diff 实际含 `verify-policy.escalate-triggers` 的语义命中（full 级：数据迁移 / schema、鉴权权限；scoped+ 级：公共接口 / API 签名、共享模块——这些票须至少 scoped 且选择集含反向闭包），而核对结果的 `tier-target` 低于应有档位 → **BLOCKER（critical）**：该升没升（阈值与集成票类的升档由脚本判定，不在此重复）
 - **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
+- **scoped 预算延期复核**：核对结果提示 `budget-partial` 时，只读 evidence 与 scoped-ref 的延期清单，复核延期项确为间接闭包、不是票 DoD 行为点的唯一覆盖，也未借「缩 scope」移除核心验收；机器分区、direct 通过、base / tree 与预算由 process_check 已核，不重算、不重跑。发现核心行为仅靠延期项覆盖 → BLOCKER（critical）；合法延期如实记录，不等待集成 full / CI，也不因此推迟评审结论
 - **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
 - **契约 diff 复核**（`docs/ARCHITECTURE.md`「接口现行态」表）：票 DoD 含契约条目时，核对 diff 中该表改动与 tech-spec 3.2 意图一致、现行签名与代码实现一致（以代码为准）、来源列填了上游 tech-spec、未顺手改无关条目——不一致或该更新没更新 → **BLOCKER（critical）**。票未声明契约条目而 diff 改了接口表已登记接口的「代码位置」文件（flow-back 情形）：漏补记接口表或 impl-log 映射缺失 → **BLOCKER（critical）**，视同红线；补记内容同样按上款复核
 - 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER

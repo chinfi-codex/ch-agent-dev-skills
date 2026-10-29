@@ -102,6 +102,43 @@ class ProcessCheckTest(unittest.TestCase):
         self.write_evidence(target="full", executed="scoped")
         self.log.write_text(LOG_OK + "| r2 | - | 是 | 集成票升至 full |\n", encoding="utf-8")
 
+    def enable_scoped_budget(self):
+        config = self.root / "dev/agents-config.md"
+        config.write_text(config.read_text(encoding="utf-8").replace(
+            "  scoped-max-loc: 400\n", "  scoped-max-loc: 400\n  scoped-budget-seconds: 1200\n"),
+            encoding="utf-8")
+
+    def write_budget_report(self):
+        report = {
+            "schema": "scoped-selection/v1",
+            "base": sh(self.root, "git", "merge-base", "main", "HEAD"),
+            "commit": self.head,
+            "tree": sh(self.root, "git", "rev-parse", "HEAD^{tree}"),
+            "enumerable": True,
+            "selected": ["z_direct.py", "a_smoke.py", "b_smoke.py"],
+            "direct": ["z_direct.py"],
+            "ran": [{"name": "z_direct.py", "exit": 0}, {"name": "a_smoke.py", "exit": 0}],
+            "deferred_tests": ["b_smoke.py"],
+            "broken": [],
+            "budget_seconds": 1200,
+            "indirect_elapsed_seconds": 1200.1,
+            "deferred": "budget-partial",
+            "execution_scope": "selected-partial",
+            "stop_reason": "time-budget",
+        }
+        path = self.feat / "impl/issue-001/raw/scoped.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return path, report
+
+    def use_budget_partial(self):
+        self.enable_scoped_budget()
+        path, report = self.write_budget_report()
+        ref = path.relative_to(self.root)
+        self.write_evidence(target="scoped", executed="light",
+                            extra=f"scoped-deferred: budget-partial\nscoped-ref: {ref}\n")
+        return path, report
+
     def check(self, phase, repo=None, extra=()):
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "--issue", str(self.issue),
                             "--repo", str(repo or self.root), "--phase", phase, *extra], capture_output=True, text=True)
@@ -335,6 +372,60 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertEqual(self.check("review")[0], 0)
         code, out = self.check("merge")
         self.assertEqual(code, 1, out)
+        self.assertIn("本阶段要求 full", out)
+
+    def test_budget_partial_requires_valid_machine_report(self):
+        path, report = self.use_budget_partial()
+        code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        self.assertIn("indirect 闭包已按预算延期", out)
+        self.assertEqual(self.check("merge")[0], 0)
+
+        path.unlink()
+        code, out = self.check("review")
+        self.assertEqual(code, 1)
+        self.assertIn("机器报告不可读", out)
+
+    def test_budget_partial_rejects_stale_incomplete_or_broken_reports(self):
+        path, report = self.use_budget_partial()
+        cases = []
+        stale = dict(report, tree="0" * 40)
+        cases.append((stale, "tree 与 HEAD 不一致"))
+        direct_deferred = dict(report,
+                               ran=[{"name": "a_smoke.py", "exit": 0}],
+                               deferred_tests=["z_direct.py", "b_smoke.py"])
+        cases.append((direct_deferred, "direct 测试未全部实际执行并通过"))
+        over_budget = dict(report, budget_seconds=1201, indirect_elapsed_seconds=1201)
+        cases.append((over_budget, "超过 scoped-budget-seconds"))
+        broken = dict(report,
+                      ran=[{"name": "z_direct.py", "exit": 0}, {"name": "a_smoke.py", "exit": 1}],
+                      broken=["a_smoke.py"])
+        cases.append((broken, "broken 非空"))
+        incomplete = dict(report, selected=["z_direct.py", "a_smoke.py", "b_smoke.py", "lost.py"])
+        cases.append((incomplete, "分区不完整"))
+        for candidate, message in cases:
+            with self.subTest(message=message):
+                path.write_text(json.dumps(candidate), encoding="utf-8")
+                code, out = self.check("review")
+                self.assertEqual(code, 1)
+                self.assertIn(message, out)
+
+    def test_budget_partial_requires_config_and_never_exempts_full(self):
+        path, report = self.use_budget_partial()
+        config = self.root / "dev/agents-config.md"
+        config.write_text(CONFIG, encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 1)
+        self.assertIn("未配置正数 scoped-budget-seconds", out)
+
+        self.enable_scoped_budget()
+        self.make_integration()
+        ref = path.relative_to(self.root)
+        self.write_evidence(target="full", executed="light",
+                            extra=f"scoped-deferred: budget-partial\nscoped-ref: {ref}\n")
+        self.assertEqual(self.check("review")[0], 0)
+        code, out = self.check("merge")
+        self.assertEqual(code, 1)
         self.assertIn("本阶段要求 full", out)
 
     # ---- worktree dev/ 卫生（软链约定）----
