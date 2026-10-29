@@ -53,6 +53,9 @@ host-budget:
 # 唯一例外是集成票的「模块隔离认定」（见 verify-policy 集成票条）：认定成立时按 module-scoped 跑涉及模块的全闭包，
 # 不再机械全仓；认定不成立或有疑义时 full 不变。
 verify-policy:
+  full-execution: ticket    # ticket = 现行票内 / 集成票 full；ci-only = full 只由已登记分支 push 触发 CI
+                            # ci-only 下票级 evidence 写 full-deferred: ci，merge/close 只核循环内验证；
+                            # feature / main 放行必须另核 CI run 的同 tree 判决，full-commit / full-ref 不得冒充
   light-max-files: 3        # declared-scope 生产代码文件数 ≤ 此值、且不触发 escalate-triggers，才允许 light
   scoped-max-files: 10      # 实测生产代码文件数 > 此值 → 直接 full；拆票时预估 > 此值 → 票必须再拆（/issue-split 粒度红线）
   scoped-max-loc: 400       # 实测 diff LOC > 此值 → 直接 full

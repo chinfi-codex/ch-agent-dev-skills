@@ -10,7 +10,9 @@ dev 阶段的流程核对只在这里做一次：/implement 在发起评审前�
 
 用法：
   python3 process_check.py --issue <票文件> --repo <票 worktree 或仓库> \
-      --phase review|merge|close [--base REV] [--head REV] [--json OUT]
+      --phase review|merge|close|promote [--base REV] [--head REV] [--json OUT]
+  ci-only main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json> \
+      --ci-run-proof <trusted-gitea-run-proof.json>
 
 退出码：0 = 全部通过；1 = 有 FAIL 项；2 = 输入 / 配置错误。
 只依赖 Python 3.8+ 标准库；只读仓库与 dev/ 产物，唯一写入是 --json 指定的文件。
@@ -438,7 +440,25 @@ def run(args) -> tuple[Report, dict]:
     if ev and target is not None:
         executed = tier_of(ev.get("tier-executed"))
         ev_commit = str(ev.get("commit") or "")
+        full_execution = str(policy.get("full-execution") or "ticket").strip()
+        full_deferred = str(ev.get("full-deferred") or "").strip()
+        ci_only = full_execution == "ci-only"
+        if full_execution not in ("ticket", "ci-only"):
+            rep.add("evidence", "FAIL", f"verify-policy.full-execution 非法：{full_execution!r}")
+        if full_deferred == "ci" and not ci_only:
+            rep.add("evidence", "FAIL", "CI-only 配置未启用：full-deferred: ci 需要 verify-policy.full-execution: ci-only")
+        if ci_only and full_deferred not in ("", "ci"):
+            rep.add("evidence", "FAIL", f"CI-only 的 full-deferred 非法：{full_deferred!r}")
+        if ci_only and (ev.get("full-commit") or ev.get("full-ref")):
+            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得用 full-commit / full-ref 冒充分支 CI 判决")
+        if ci_only and executed == TIERS["full"]:
+            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得记录本票执行 full")
+        defer_to_ci = ci_only and full_deferred == "ci"
         need = target if args.phase in ("merge", "close") else min(target, TIERS["scoped"])
+        if defer_to_ci:
+            need = min(need, TIERS["scoped"])
+            rep.add("evidence", "REVIEW",
+                    "full-deferred: ci：票级只核循环内验证；feature / main 放行另核分支 CI 同 tree 判决")
         if executed is None:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:
@@ -471,6 +491,67 @@ def run(args) -> tuple[Report, dict]:
         if args.phase in ("merge", "close") and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
             if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
                 rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
+
+    if args.phase == "promote":
+        if str(policy.get("full-execution") or "ticket") != "ci-only":
+            rep.add("ci-verdict", "FAIL", "promote 仅用于 full-execution: ci-only；ticket 模式按原 main 放行流程")
+        if not args.ci_verdict:
+            rep.add("ci-verdict", "FAIL", "main 放行缺 --ci-verdict；不得把票级 close 当作 main 放行")
+        else:
+            verdict_path = Path(args.ci_verdict)
+            try:
+                verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                verdict = {}
+                rep.add("ci-verdict", "FAIL", f"CI 判决不可读：{exc}")
+            expected_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+            checks = (
+                (verdict.get("schema") == "pandu.test-verdict/v1", "schema 非法"),
+                (verdict.get("status") == "completed", "status 不是 completed"),
+                (verdict.get("pass") is True, "pass 不是 true"),
+                (verdict.get("commit") == head, "commit 与 HEAD 不一致"),
+                (verdict.get("tree") == expected_tree, "tree 与 HEAD 不一致"),
+                (verdict.get("ref") == git(repo, "symbolic-ref", "HEAD").strip(), "ref 与当前分支不一致"),
+                (bool(verdict.get("run_id")), "缺 run_id"),
+                (verdict.get("ran_n", 0) > 0, "没有实际执行测试"),
+                (verdict.get("skipped_env_n") == 0, "仍有 skipped-env 未决项"),
+                (not verdict.get("new_failures"), "仍有新增失败"),
+                (not verdict.get("unattributed_failures"), "仍有未归因失败"),
+                (verdict.get("attribution_status") in ("not-needed", "completed"), "失败归因尚未完成"),
+                (verdict.get("quarantine_overdue_n", 0) == 0, "仍有超期隔离条目"),
+                (not verdict.get("quarantined_n") or bool(verdict.get("quarantine_config_sha256")),
+                 "隔离项缺配置哈希"),
+            )
+            for ok, message in checks:
+                if not ok:
+                    rep.add("ci-verdict", "FAIL", f"main 放行判决无效：{message}")
+            proof = {}
+            if not args.ci_run_proof:
+                rep.add("ci-run-proof", "FAIL", "main 放行缺受控监督生成的 --ci-run-proof")
+            else:
+                try:
+                    proof = json.loads(Path(args.ci_run_proof).read_text(encoding="utf-8"))
+                    verdict_digest = hashlib.sha256(verdict_path.read_bytes()).hexdigest()
+                except (OSError, ValueError) as exc:
+                    verdict_digest = ""
+                    rep.add("ci-run-proof", "FAIL", f"真实 run 证明不可读：{exc}")
+                current_ref = git(repo, "symbolic-ref", "HEAD").strip()
+                proof_checks = (
+                    (proof.get("schema") == "pandu.ci-run-proof/v1", "run 证明 schema 非法"),
+                    (proof.get("run_id") == str(verdict.get("run_id")), "run_id 与真实 run 证明不一致"),
+                    (proof.get("commit") == head, "真实 run commit 与 HEAD 不一致"),
+                    (proof.get("branch") in (current_ref, current_ref.removeprefix("refs/heads/")),
+                     "真实 run 分支与当前分支不一致"),
+                    (proof.get("status") == "completed", "真实 run 尚未完成"),
+                    (proof.get("conclusion") == "success", "真实 run 不是 success"),
+                    (proof.get("verdict_pass") is True, "真实 run 的 verdict 未通过"),
+                    (proof.get("verdict_sha256") == verdict_digest, "verdict 文件与真实 run 证据哈希不一致"),
+                )
+                for ok, message in proof_checks:
+                    if not ok:
+                        rep.add("ci-run-proof", "FAIL", f"main 放行真实 run 证明无效：{message}")
+            if not rep.failed:
+                rep.add("ci-verdict", "PASS", "CI 判决与 HEAD commit / tree 一致且全部必跑项通过")
 
     # 已有多实例拓扑的判读项目不得以本机测试或口头声明替代远端回执。
     topology_file = repo / "configuration/deploy/topology.json"
@@ -558,8 +639,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 档位 / 证据 / 需求符合性）")
     ap.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     ap.add_argument("--repo", required=True, help="票 worktree（或含该分支的仓库）路径")
-    ap.add_argument("--phase", choices=["review", "merge", "close"], required=True,
-                    help="review=评审前置门；merge=转 ready 前；close=主会话收口（含符合性核对）")
+    ap.add_argument("--phase", choices=["review", "merge", "close", "promote"], required=True,
+                    help="review=评审前置门；merge=转 ready 前；close=需求分支收口；promote=main 放行（需 CI 判决）")
+    ap.add_argument("--ci-verdict", help="promote 所需的 pandu.test-verdict/v1 JSON")
+    ap.add_argument("--ci-run-proof", help="受控监督通过真实 Gitea API 生成的 pandu.ci-run-proof/v1 JSON")
     ap.add_argument("--base", help="固定点；默认 merge-base(main-branch, head)")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--impl-log")

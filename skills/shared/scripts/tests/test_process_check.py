@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -100,9 +102,9 @@ class ProcessCheckTest(unittest.TestCase):
         self.write_evidence(target="full", executed="scoped")
         self.log.write_text(LOG_OK + "| r2 | - | 是 | 集成票升至 full |\n", encoding="utf-8")
 
-    def check(self, phase, repo=None):
+    def check(self, phase, repo=None, extra=()):
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "--issue", str(self.issue),
-                            "--repo", str(repo or self.root), "--phase", phase], capture_output=True, text=True)
+                            "--repo", str(repo or self.root), "--phase", phase, *extra], capture_output=True, text=True)
         return r.returncode, r.stdout + r.stderr
 
     def test_unregistered_redline_and_drift_fail(self):
@@ -168,6 +170,104 @@ class ProcessCheckTest(unittest.TestCase):
         code, out = self.check("merge")
         self.assertEqual(code, 1, out)
         self.assertIn("不是 pass", out)
+
+    def enable_ci_only(self):
+        path = self.root / "dev/agents-config.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "verify-policy:\n", "verify-policy:\n  full-execution: ci-only\n"), encoding="utf-8")
+
+    def test_ci_only_defers_ticket_full_to_branch_ci(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 0, out)
+        self.assertIn("full-deferred", out)
+
+    def test_ci_only_rejects_missing_deferred_and_legacy_full_evidence(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target="full", executed="scoped")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("本阶段要求 full", out)
+        self.write_evidence(target="full", executed="scoped",
+                            extra=f"full-deferred: ci\nfull-commit: {self.head}\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("CI-only", out)
+
+    def test_ci_deferred_requires_opt_in(self):
+        self.make_integration()
+        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
+        code, out = self.check("merge")
+        self.assertEqual(code, 1, out)
+        self.assertIn("CI-only", out)
+
+    def write_ci_verdict(self, **updates):
+        value = {
+            'schema': 'pandu.test-verdict/v1', 'status': 'completed', 'pass': True,
+            'new_failures': [], 'unattributed_failures': [], 'skipped_env_n': 0,
+            'attribution_status': 'not-needed',
+            'quarantined_n': 0, 'commit': self.head,
+            'tree': sh(self.root, 'git', 'rev-parse', 'HEAD^{tree}'),
+            'ref': 'refs/heads/feat', 'run_id': '12345', 'ran_n': 1,
+        }
+        value.update(updates)
+        path = self.root / 'dev/ci-verdict.json'
+        path.write_text(json.dumps(value), encoding='utf-8')
+        return str(path)
+
+    def promote_args(self, verdict_path):
+        proof = {
+            'schema': 'pandu.ci-run-proof/v1', 'run_id': '12345',
+            'event': 'push', 'status': 'completed', 'conclusion': 'success',
+            'commit': self.head, 'branch': 'feat', 'verdict_pass': True,
+            'verdict_sha256': hashlib.sha256(Path(verdict_path).read_bytes()).hexdigest(),
+        }
+        path = self.root / 'dev/ci-run-proof.json'
+        path.write_text(json.dumps(proof), encoding='utf-8')
+        return ['--ci-verdict', verdict_path, '--ci-run-proof', str(path)]
+
+    def test_ci_only_promote_requires_matching_green_verdict(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target='full', executed='scoped', extra='full-deferred: ci\n')
+        verdict = self.write_ci_verdict()
+        code, out = self.check('promote', extra=['--ci-verdict', verdict])
+        self.assertEqual(code, 1, out)
+        self.assertIn('ci-run-proof', out)
+        code, out = self.check('promote', extra=self.promote_args(verdict))
+        self.assertEqual(code, 0, out)
+        stale = self.write_ci_verdict(tree='0'*40)
+        code, out = self.check('promote', extra=self.promote_args(stale))
+        self.assertEqual(code, 1, out)
+        self.assertIn('tree', out)
+        incomplete = self.write_ci_verdict(status='incomplete', **{'pass': False})
+        code, out = self.check('promote', extra=self.promote_args(incomplete))
+        self.assertEqual(code, 1, out)
+        self.assertIn('pass', out)
+        overdue = self.write_ci_verdict(quarantine_overdue_n=1)
+        code, out = self.check('promote', extra=self.promote_args(overdue))
+        self.assertEqual(code, 1, out)
+        self.assertIn('超期隔离', out)
+        missing_hash = self.write_ci_verdict(quarantined_n=1)
+        code, out = self.check('promote', extra=self.promote_args(missing_hash))
+        self.assertEqual(code, 1, out)
+        self.assertIn('配置哈希', out)
+
+    def test_promote_rejects_missing_verdict_and_legacy_mode(self):
+        self.make_integration()
+        self.enable_ci_only()
+        self.write_evidence(target='full', executed='scoped', extra='full-deferred: ci\n')
+        code, out = self.check('promote')
+        self.assertEqual(code, 1, out)
+        self.assertIn('ci-verdict', out)
+        (self.root / 'dev/agents-config.md').write_text(CONFIG, encoding='utf-8')
+        verdict = self.write_ci_verdict()
+        code, out = self.check('promote', extra=self.promote_args(verdict))
+        self.assertEqual(code, 1, out)
+        self.assertIn('ci-only', out)
 
     # ---- 需求覆盖矩阵 ----
 

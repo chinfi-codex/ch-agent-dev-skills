@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 SCRIPTS=Path(__file__).resolve().parents[1]
 def load(name):
@@ -26,6 +27,52 @@ class RemoteTests(unittest.TestCase):
                      [{'name':'x','argv':['true']},{'name':'x','argv':['false']}]):
             with self.assertRaises(ValueError):rt.commands_ok(rows)
         self.assertEqual(rt.commands_ok([{'name':'x','argv':['echo','a;$(whoami)']}])[0]['argv'][1],'a;$(whoami)')
+
+    def test_full_commands_must_use_ci_only_in_ci_mode(self):
+        row = {'name':'full','argv':['{python}','tools/check.py']}
+        self.assertEqual(rt.commands_ok([row]), [row])
+        for name in ('full', 'FULL', ' full '):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'full.*CI'):
+                rt.commands_ok([{'name':name,'argv':['{python}','tools/check.py']}], ci_only=True)
+        with self.assertRaisesRegex(ValueError, 'full.*CI'):
+            rt.commands_ok([{'name':'regression','argv':['{python}','tools/check.py','--quiet']}], ci_only=True)
+        with self.assertRaisesRegex(ValueError, 'full.*CI'):
+            rt.commands_ok([{'name':'regression','argv':['bash','-lc','python3 tools/check.py --quiet']}], ci_only=True)
+        for command in ("python3 'tools/check.py' --quiet",
+                        'python3 tools/check.py; echo done',
+                        'python3 tools/check.py&&echo done'):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, 'full.*CI'):
+                rt.commands_ok([{'name':'regression','argv':['bash','-lc',command]}], ci_only=True)
+
+    def test_full_execution_accepts_yaml_quoted_values(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root/'dev').mkdir()
+            for value in ('ci-only', "'ci-only'", '"ci-only"'):
+                (root/'dev/agents-config.md').write_text(f'verify-policy:\n  full-execution: {value}\n')
+                self.assertEqual(rt.full_execution(root), 'ci-only')
+
+    def test_ci_only_full_is_rejected_before_remote_resolution_or_push(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(['git','init','-q','-b','feat/topic'],cwd=root,check=True)
+            subprocess.run(['git','config','user.email','test@example.test'],cwd=root,check=True)
+            subprocess.run(['git','config','user.name','Test'],cwd=root,check=True)
+            (root/'dev').mkdir()
+            (root/'dev/agents-config.md').write_text('```yaml\nverify-policy:\n  full-execution: ci-only\n```\n')
+            (root/'tracked').write_text('x')
+            subprocess.run(['git','add','.'],cwd=root,check=True)
+            subprocess.run(['git','commit','-qm','base'],cwd=root,check=True)
+            commands = root/'commands.json'
+            commands.write_text(json.dumps([{'name':'regression','argv':['{python}','tools/check.py']}]))
+            subprocess.run(['git','add','commands.json'],cwd=root,check=True)
+            subprocess.run(['git','commit','-qm','commands'],cwd=root,check=True)
+            args = SimpleNamespace(repo=str(root), instance='judge/query', commands=str(commands),
+                                   out=str(root/'out'), push=True, want=1, timeout=30)
+            with patch.object(rt, 'resolve_local', side_effect=AssertionError('remote touched')) as resolve:
+                with self.assertRaisesRegex(ValueError, 'full.*CI'):
+                    rt.start(args)
+                resolve.assert_not_called()
 
     def test_resolution_reuses_declared_legacy_and_no_config_write(self):
         with tempfile.TemporaryDirectory() as td:
