@@ -4,8 +4,8 @@ version: 0.7.1
 default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally auto-dispatched by the
-  main session as a fresh host-agent conversation (model per the
-  agents-config dispatch.model entry for the current host, by ticket tier):
+  main session as a fresh host-agent conversation (development model
+  resolved from dispatch.hosts for the current host, by ticket tier):
   TDD in a dedicated worktree, per-round scope-drift checks with one-way
   verify-tier escalation, on-disk evidence for the ticket's tier gate,
   then independent /ai-review, BLOCKER fixes, and the merge request made
@@ -50,7 +50,7 @@ allowed-tools:
 运行身份：
 
 - 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
-- 被派发对话的模型取 `dispatch.model.<当前宿主>` 按票档位取 default / escalated 清单的第一个当前可用模型（light / scoped → default；full / 集成 / 高风险 → escalated）
+- 被派发对话按「派发协议」先校验配置，再用 `resolve --role development` 取当前宿主 `development.default / escalated` 的原生角色绑定（light / scoped → default；full / 集成 / 高风险 → escalated）；不得只读模型名后在普通子会话里静默继承
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
 ---
@@ -128,7 +128,7 @@ allowed-tools:
 - **流程核对（评审前置门）**：`python3 ../shared/scripts/process_check.py --issue <主工作区票文件> --repo <本票 worktree> --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>`——红线登记、漂移登记、阈值 / 集成票档位下限、evidence 头与 HEAD 一致性一次判完；退出码非 0 → 补登记 / 升档补验证 / 刷新 evidence 后重跑（计入自修复轮次），通过才发起评审。评审员只读这份结果，不重做流程核对
 - 票置 `in-review`；push 分支
 - **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审对话模型取 `dispatch.model.<当前宿主>` 与本票同档清单的首选可用项）：
+- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort，不随开发票档变化）：
   - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec，并传入流程核对 JSON 路径；保留评审对话句柄（如 agentId），供 Step 7 复审续接
   - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
   - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告

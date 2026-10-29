@@ -12,21 +12,61 @@ tracker: gitlab
 # 主分支名：worktree 与 MR 的基准分支
 main-branch: main
 
-# 执行派发（issue 生成后由主会话自动派发并监督到合并，无需人工触发）
+# 执行派发（主会话监督到合并；开发与独立评审使用不同的隔离会话）
 dispatch:
-  executor: subagent   # subagent = 主会话通过宿主 agent 的新开独立对话能力执行 /implement
-                       # （宿主无关：Claude Code = Task，ZCode = Agent，Codex / WorkBuddy =
-                       #  各自的新会话 / 派发机制；宿主无此能力时按派发协议兜底）
-  # 被派发对话模型：按宿主 agent 分别配置（各宿主可选模型阵容不同），每个宿主条目由人在 /setup-dev 确认。
-  # 主会话按自身所在宿主取对应条目；当前宿主无条目 → 停下请人确认后补写，不跨宿主套用、不自行挑选。
-  # 按票分档：default 用于 light / scoped 票的实现与评审；escalated 用于 full 档票、集成票、高风险票，
-  #   以及评审达 review-round-alert 轮后的续修。清单内按优先级排序，取第一个当前可用的模型。
-  model:
-    <宿主名，如 claude-code / zcode / codex>:
-      default: [<宿主具体模型，推荐经济性最高、速度快的一档>]
-      escalated: [<宿主具体模型，推荐能力最强的一档>]
-      reasoning-effort: {default: medium, escalated: high}   # 宿主支持推理强度时填写，否则删去
+  schema-version: 1
+  executor: subagent
   parallel-max: 2      # frontier 中 declared-scope 互不相交的票可并行派发的上限；1 = 串行
+  # 角色语义：
+  # - supervisor-review：主会话监督 / 符合性核对 + 独立 /ai-review；同模型但不同执行上下文。
+  # - development：独立 /implement；light / scoped 用 default，full / 集成 / 高风险及评审预警后用 escalated。
+  # 本模板按 2026-10-29 用户确认阵容填写；development 两档同值表示不另设第三型号。
+  # 主会话开工前必须核对 supervisor-review 的 model / effort；不符即停，不静默继承或跨宿主套用。
+  hosts:
+    codex:
+      supervisor-review:
+        model: gpt-6-astra
+        effort: low
+      development:
+        default:
+          model: gpt-6.1-sol
+          effort: medium
+        escalated:
+          model: gpt-6.1-sol
+          effort: medium
+    claude-code:
+      supervisor-review:
+        model: claude-opus-5-5
+        effort: medium
+      development:
+        default:
+          model: claude-sonnet-5-5
+          effort: medium
+        escalated:
+          model: claude-sonnet-5-5
+          effort: medium
+    zcode:
+      supervisor-review:
+        model: bigmodel-api/GLM-5.3
+        effort: high
+      development:
+        default:
+          model: deepseek/deepseek-flash
+          effort: high
+        escalated:
+          model: deepseek/deepseek-flash
+          effort: high
+    dsh:
+      supervisor-review:
+        model: deepseek-official/deepseek-v4-pro
+        effort: high
+      development:
+        default:
+          model: deepseek-official/deepseek-flash
+          effort: high
+        escalated:
+          model: deepseek-official/deepseek-flash
+          effort: high
 
 # 质量门命令
 quality-gate:
@@ -176,7 +216,7 @@ conformance:
                           #   落盘留痕），scoped / full / 集成票仍一律必核（按实测档位 tier-target 判定，升档票不免核）
   light-sample: 1/3       # sampled 模式下 light 票的抽查比例
   checker: main-session   # main-session = 主会话亲核（默认，输入有界不读全量代码）；
-                          #   dispatched = 上下文紧张时按派发协议开独立对话核对（模型取 dispatch.model escalated 首选）
+                          #   dispatched = 上下文紧张时按派发协议开独立对话核对（模型取当前宿主 supervisor-review）
 
 # 预授权机械刷新：随生产文件变更必然联动、可由机器证明「只动这些字段」的派生物，
 # 刷新不视为「修改既有测试 / 红线绕过验收」，无需停下等人授权；须在 impl-log 逐文件登记，评审独立复核 diff 只含所列字段
@@ -230,6 +270,6 @@ gitlab-ci: manual
 - 整机算力预算：scoped / full / 归因补跑经 `shared/scripts/test_slots.py run` 包装执行（预算真源是机器级 `~/.cache/agent-dev/slots/budget.json`，`host-budget` 节为镜像）；单项超时撞高负载（load-peak > ncpu）先串行重跑，通过记 `load-flake`，不直接归因
 - 验证档位制：交付验证按票 frontmatter 的 `verify-tier` 分档执行（规则见上方 `verify-policy`），full 不再每票必跑；触发器分两级（full 级 = 迁移 / 鉴权，票内全量；scoped+ 级含公共接口签名，跑反向闭包），选择集大小不是升档理由；每 feature 至少一次 full 由集成票（DAG 终点票）保证，跨 feature 回归由 `daily-regression`（main 每工作日一次 full）兜底；集成票唯一例外是「模块隔离认定」——feature 全程只动不被外部依赖的叶子模块时按 module-scoped 跑该模块全闭包，不机械全仓。
 - `ocr.mode: delegate` 是**默认模式而非降级**：OCR 侧不调 LLM（只做文件筛选 + 规则解析），评审智能由宿主 agent 内新开的独立对话承担；无 LLM 端点、未接 CI 也能获得同等纪律的独立评审
-- 评审与实现的被派发对话模型取 `dispatch.model.<当前宿主>` 按票档位取 default / escalated 清单的第一个当前可用模型（各宿主条目由 `/setup-dev` 逐宿主请人确认）；评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖模型档位
+- 主会话监督 / 符合性核对与独立评审使用当前宿主 `dispatch.hosts.<宿主>.supervisor-review`，但评审必须另开独立会话；实现按票档取 `development.default / escalated`。开工前用 `shared/scripts/dispatch_config.py validate` 校验、`resolve` 解析原生参数，缺当前宿主或校验失败即停，不跨宿主套用。评审严格性由 rule.json、票 DoD 与红线复核保证，不依赖开发票档
 - 规则文件 `.opencodereview/rule.json` 结构：`include[]` / `exclude[]`（glob，优先级最高）/ `rules[{path, rule}]`（第一条匹配生效）；评审规则文本从 `REVIEW.md` 提炼维护
 - 本文件不进 GLOSSARY；术语口径仍以 `./docs/GLOSSARY.md` 为准

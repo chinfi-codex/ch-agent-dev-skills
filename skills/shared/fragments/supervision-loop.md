@@ -19,7 +19,7 @@
    - **逐条核映射**：对照 impl-log「需求覆盖矩阵」，打开映射指向的代码位置核对语义（不只看 evidence 退出码；至少覆盖全部 ★ 关键路径行），逐条判 `已实现 / 语义偏差 / 未实现`；只照抄矩阵不打开代码等于没核
    - **集成票加做 feature 级核对**：对 tech-spec 全节（不只票锚点）枚举 feature 级需求点，对照本 feature 各票覆盖矩阵的并集，抓票间接缝缺口（A 票以为 B 票做）
    - 结论按模板 `shared/templates/conformance.md` 落盘 `impl/<issue-id>/conformance-<issue-id>.md`（`verdict: conform / deviate / missing` + `commit`；`deviate / missing` 逐条标打回原因分类：未实现 / 语义偏差 / DoD 本身窄，供复盘归因）
-   - **执行身份**：默认主会话亲核（输入有界：票全文 + spec 锚点节 + diff stat + 覆盖矩阵 + 抽查代码，不读全量代码）；上下文紧张时按派发协议开独立对话执行（模型取 `dispatch.model` escalated 首选），主会话只读结论；核对产物全部落盘，上下文只留结论行
+   - **执行身份**：默认主会话亲核（输入有界：票全文 + spec 锚点节 + diff stat + 覆盖矩阵 + 抽查代码，不读全量代码）；其模型 / effort 必须已按派发协议核对为当前宿主 `supervisor-review`。上下文紧张时按派发协议开独立对话执行（同样取 `supervisor-review`，用 `resolve --role review` 绑定独立角色），主会话只读结论；核对产物全部落盘，上下文只留结论行
    - **分档触发**按 `conformance.mode`：`always`（默认）每票必核；`sampled` 时实测 light 档票抽查（未抽中写 `verdict: skipped` 落盘留痕），scoped / full / 集成票一律必核
    - 核对通过后跑**收口流程核对** `--phase close`（= `--phase merge` 全部项 + conformance 文件存在、`verdict: conform`、commit 与 HEAD 本票文件一致），通过才执行**合并动作序列**——合并（gitlab：`glab mr merge <IID> --delete-source-branch`；local：主工作区 `git merge --no-ff feat/<feature-slug>-<issue-id>`）→ 票置 `done` → 追加 `merged` 事件，三步一笔（见「状态与事件写入契约」）——随后按「派发协议」清场序列收尾；合并冲突先在 worktree 内 rebase `main-branch`、重跑 `quality-gate.fast` 再合
 4a. **CI-only full（`verify-policy.full-execution: ci-only`）**：票级 merge / close 只核循环内判决与 `full-deferred: ci`，不得要求票内 `tier-executed: full`、`full-commit` 或 `full-ref`，也不得用 `remote_tests.py` 补跑 full。票合入需求分支只表示代码已集成；主会话随后普通 push 需求分支，由判读机 CI 在被 push 提交上执行 full。feature / main 放行另核 CI run 的 ref、commit、tree、pass 与需求级验收：执行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，未通过不得合并 main；分支前进或 tree 改变即重新验证。清单外失败由 CI 执行器在 base 隔离检出中自动补跑单项并归因，agent 只读 `new_failures` / `preexisting_failures` / `unattributed_failures` 与签名指针，不读整套日志。符合自动回退条件的 feature 分支由独立 CI job 二分责任提交、复跑原失败项、生成回修票并普通 push；回退后的新 CI 通过才恢复放行资格。责任不唯一、revert 冲突、复跑仍红或基线不可用时保持未验证，不自动试错，也不回退 main / query / 票分支。pandu 的 full 只有 push / 手工 dispatch CI 路径：不启用 nightly，不由 push 自动部署。每日回归与人工重跑也只走同一 CI workflow，本机不可用时不降级补跑
@@ -36,7 +36,7 @@
 - **队列即 DAG**：不另建队列文件——门②确认的票清单 + 阻塞边即队列，每轮按第 1 步重算 frontier 取票
 - **单循环、默认串行**：同一项目同时只跑一个无人值守循环——开跑前先确认没有仍在运行的旧循环或遗留定时唤醒，有则先停掉再进入本模式；离场期间并行派发上限按 1（串行）执行，仅当人在授权里明确同意并行时才按 `dispatch.parallel-max`
 - **越界决策不擅自拍板**：遇到授权边界外又必须决定的事 → 决策内容与推荐方向写进 `decisions.md`，该票置 `needs-human`，继续跑其他票
-- **评审轮次预警**：同票评审达 `review-round-alert` 轮 → 主会话读最近两轮 BLOCKER，判断是范围过大（拆出后续票）、首轮漏报堆积（要求评审一次列全）还是模型能力不足（续修改用 `escalated` 模型）；判定追加为 `digest` 事件，不在此停等人
+- **评审轮次预警**：同票评审达 `review-round-alert` 轮 → 主会话读最近两轮 BLOCKER，判断是范围过大（拆出后续票）、首轮漏报堆积（要求评审一次列全）还是模型能力不足（续修改用当前宿主 `development.escalated`）；判定追加为 `digest` 事件，不在此停等人
 - **进度留痕**：每关一票、每打回一次、每张 `needs-human`，事件由「状态与事件写入契约」自然落 `progress.jsonl`，本模式不再另记 progress.md；`progress.jsonl` + 票 frontmatter 是新会话接力的唯一依据
 - **暂停改写为记录**：第 7 步的暂停条件在本模式下不中断循环——记 `decisions.md`、票置 `needs-human` 后继续跑其他票；命中**停止条件**才停：frontier 空且全部 `done`（正常完成）/ 剩余票全部 `needs-human` 或 `阻塞` / 人给的预算或时限到 / 命中下方熔断。任何停止都做三件事：追加 `digest` 事件（总结写进 note）、撤销本次创建的定时唤醒（循环停了心跳不许还在）、按第 6 步的收尾总结格式向用户汇报
 - **熔断即停，不 retry**：命中任一立即停止派发与合并、追加 `circuit-break` 事件（原因写进 note）并撤销定时唤醒，不安排「过会儿再试」，保持停止等人裁决：①账号额度用量达授权阈值（默认 80%），或已额度耗尽 / 持续限流 / 鉴权失败；②定时唤醒续跑时连续 2 次唤醒没有任何票状态推进（空转只烧额度，不产出）
