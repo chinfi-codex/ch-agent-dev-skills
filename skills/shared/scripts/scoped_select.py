@@ -18,11 +18,13 @@
 - 已删除代码、解析失败、没有可证明覆盖的代码、存在动态加载点且变更模块无静态入边：
   输出 enumerable: false。--run 对此输出 deferred 不执行（套件级验证由集成票 full /
   每日回归兜底，evidence 记 scoped-deferred: closure-incomplete）；--fallback-run 强制全量。
+- 可枚举选择集先跑 direct 再跑 indirect；--budget-seconds 只限制 indirect，到点停发新项，
+  在途项自然结束。已执行项全绿时输出 budget-partial 与完整延期分区，direct 不得延期。
 
 用法：
   python3 scoped_select.py --repo <仓> [--base REV | --changed F ...] [--list | --run]
-      [--jobs N] [--timeout S] [--map PATH] [--scan DIR ...] [--test-dir DIR]
-      [--categories PATH] [--fallback-run]
+      [--jobs N] [--timeout S] [--budget-seconds S] [--report PATH] [--map PATH]
+      [--scan DIR ...] [--test-dir DIR] [--categories PATH] [--fallback-run]
   --categories：测试分类清单（可选），只读 `gate: helper` 分类的 tests 名单——helper 用例
       不进测试清单与选择集（它们由公开入口间接覆盖，单独执行会误报）。
 退出码：--list 恒 0；--run 有失败即 1，deferred 恒 0。只依赖 Python 3.8+ 标准库。
@@ -33,7 +35,8 @@ import json
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 SKIP_PARTS = {'__pycache__', 'node_modules', '.git', '.venv', 'venv', 'dist', 'runs'}
@@ -396,6 +399,63 @@ def run_tests(repo, test_dir, names, jobs, timeout):
     return ran
 
 
+def run_tests_with_budget(repo, test_dir, names, jobs, timeout, budget_seconds, clock=time.monotonic):
+    """预算到点只停发新项；在途项照常结束，未启动项完整返回为 deferred。"""
+    started = clock()
+    remaining = iter(names)
+    pending = {}
+    completed = {}
+    exhausted = False
+
+    def one(name):
+        cmd = [sys.executable, name] if name.endswith('.py') else ['bash', name]
+        try:
+            r = subprocess.run(cmd, cwd=repo / test_dir, capture_output=True, timeout=timeout)
+            return {'name': name, 'exit': r.returncode}
+        except subprocess.TimeoutExpired:
+            return {'name': name, 'exit': 'timeout'}
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        while len(pending) < jobs:
+            try:
+                name = next(remaining)
+            except StopIteration:
+                exhausted = True
+                break
+            pending[pool.submit(one, name)] = name
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                name = pending.pop(future)
+                completed[name] = future.result()
+            while len(pending) < jobs and not exhausted:
+                if clock() - started >= budget_seconds:
+                    exhausted = True
+                    break
+                try:
+                    name = next(remaining)
+                except StopIteration:
+                    exhausted = True
+                    break
+                pending[pool.submit(one, name)] = name
+    deferred = list(remaining)
+    ran = [completed[name] for name in names if name in completed]
+    return ran, deferred, clock() - started
+
+
+def revision(repo, rev):
+    result = _git(repo, 'rev-parse', rev)
+    return result.stdout.decode().strip() if result.returncode == 0 else None
+
+
+def emit_result(result, report_path=None):
+    text = json.dumps(result, ensure_ascii=False, indent=2)
+    if report_path:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(text + '\n', encoding='utf-8')
+    print(text)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='scoped_select.py',
@@ -408,6 +468,9 @@ def main(argv=None):
     mode.add_argument('--run', action='store_true', help='并行执行选择集')
     ap.add_argument('--jobs', type=int, default=6, help='并发数，默认 6')
     ap.add_argument('--timeout', type=int, default=300, help='单项超时秒数，默认 300')
+    ap.add_argument('--budget-seconds', type=float, default=0,
+                    help='间接闭包墙钟预算秒数；0 不限。到点停发新项，直接测试不受影响')
+    ap.add_argument('--report', help='机器报告输出路径（相对 --repo）；同时仍打印到 stdout')
     ap.add_argument('--map', dest='map_path', help='dir-map 路径，默认 <repo>/dev/scoped-map.yaml')
     ap.add_argument('--scan', action='append', default=[], help='import 图扫描根（可重复，默认 tools skills）')
     ap.add_argument('--test-dir', default='tools/tests', help='测试目录，默认 tools/tests')
@@ -415,40 +478,71 @@ def main(argv=None):
     ap.add_argument('--fallback-run', action='store_true',
                     help='闭包不可证明时仍全量执行（默认 deferred 不执行，由集成票/每日回归兜底）')
     args = ap.parse_args(argv)
+    if args.budget_seconds < 0:
+        ap.error('--budget-seconds 须 ≥ 0')
 
     repo = Path(args.repo).resolve()
     scan_roots = tuple(args.scan) or ('tools', 'skills')
     map_path = Path(args.map_path) if args.map_path else None
     categories = Path(args.categories) if args.categories else None
+    report_path = Path(args.report) if args.report else None
+    if report_path and not report_path.is_absolute():
+        report_path = repo / report_path
     if args.changed:
         base, changed = None, sorted(args.changed)
     else:
         base = args.base or default_base(repo)
         changed = changed_files(repo, base)
-    result = {'base': base, **select(repo, changed, scan_roots, args.test_dir, map_path, categories)}
+    result = {'schema': 'scoped-selection/v1', 'base': base,
+              **select(repo, changed, scan_roots, args.test_dir, map_path, categories)}
     result['execution_scope'] = ('full_fallback' if not result['enumerable'] else
                                  'selected' if result['selected'] else 'empty')
 
     if not args.run:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_result(result, report_path)
         return 0
 
+    result['commit'] = revision(repo, 'HEAD')
+    result['tree'] = revision(repo, 'HEAD^{tree}')
+    result['budget_seconds'] = args.budget_seconds
     if not result['enumerable'] and not args.fallback_run:
         # 闭包不可证明时全量 = 变相每票 full；改为延期：不执行、如实输出，
         # 套件级验证由集成票 full 与每日回归兜底（调用方记 evidence scoped-deferred）。
         result['deferred'] = 'closure-incomplete'
         result['ran'] = []
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_result(result, report_path)
         return 0
 
     names = result['selected']
     if not result['enumerable']:
         helpers = load_helper_tests(categories or (repo / 'tools' / 'test_categories.yaml'))
         names = [t for t in test_files(repo, args.test_dir) if t not in helpers]
-    ran = run_tests(repo, args.test_dir, names, max(1, args.jobs), args.timeout)
+        ran = run_tests(repo, args.test_dir, names, max(1, args.jobs), args.timeout)
+        deferred_tests = []
+    else:
+        direct = [name for name in names if name in set(result['direct'])]
+        indirect = [name for name in names if name not in set(result['direct'])]
+        started = time.monotonic()
+        ran = run_tests(repo, args.test_dir, direct, max(1, args.jobs), args.timeout)
+        if args.budget_seconds > 0:
+            indirect_ran, deferred_tests, indirect_seconds = run_tests_with_budget(
+                repo, args.test_dir, indirect, max(1, args.jobs), args.timeout,
+                args.budget_seconds)
+            result['indirect_elapsed_seconds'] = round(indirect_seconds, 3)
+        else:
+            indirect_ran = run_tests(repo, args.test_dir, indirect, max(1, args.jobs), args.timeout)
+            deferred_tests = []
+        ran.extend(indirect_ran)
+        result['elapsed_seconds'] = round(time.monotonic() - started, 3)
     result['ran'] = ran
+    result['deferred_tests'] = deferred_tests
     result['broken'] = [r['name'] for r in ran if r['exit'] != 0]
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if deferred_tests:
+        result['execution_scope'] = 'selected-partial'
+        result['stop_reason'] = 'time-budget'
+        if not result['broken']:
+            result['deferred'] = 'budget-partial'
+    emit_result(result, report_path)
     return 1 if result['broken'] else 0
 
 

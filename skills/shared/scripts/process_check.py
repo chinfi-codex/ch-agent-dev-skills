@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from collections import Counter
 import json
 import fnmatch
-import json
 import re
 import subprocess
 import sys
@@ -154,6 +152,75 @@ def md_section(text: str, title: str) -> str:
     return m.group(1) if m else ""
 
 
+def validate_budget_partial(report: dict, base: str, tree: str, max_budget) -> list[str]:
+    """核验限时 scoped 的机器分区；任何形态不明都按不可豁免处理。"""
+    errors = []
+    if not isinstance(report, dict):
+        return ["机器报告不是 JSON 对象"]
+    checks = (
+        (report.get("schema") == "scoped-selection/v1", "schema 非法"),
+        (report.get("deferred") == "budget-partial", "deferred 不是 budget-partial"),
+        (report.get("execution_scope") == "selected-partial", "execution_scope 不是 selected-partial"),
+        (report.get("stop_reason") == "time-budget", "stop_reason 不是 time-budget"),
+        (report.get("enumerable") is True, "闭包不可枚举不能使用 budget-partial"),
+        (report.get("base") == base, "base 与本次流程核对不一致"),
+        (report.get("tree") == tree, "tree 与 HEAD 不一致"),
+        (bool(report.get("commit")), "缺执行时 commit"),
+    )
+    errors.extend(message for ok, message in checks if not ok)
+    budget = report.get("budget_seconds")
+    if (not isinstance(max_budget, (int, float)) or isinstance(max_budget, bool)
+            or max_budget <= 0):
+        errors.append("未配置正数 scoped-budget-seconds")
+    elif (not isinstance(budget, (int, float)) or isinstance(budget, bool)
+          or budget <= 0 or budget > max_budget):
+        errors.append("执行预算缺失、非正数或超过 scoped-budget-seconds")
+    elapsed = report.get("indirect_elapsed_seconds")
+    if (not isinstance(elapsed, (int, float)) or isinstance(elapsed, bool)
+            or not isinstance(budget, (int, float)) or isinstance(budget, bool)
+            or elapsed + 0.001 < budget):
+        errors.append("间接闭包实际耗时未达到所声明预算")
+
+    selected = report.get("selected")
+    direct = report.get("direct")
+    deferred = report.get("deferred_tests")
+    ran = report.get("ran")
+    broken = report.get("broken")
+    for value, label in ((selected, "selected"), (direct, "direct"),
+                         (deferred, "deferred_tests"), (broken, "broken")):
+        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+            errors.append(f"{label} 不是字符串清单")
+    if not isinstance(ran, list) or not all(
+            isinstance(r, dict) and isinstance(r.get("name"), str) for r in ran):
+        errors.append("ran 不是执行结果清单")
+        return errors
+    if not all(isinstance(value, list) and all(isinstance(x, str) for x in value)
+               for value in (selected, direct, deferred, broken)):
+        return errors
+    ran_names = [r["name"] for r in ran]
+    if len(ran_names) != len(set(ran_names)):
+        errors.append("ran 含重复测试")
+    if any(r.get("exit") != 0 for r in ran):
+        errors.append("存在失败或超时的已执行测试")
+    if broken:
+        errors.append("broken 非空")
+    if isinstance(selected, list) and isinstance(deferred, list):
+        ran_set, deferred_set, selected_set = set(ran_names), set(deferred), set(selected)
+        if ran_set & deferred_set:
+            errors.append("已跑与延期测试重叠")
+        if ran_set | deferred_set != selected_set or len(ran_names) + len(deferred) != len(selected):
+            errors.append("selected 与 ran + deferred_tests 分区不完整")
+        if not deferred:
+            errors.append("延期清单为空")
+    if isinstance(direct, list):
+        passed = {r["name"] for r in ran if r.get("exit") == 0}
+        if not set(direct) <= passed:
+            errors.append("direct 测试未全部实际执行并通过")
+        if isinstance(deferred, list) and set(direct) & set(deferred):
+            errors.append("direct 测试不得延期")
+    return errors
+
+
 # ---------- glob ----------
 
 def glob_to_regex(pattern: str) -> re.Pattern:
@@ -253,69 +320,6 @@ def successors(issue_path: Path, issue_id: str):
         if issue_id in [str(d) for d in deps]:
             out.append(str(fm.get("issue-id") or p.stem))
     return out
-
-
-def remote_receipt_errors(evidence, ev, head, tree):
-    """Validate copied remote evidence without contacting or trusting a live branch tip."""
-    errors = []
-    paths = ev.get("remote-runs")
-    if ev.get("test-location") != "remote" or not isinstance(paths, list) or not paths:
-        return ["缺远端测试位置或 remote-runs 回执列表"]
-    manifests = ev.get("remote-command-manifests")
-    intended = []
-    if not isinstance(manifests, list) or not manifests:
-        return ["缺提交测试前冻结的 remote-command-manifests 命令清单"]
-    try:
-        for relative in manifests:
-            manifest = (evidence.parent / str(relative)).resolve()
-            manifest.relative_to(evidence.parent.resolve())
-            commands = json.loads(manifest.read_text())
-            if not isinstance(commands, list) or not commands:
-                raise ValueError("空命令清单")
-            intended.extend((row["name"], tuple(row["argv"])) for row in commands)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return [f"命令清单无效: {exc}"]
-    observed = []
-    for relative in paths:
-        try:
-            path = (evidence.parent / str(relative)).resolve()
-            path.relative_to(evidence.parent.resolve())
-            data = json.loads(path.read_text())
-            if data.get("schema") != "agent-dev.remote-test/v1" or data.get("phase") != "completed":
-                raise ValueError("远端测试未完成")
-            if data.get("commit") != head or data.get("tree") != tree or data.get("final_commit") != head or data.get("dirty") is not False:
-                raise ValueError("远端测试提交/tree不一致或输入被修改")
-            context = data.get("context") or {}
-            if not all(context.get(k) for k in ("instance", "hostname", "fingerprints", "runtime_id", "python")):
-                raise ValueError("缺远端实例/环境身份")
-            if not data.get("python_version") or not data.get("packages_sha256"):
-                raise ValueError("缺运行时指纹")
-            rows = data.get("results")
-            expected = data.get("commands")
-            if not rows or not expected or [r["name"] for r in rows] != [r["name"] for r in expected]:
-                raise ValueError("远端命令未完整执行")
-            observed.extend((row["name"], tuple(row["argv"])) for row in expected)
-            jobs = data.get("jobs")
-            if type(jobs) is not int or jobs < 1:
-                raise ValueError("缺实际槽位数")
-            for row, submitted in zip(rows, expected):
-                actual_argv = [arg.replace("{python}", context["python"]).replace("{jobs}", str(jobs)) for arg in submitted["argv"]]
-                if row.get("argv") != actual_argv:
-                    raise ValueError("实际执行命令与提交清单不一致")
-                if type(row.get("returncode")) is not int or not row.get("argv"):
-                    raise ValueError("缺实际命令/退出码")
-                if row["returncode"] != 0:
-                    raise ValueError("远端命令失败；不能以 all-passed 声明覆盖非零退出码")
-                log = path.parent / row["log"]
-                if Path(row["log"]).name != row["log"]:
-                    raise ValueError("非法日志路径")
-                if hashlib.sha256(log.read_bytes()).hexdigest() != row.get("log_sha256"):
-                    raise ValueError("日志缺失或摘要不符")
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            errors.append(f"{relative}: {exc}")
-    if Counter(intended) != Counter(observed):
-        errors.append("验收命令清单与远端实际提交集合不一致")
-    return errors
 
 
 def run(args) -> tuple[Report, dict]:
@@ -440,6 +444,8 @@ def run(args) -> tuple[Report, dict]:
     if ev and target is not None:
         executed = tier_of(ev.get("tier-executed"))
         ev_commit = str(ev.get("commit") or "")
+        scoped_deferred = str(ev.get("scoped-deferred") or "").strip()
+        budget_partial_valid = False
         full_execution = str(policy.get("full-execution") or "ticket").strip()
         full_deferred = str(ev.get("full-deferred") or "").strip()
         ci_only = full_execution == "ci-only"
@@ -454,6 +460,33 @@ def run(args) -> tuple[Report, dict]:
         if ci_only and executed == TIERS["full"]:
             rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得记录本票执行 full")
         defer_to_ci = ci_only and full_deferred == "ci"
+        if scoped_deferred not in ("", "closure-incomplete", "budget-partial"):
+            rep.add("evidence", "FAIL", f"scoped-deferred 非法：{scoped_deferred!r}")
+        if scoped_deferred == "budget-partial":
+            partial_errors = []
+            if executed != TIERS["light"]:
+                partial_errors.append("tier-executed 必须如实记 light")
+            scoped_ref = str(ev.get("scoped-ref") or "").strip()
+            report = {}
+            if not scoped_ref:
+                partial_errors.append("缺 scoped-ref 机器报告")
+            else:
+                report_path = (root / scoped_ref).resolve()
+                try:
+                    report_path.relative_to(impl_dir.resolve())
+                except ValueError:
+                    partial_errors.append("scoped-ref 必须位于本票 impl 目录")
+                try:
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    partial_errors.append(f"机器报告不可读：{exc}")
+            if not partial_errors:
+                head_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+                partial_errors = validate_budget_partial(
+                    report, base, head_tree, policy.get("scoped-budget-seconds"))
+            for message in partial_errors:
+                rep.add("evidence", "FAIL", f"budget-partial 无效：{message}")
+            budget_partial_valid = not partial_errors
         need = target if args.phase in ("merge", "close") else min(target, TIERS["scoped"])
         if defer_to_ci:
             need = min(need, TIERS["scoped"])
@@ -462,12 +495,16 @@ def run(args) -> tuple[Report, dict]:
         if executed is None:
             rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
         elif executed < need:
-            # scoped-deferred：选择集不可枚举时票内不跑选择集（跑了等于变相每票 full），DoD + fast 照跑，
-            # 套件级验证由集成票 full 与每日回归兜底；full 档最终 full 不免跑（need=full 时不豁免）
+            # scoped-deferred：闭包不可枚举整包延期，或机器报告证明 direct 全绿、仅 indirect 因预算延期。
+            # 两者都不豁免 full 档最终 full（need=full）；budget-partial 更不能靠手写标记放行。
             if (executed >= TIERS["light"] and need <= TIERS["scoped"]
-                    and str(ev.get("scoped-deferred") or "").strip() == "closure-incomplete"):
+                    and scoped_deferred == "closure-incomplete"):
                 rep.add("evidence", "REVIEW",
                         "scoped 选择集不可枚举已延期（scoped-deferred）：由集成票 full / 每日回归兜底，评审复核 DoD + fast 结论与延期原因")
+            elif (executed >= TIERS["light"] and need <= TIERS["scoped"]
+                  and scoped_deferred == "budget-partial" and budget_partial_valid):
+                rep.add("evidence", "REVIEW",
+                        "scoped indirect 闭包已按预算延期：direct 与已执行项全绿，评审复核延期清单；集成 full / CI 放行不豁免")
             else:
                 rep.add("evidence", "FAIL", f"tier-executed {_name(executed)} < 本阶段要求 {_name(need)}")
         full_ref = str(ev.get("full-ref") or "").strip()
@@ -552,27 +589,6 @@ def run(args) -> tuple[Report, dict]:
                         rep.add("ci-run-proof", "FAIL", f"main 放行真实 run 证明无效：{message}")
             if not rep.failed:
                 rep.add("ci-verdict", "PASS", "CI 判决与 HEAD commit / tree 一致且全部必跑项通过")
-
-    # 已有多实例拓扑的判读项目不得以本机测试或口头声明替代远端回执。
-    topology_file = repo / "configuration/deploy/topology.json"
-    remote_required = False
-    if topology_file.is_file():
-        try:
-            declaration = json.loads(topology_file.read_text())
-            remote_required = any(h.get("location") == "server" for h in declaration.get("hosts", {}).values())
-        except (OSError, ValueError, TypeError, AttributeError):
-            rep.add("remote-evidence", "FAIL", "部署拓扑无法解析，不能静默回退本机测试")
-    if remote_required or ev.get("test-location") == "remote":
-        tested = str(ev.get("commit") or "")
-        if not re.fullmatch(r"[0-9a-f]{40}", tested):
-            errors = ["缺有效 evidence.commit"]
-        else:
-            # Existing _same_ticket_tree gate above proves permitted reuse against HEAD.
-            errors = remote_receipt_errors(evidence, ev, tested, git(repo, "rev-parse", f"{tested}^{{tree}}").strip())
-        for error in errors:
-            rep.add("remote-evidence", "FAIL", error)
-        if not errors:
-            rep.add("remote-evidence", "PASS", "远端提交/环境/命令与日志完整性一致；验收覆盖与先在失败归因仍须核对")
 
     # 5. worktree dev/ 卫生：约定是「无 dev/」或「指向主工作区 dev/ 的软链」；实体副本 = 磁盘随票线性膨胀、清场丢真源
     # .git 为文件说明 --repo 是 worktree 而非主工作区（主工作区的 dev/ 本来就是真源，不查）

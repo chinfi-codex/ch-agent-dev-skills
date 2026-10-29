@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scoped_select.py"
 sys.path.insert(0, str(SCRIPT.parent))
@@ -185,6 +186,62 @@ class SyntheticRepo(unittest.TestCase):
         self.assertEqual(report['execution_scope'], 'selected')
         self.assertEqual(report['broken'], ['bad1.py'])
         self.assertEqual(sorted(r['name'] for r in report['ran']), ['bad1.py', 'ok1.py'])
+
+    def test_direct_tests_run_before_indirect_closure(self):
+        order = 'from pathlib import Path\n'
+        build(self.root, {
+            'tools/tests/a_smoke.py': (order + 'Path("order.log").open("a").write("indirect\\n")\n'
+                                       'if False:\n    import cli\n'),
+            'tools/tests/z_direct.py': order + 'Path("order.log").open("a").write("direct\\n")\n',
+        })
+        code, report = self.run_cli('--run', '--jobs', '1', '--changed', 'skills/s1/scripts/core.py',
+                                    '--changed', 'tools/tests/z_direct.py')
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report['direct'], ['z_direct.py'])
+        self.assertEqual((self.root / 'tools/tests/order.log').read_text(), 'direct\nindirect\n')
+
+    def test_budget_stops_launching_and_preserves_partition(self):
+        clock = mock.Mock(side_effect=[0, 20, 20])
+        completed = subprocess.CompletedProcess(['x'], 0)
+        with mock.patch.object(scoped_select.subprocess, 'run', return_value=completed) as run:
+            ran, deferred, elapsed = scoped_select.run_tests_with_budget(
+                self.root, 'tools/tests', ['a.py', 'b.py', 'c.py'], 1, 5, 10, clock=clock)
+        self.assertEqual([r['name'] for r in ran], ['a.py'])
+        self.assertEqual(deferred, ['b.py', 'c.py'])
+        self.assertEqual(elapsed, 20)
+        self.assertEqual(run.call_count, 1)
+
+    def test_budget_partial_writes_machine_report(self):
+        build(self.root, {'tools/tests/z_direct.py': 'print("direct")\n'})
+        indirect_ran = [{'name': 'a_smoke.py', 'exit': 0}]
+        with mock.patch.object(scoped_select, 'run_tests_with_budget',
+                               return_value=(indirect_ran, ['b_smoke.py'], 12.0)):
+            code, report = self.run_cli('--run', '--budget-seconds', '1200',
+                                        '--report', 'artifacts/scoped.json',
+                                        '--changed', 'skills/s1/scripts/core.py',
+                                        '--changed', 'tools/tests/z_direct.py')
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report['schema'], 'scoped-selection/v1')
+        self.assertEqual(report['deferred'], 'budget-partial')
+        self.assertEqual(report['execution_scope'], 'selected-partial')
+        self.assertEqual(report['stop_reason'], 'time-budget')
+        self.assertEqual(report['deferred_tests'], ['b_smoke.py'])
+        self.assertEqual({r['name'] for r in report['ran']} | set(report['deferred_tests']),
+                         set(report['selected']))
+        saved = json.loads((self.root / 'artifacts/scoped.json').read_text())
+        self.assertEqual(saved, report)
+
+    def test_broken_run_cannot_become_budget_partial(self):
+        build(self.root, {'tools/tests/z_direct.py': 'raise SystemExit(3)\n'})
+        with mock.patch.object(scoped_select, 'run_tests_with_budget',
+                               return_value=([], ['a_smoke.py', 'b_smoke.py'], 12.0)):
+            code, report = self.run_cli('--run', '--budget-seconds', '1200',
+                                        '--changed', 'skills/s1/scripts/core.py',
+                                        '--changed', 'tools/tests/z_direct.py')
+        self.assertEqual(code, 1)
+        self.assertEqual(report['broken'], ['z_direct.py'])
+        self.assertEqual(report['deferred_tests'], ['a_smoke.py', 'b_smoke.py'])
+        self.assertNotIn('deferred', report)
 
     def test_git_diff_input(self):
         env = {**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t',
