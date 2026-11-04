@@ -22,6 +22,8 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -49,6 +51,12 @@ STATUS_LABEL = {
 CLOSED_ALIASES = {"done-review", "done-human", "superseded", "cancelled", "deferred"}
 STATUS_ALIAS = {"implementing": "in-progress", "review-pending": "in-review", "analysis": "confirmed"}
 ISSUE_ID_RE = re.compile(r"issue-\d+[a-z0-9]*", re.I)
+# 开发中泳道：在制口径只看票状态；会话暂停 / 分支存在不参与需求级判定
+CANON_STATUSES = ("in-progress", "in-review", "mr-submitted", "needs-human")
+BRANCH_HOSTS = {"claude", "codex", "zcode", "deepseek"}
+EXTERNAL_BODY_RE = re.compile(
+    r"(?:外部前置|外部依赖)\s*(?:[①②③④0-9]+\s*)?[：:]\s*"
+    r"([^，。；\n]{1,50}?)\s+(issue-\d+[a-z0-9]*)", re.I)
 
 
 # ---------- 基础解析 ----------
@@ -1244,6 +1252,16 @@ def build_tree_payload(repo, stall_min, now=None):
             if k:
                 counts[k] += 1
         agents = sorted({b["host"] for b in bindings if not b["paused"] and b["feature"].split("/")[-1] == slug})
+        # 需求态与「开发中」视图同一判定：无在制票即非开发中，呈现时须弱化并标明原因
+        retired = sum(1 for it in issues if it.get("closed_as"))
+        if inflight:
+            fstate = None
+        elif retired:
+            fstate = "closed"
+        elif counts["ready"]:
+            fstate = "ready"
+        else:
+            fstate = "done"
 
         def ticket_node(it, r):
             p = (it.get("probe") or {})
@@ -1280,6 +1298,7 @@ def build_tree_payload(repo, stall_min, now=None):
             else:
                 top.append(node)
         fnodes.append({"kind": "feature", "slug": slug, "agents": agents, "counts": counts,
+                       "closed": not bool(inflight), "fstate": fstate,
                        "sev": min(sev_of(it["status"]) for it in inflight) if inflight else 9,
                        "children": top})
 
@@ -1315,6 +1334,377 @@ def payload_command(args):
     repo = pick_repo(args)
     import json as _json
     print(_json.dumps(build_tree_payload(repo, args.stall_min), ensure_ascii=False))
+
+
+# ---------- 开发中泳道 payload（横向泳道视图数据源） ----------
+
+def _norm_feature_key(value):
+    return re.sub(r"[\s/]+", "", str(value or "")).lower()
+
+
+def _yaml_values(value):
+    if not value:
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    return [str(v).strip().strip("'\"") for v in value if str(v).strip().strip("'\"")]
+
+
+def _split_external_ref(ref):
+    """external-blocked-by 值形态：`模块/slug#issue-N`、`slug/issue-N`、非 issue 里程碑。
+    返回 (feature 标签, 归一化 issue id)；非 issue 引用返回 (原值, None)。"""
+    ref = str(ref).strip().strip("'\"")
+    if "#" in ref:
+        label, _, iid = ref.partition("#")
+    elif "/" in ref and ISSUE_ID_RE.fullmatch(ref.rpartition("/")[2] or ""):
+        label, _, iid = ref.rpartition("/")
+    else:
+        return ref, None
+    iid = iid.strip()
+    if iid and ISSUE_ID_RE.fullmatch(iid):
+        return label.strip(), iid.lower()
+    return ref, None
+
+
+def _done_ts(events, issue_id, text):
+    """完结时间：merged 事件 ts 优先，回退票 status 行内注释日期（`done  # 2026-10-12 合并…`）。
+    两者都没有返回 None——由 UI 按「未知即过期」处理。"""
+    ev = last_event(events, issue_id, "merged")
+    if ev:
+        ts = ev.get("_ts") or parse_ts(ev.get("ts"))
+        if not ts and ev.get("ts"):
+            try:
+                ts = datetime.fromisoformat(str(ev["ts"]).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                ts = None
+        if ts:
+            return ts
+    m = re.search(r"^status:\s*done[^\n]*?(\d{4}-\d{2}-\d{2})", text or "", re.M)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y-%m-%d").timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def build_swim_payload(repo, now=None, sessions=None):
+    """开发中泳道 payload：需求×issue 横向依赖图。
+    只做 1 次分支名枚举（不做祖先链 / ahead-dirty），依赖全部显式：
+    internal=blocked-by（同需求内解析）、external=external-blocked-by、
+    body=正文「外部前置/外部依赖」（带 文件:行 证据）、milestone=非 issue 引用。
+    目标缺失的引用保留 resolved=false，不把裸票号猜到别的需求上。"""
+    now = now or time.time()
+    repo = Path(repo)
+    if sessions is None:
+        sessions = load_session_bindings(repo)
+    meta, tix_multi = [], {}
+    for feat in find_features(repo):
+        feature_id = f"{feat.parent.name}/{feat.name}"
+        events = load_events(feat)
+        rows = load_issues(repo, feat, events, {})  # 空 wt_index：泳道不做 worktree 探针，零额外 git 开销
+        meta.append((feature_id, feat, events, rows))
+        for it in rows:
+            tix_multi.setdefault(it["id"], []).append(it)
+
+    # 分支名 → 票：名称级弱线索（宿主前缀 + 票号作用域消歧），失败退回票文件 branch 字段
+    branch_hint = {}
+    try:
+        main = detect_main_branch(repo)
+        if main:
+            r = git_run(repo, "for-each-ref", "refs/heads", "--format=%(refname:short)")
+            if r is not None and r.returncode == 0:
+                for name in (ln.strip() for ln in r.stdout.splitlines()):
+                    m = ISSUE_ID_RE.search(name)
+                    if not m:
+                        continue
+                    it = resolve_ticket(tix_multi, m.group(0).lower(), name)
+                    if it:
+                        branch_hint.setdefault(it["key"], name)
+    except Exception:
+        branch_hint = {}
+
+    def agent_rows(it, events):
+        out = []
+        fm_dispatch = it["fm"].get("dispatch")
+        if not isinstance(fm_dispatch, dict):
+            fm_dispatch = {}
+        host = str(fm_dispatch.get("host") or "").strip()
+        model = str(fm_dispatch.get("model") or "").strip()
+        if not host:
+            ev = last_event(events, it["id"], "dispatch")
+            if ev:
+                host = str(ev.get("host") or "").strip()
+                model = str(ev.get("model") or "").strip()
+        if host:
+            out.append({"host": host, "source": "dispatch", "issue": it["id"], "model": model})
+        for b in sessions:
+            if not b.get("paused") and b.get("feature") == it["feature"] and b.get("issue") == it["id"]:
+                out.append({"host": b["host"], "source": "session", "issue": it["id"], "title": b.get("title") or ""})
+        branch = branch_hint.get(it["key"]) or str(it["fm"].get("branch") or "").strip() or None
+        if branch:
+            prefix = branch.split("/", 1)[0].lower()
+            if prefix in BRANCH_HOSTS:
+                out.append({"host": prefix, "source": "branch", "issue": it["id"], "branch": branch})
+        return out, branch
+
+    features_out, issues_by_uid, it_by_uid = [], {}, {}
+    for feature_id, feat, events, rows in meta:
+        counts = dict.fromkeys(("total", "done", "run", "review", "mr", "human", "ready", "other"), 0)
+        counts["total"] = len(rows)
+        fissues = []
+        for it in rows:
+            k = {"done": "done", "in-progress": "run", "in-review": "review",
+                 "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(it["status"], "other")
+            counts[k] += 1
+            agents, branch = agent_rows(it, events)
+            try:
+                rel_path = str(Path(it["issue_path"]).relative_to(repo))
+            except ValueError:
+                rel_path = it["issue_path"]
+            uid = f"{feature_id}#{it['id']}"
+            node = {"uid": uid, "id": it["id"], "key": it["key"], "feature": feature_id,
+                    "title": it["title"], "status": it["status"], "issue_path": rel_path,
+                    "branch": branch, "agents": agents,
+                    "verify_fails": it.get("verify_fails", 0),
+                    "human_note": it.get("human_note", ""),
+                    "review_rounds": it.get("review_rounds", 0)}
+            if it["status"] == "done":
+                try:
+                    txt = Path(it["issue_path"]).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    txt = ""
+                node["done_ts"] = _done_ts(events, it["id"], txt)
+            fissues.append(node)
+            issues_by_uid[uid] = node
+            it_by_uid[uid] = it
+        feature_agents, seen = [], set()
+        for node in fissues:
+            if node["status"] in CANON_STATUSES:
+                for a in node["agents"]:
+                    kk = (a["host"], a["source"], a.get("issue"))
+                    if kk not in seen:
+                        seen.add(kk)
+                        feature_agents.append(a)
+        for b in sessions:
+            if not b.get("paused") and b.get("feature") == feature_id:
+                kk = (b["host"], "session", b.get("issue"))
+                if kk not in seen:
+                    seen.add(kk)
+                    feature_agents.append({"host": b["host"], "source": "session",
+                                           "issue": b.get("issue"), "title": b.get("title") or ""})
+        # 需求态三分类（与分支树同一口径）：closed=有已关闭/退役票；ready=仅剩可派发；done=全部完结
+        retired = sum(1 for it in rows if it.get("closed_as"))
+        active = any(n["status"] in CANON_STATUSES for n in fissues)
+        if active:
+            fstate = None
+        elif retired:
+            fstate = "closed"
+        elif counts["ready"]:
+            fstate = "ready"
+        else:
+            fstate = "done"
+        features_out.append({"id": feature_id, "module": feat.parent.name, "slug": feat.name,
+                             "active": active, "fstate": fstate,
+                             "counts": counts, "agents": feature_agents, "issues": fissues})
+
+    by_key, by_slug = {}, {}
+    for f in features_out:
+        by_key.setdefault(_norm_feature_key(f["id"]), []).append(f["id"])
+        by_slug.setdefault(_norm_feature_key(f["slug"]), []).append(f["id"])
+
+    def match_feature(label):
+        key = _norm_feature_key(label)
+        if not key:
+            return None
+        for table in (by_key, by_slug):
+            hits = table.get(key)
+            if hits and len(hits) == 1:
+                return hits[0]
+        return None
+
+    edges = []
+
+    def add_edge(src, target_uid, target_feature, kind, origin, ref, evidence=""):
+        edges.append({"from": src["uid"], "from_feature": src["feature"], "to": target_uid,
+                      "to_feature": target_feature, "kind": kind, "origin": origin,
+                      "ref": str(ref), "resolved": bool(target_uid), "evidence": evidence})
+
+    for uid, it in it_by_uid.items():
+        node = issues_by_uid[uid]
+        for ref in (it["blocked_by"] or []):
+            ref = str(ref).strip().strip("'\"")
+            if not ref:
+                continue
+            target = issues_by_uid.get(f"{node['feature']}#{ref.lower()}")
+            add_edge(node, target["uid"] if target else None, node["feature"], "internal", "blocked-by", ref)
+        for ref in _yaml_values(it["fm"].get("external-blocked-by")):
+            label, iid = _split_external_ref(ref)
+            if iid is None:
+                add_edge(node, None, None, "milestone", "external-blocked-by", ref)
+                continue
+            tf = match_feature(label)
+            target = issues_by_uid.get(f"{tf}#{iid}") if tf else None
+            add_edge(node, target["uid"] if target else None, tf, "external", "external-blocked-by", ref)
+        try:
+            text = Path(it["issue_path"]).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if len(text) <= 200_000:
+            for lineno, line in enumerate(text.splitlines(), 1):
+                m = EXTERNAL_BODY_RE.search(line)
+                if not m:
+                    continue
+                tf = match_feature(m.group(1))
+                target = issues_by_uid.get(f"{tf}#{m.group(2).lower()}") if tf else None
+                add_edge(node, target["uid"] if target else None, tf, "body", "正文外部前置",
+                         f"{tf or m.group(1).strip()}#{m.group(2).lower()}",
+                         f"{node['issue_path']}:{lineno} {line.strip()[:200]}")
+
+    cross = [e for e in edges if e["kind"] in ("external", "body")]
+    stats = {
+        "features": len(features_out),
+        "issues": len(issues_by_uid),
+        "developing_features": sum(1 for f in features_out if f["active"]),
+        "active_issues": sum(1 for n in issues_by_uid.values() if n["status"] in CANON_STATUSES),
+        "internal_edges": sum(1 for e in edges if e["kind"] == "internal"),
+        "missing_internal": sum(1 for e in edges if e["kind"] == "internal" and not e["resolved"]),
+        "cross_issue_refs": len(cross),
+        "resolved_cross": sum(1 for e in cross if e["resolved"]),
+        "unresolved_cross": sum(1 for e in cross if not e["resolved"]),
+        "milestone_refs": sum(1 for e in edges if e["kind"] == "milestone"),
+    }
+    return {"repo": repo.name, "generated": now,
+            "generated_label": datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S %z"),
+            "stats": stats, "features": features_out, "dependencies": edges}
+
+
+def swim_command(args):
+    repo = pick_repo(args)
+    import json as _json
+    print(_json.dumps(build_swim_payload(repo), ensure_ascii=False))
+
+
+# ---------- 开发摘要（宿主模型生成项目管理总结） ----------
+
+_SUMMARY_PROMPT = (
+    "你是多宿主 AI 开发调度的项目管理助手。下面是「开发中」视图的真实数据事实（可能被截断）。"
+    "只基于这些事实，输出一份中文项目管理摘要，包含四段："
+    "【整体进展】一两句；【各需求】每个开发中需求一行，写阶段与进展；"
+    "【卡点与风险】等人/复跑打回/长期无分支的待合并票/跨需求依赖缺失等，无则写「无」；"
+    "【建议关注】最多三条。总计不超过 300 字，直接给结论，不写开场白和免责声明。\n\n=== 事实 ===\n"
+)
+
+
+def _summary_facts(payload):
+    """把泳道 payload 压成模型可读的事实清单（截断保护 6000 字）。"""
+    st = payload["stats"]
+    queued = sum((f["counts"].get("ready") or 0) for f in payload["features"] if f["active"])
+    lines = [f"仓库：{payload['repo']}；快照：{payload['generated_label']}；"
+             f"开发中需求 {st['developing_features']} 个；在制票 {st['active_issues']} 张；"
+             f"待派发 {queued} 张；跨需求依赖可解析 {st['resolved_cross']}、待核对 {st['unresolved_cross']}；"
+             f"里程碑引用 {st['milestone_refs']} 条"]
+    for f in payload["features"]:
+        if not f["active"]:
+            continue
+        c = f["counts"]
+        lines.append(f"需求 {f['slug']}（{f['module']}）：{c.get('done', 0)}/{c.get('total', 0)} 完结")
+        for i in f["issues"]:
+            if i["status"] not in CANON_STATUSES and i["status"] != "confirmed":
+                continue
+            bits = [STATUS_LABEL.get(i["status"], i["status"])]
+            if i.get("branch"):
+                bits.append("分支 " + str(i["branch"]))
+            hosts = "、".join(sorted({a["host"] + "·" + a["source"] for a in i.get("agents", [])})) or "未绑定"
+            bits.append(hosts)
+            if i.get("verify_fails"):
+                bits.append(f"复跑打回 {i['verify_fails']} 次")
+            if i.get("review_rounds"):
+                bits.append(f"评审第 {i['review_rounds']} 轮")
+            if i.get("human_note"):
+                bits.append("等人备注：" + str(i["human_note"])[:80])
+            lines.append(f"  - {i['id']} {str(i['title'])[:40]}：{'；'.join(bits)}")
+    unresolved = [e["ref"] for e in payload["dependencies"]
+                  if e["kind"] in ("external", "body") and not e["resolved"]]
+    if unresolved:
+        lines.append("待核对跨需求引用：" + "、".join(str(x) for x in unresolved[:8]))
+    return "\n".join(lines)[:6000]
+
+
+def _read_env_file(path):
+    """KEY=VALUE 行解析（pandu 本地部署 local.env 形态）；文件缺失或坏行忽略。"""
+    out = {}
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip().strip("'\"")
+    except OSError:
+        pass
+    return out
+
+
+def _summary_config(args, home=None):
+    """解析摘要模型配置：参数 > CH_PROGRESS_SUMMARY_* 环境变量 > 宿主配置 host.json /model
+    （api_key 按 api_key_ref_env 先查进程环境，再回退同目录 local.env）。"""
+    home = Path(home) if home else Path.home()
+    host = {}
+    try:
+        host = json.loads((home / ".config" / "pandu" / "host.json").read_text(encoding="utf-8")).get("model") or {}
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    base = (getattr(args, "base_url", None) or os.environ.get("CH_PROGRESS_SUMMARY_BASE_URL")
+            or host.get("base_url"))
+    model = (getattr(args, "model", None) or os.environ.get("CH_PROGRESS_SUMMARY_MODEL")
+             or host.get("model"))
+    ref = host.get("api_key_ref_env")
+    key = (getattr(args, "api_key", None) or os.environ.get("CH_PROGRESS_SUMMARY_API_KEY")
+           or (os.environ.get(ref) if ref else None))
+    if not key and ref:
+        key = _read_env_file(home / ".config" / "pandu" / "local.env").get(ref)
+    return base, model, key
+
+
+def _call_llm(base_url, api_key, model, prompt, timeout=90):
+    # deepseek-flash 等推理模型先产出 reasoning_content 再给正文：预算不足会 length 截断、正文为空。
+    # 返回 (正文, finish_reason)，截断状态交给调用方生成可诊断的报错。
+    req = urllib.request.Request(
+        base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps({"model": model, "temperature": 0.3, "max_tokens": 8000,
+                         "messages": [{"role": "user", "content": prompt}]}).encode("utf-8"),
+        headers={"content-type": "application/json", "authorization": "Bearer " + api_key},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message", {}) or {}
+    return (msg.get("content") or "").strip(), choice.get("finish_reason") or ""
+
+
+def summary_command(args):
+    repo = pick_repo(args)
+    out = {"repo": repo.name, "generated": time.time()}
+    base, model, key = _summary_config(args)
+    if not (base and model and key):
+        out.update(ok=False, error="未配置总结模型：需要 base_url/model/api_key"
+                   "（命令行参数、CH_PROGRESS_SUMMARY_* 环境变量，或宿主配置 host.json /model）")
+        print(json.dumps(out, ensure_ascii=False))
+        sys.exit(1)
+    try:
+        text, finish = _call_llm(base, key, model, _SUMMARY_PROMPT + _summary_facts(build_swim_payload(repo)))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError, ValueError) as exc:
+        out.update(ok=False, error=f"模型调用失败：{exc}")
+        print(json.dumps(out, ensure_ascii=False))
+        sys.exit(1)
+    if not text:
+        reason = "（finish_reason: length，推理未在预算内完成）" if finish == "length" else f"（finish_reason: {finish or '未知'}）"
+        out.update(ok=False, error="模型返回正文为空" + reason + "；请重试，或在插件配置把 summary.model 换成非推理模型")
+        print(json.dumps(out, ensure_ascii=False))
+        sys.exit(1)
+    out.update(ok=True, summary=text, model=model)
+    print(json.dumps(out, ensure_ascii=False))
 
 
 # ---------- 收尾清场（预检 → 确认 → 重验 → 执行） ----------
@@ -1423,6 +1813,34 @@ def cleanup_plan(repo, branch=None, issue=None):
     return plan
 
 
+def close_after_discard(plan, result):
+    """丢弃开发成功后把票状态闭环为 deferred（与关闭需求同一机制，幂等）。
+    合并保留不在此列：合入内容仍待正常验收收口，票状态不动。"""
+    import progress_cleanup as pc
+    feat = Path(plan["_feature_dir"])
+    hit = [it for it in load_issues(Path(plan["_repo"]), feat, load_events(feat), {})
+           if it["id"] == plan["issue"]]
+    if hit and hit[0]["status"] != "done":
+        t = dict(hit[0])
+        t["feature_dir"] = str(feat)
+        closed = pc.close_issue(t, "丢弃开发：worktree/分支已按清理规则移除，需求搁置关闭")
+        result["previous_status"] = closed["previous_status"]
+        result["status"] = closed["status"]
+
+
+def record_merged_event(plan, result):
+    """合并保留成功后补写 merged 事件（backfill），让事件流如实记录这次合并。
+    票状态按对账契约由监督循环收口（分支已删/提交已进目标 → 补done），插件不擅自置 done。"""
+    feat_dir = Path(plan["_feature_dir"])
+    with open(feat_dir / JOURNAL_NAME, "a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "event": "merged", "issue": plan["issue"], "host": "dsh",
+            "note": (f"插件合并保留 backfill：{result['merged_into']}@{result['merge_commit']}；"
+                     "验收收口由监督循环按对账契约承接"),
+        }, ensure_ascii=False) + "\n")
+
+
 def cleanup_command(args):
     import progress_cleanup as pc
     try:
@@ -1449,6 +1867,13 @@ def cleanup_command(args):
                     "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "event": "digest", "issue": plan["issue"], "host": "dsh", "note": note,
                 }, ensure_ascii=False) + "\n")
+        if result["action"] == "discard":
+            try:
+                close_after_discard(plan, result)
+            except pc.CleanupError as exc:
+                result["warnings"].append("清理完成，但票状态未改为 deferred：" + str(exc))
+        if result["action"] == "merge" and result.get("merge_commit"):
+            record_merged_event(plan, result)
         result["confirm"] = plan["confirm"]
         print(json.dumps(result, ensure_ascii=False))
         if not result["ok"]:
@@ -1521,6 +1946,17 @@ def main():
     p6.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
     p6.add_argument("--stall-min", type=int, default=STALL_DEFAULT_MIN, help="无动静判卡阈值（分钟）")
     p6.set_defaults(func=payload_command)
+
+    p9 = sub.add_parser("swim", help="开发中泳道 payload JSON：需求×issue 横向依赖图")
+    p9.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
+    p9.set_defaults(func=swim_command)
+
+    p10 = sub.add_parser("summary", help="宿主模型生成开发摘要（项目管理视角）")
+    p10.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
+    p10.add_argument("--base-url", help="OpenAI 兼容端点（缺省读环境变量/宿主配置）")
+    p10.add_argument("--model", help="模型名（缺省读环境变量/宿主配置）")
+    p10.add_argument("--api-key", help="API Key（缺省读环境变量；优先用环境变量传密钥）")
+    p10.set_defaults(func=summary_command)
 
     p7 = sub.add_parser("cleanup", help="已完成票收尾清场：默认预检，--apply 需携带预检 confirm")
     p7.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")

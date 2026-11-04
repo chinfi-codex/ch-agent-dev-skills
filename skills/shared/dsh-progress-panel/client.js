@@ -31,6 +31,8 @@ window.__ModuleLoader__.load({
 [data-cpp] .cpp-row.is-feat{background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,.1));margin-top:6px;font-size:13px;}
 [data-cpp] button.cpp-row{width:100%;text-align:left;border:1px solid transparent;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer;}
 [data-cpp] button.cpp-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14));border-color:var(--cpp-line);}
+[data-cpp] .cpp-row.is-feat.is-muted{opacity:.6;}
+[data-cpp] .cpp-row.is-feat.is-muted .cpp-fname{font-weight:400;}
 [data-cpp] .cpp-row.is-feat:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.18));}
 [data-cpp] .cpp-g{width:12px;align-self:stretch;flex:none;position:relative;}
 [data-cpp] .cpp-g.is-v::before,[data-cpp] .cpp-g.is-b::before{content:"";position:absolute;left:6px;top:0;bottom:0;width:1px;background:var(--cpp-line);}
@@ -113,9 +115,83 @@ window.__ModuleLoader__.load({
 [data-cpp] .cpp-result-ok{color:#3dd68c;font-size:13px;margin:8px 0;}
 [data-cpp] .cpp-result-warn{color:#f0a83c;font-size:13px;margin:8px 0;}
 [data-cpp] .cpp-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:var(--cpp-dim);overflow-wrap:anywhere;margin-top:8px;}
+[data-cpp] .cpp-viewtabs{display:flex;gap:3px;padding:3px;background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,.1));border-radius:8px;margin:0 4px 8px;width:max-content;}
+[data-cpp] .cpp-viewtab{border:0;background:transparent;color:var(--cpp-dim);font:inherit;font-size:12px;border-radius:6px;padding:4px 12px;cursor:pointer;}
+[data-cpp] .cpp-viewtab.is-on{background:var(--dsw-alias-bg-layer-1,#1b1d21);color:var(--dsw-alias-label-primary,#e8eaed);box-shadow:0 1px 3px rgba(0,0,0,.25);}
+[data-cpp] .sw-metrics{display:flex;gap:14px;flex-wrap:wrap;padding:2px 6px 8px;color:var(--cpp-dim);font-size:11px;}
+[data-cpp] .sw-metrics b{color:var(--dsw-alias-label-primary,#e8eaed);font-size:14px;font-weight:550;margin-right:3px;font-variant-numeric:tabular-nums;}
+[data-cpp] .sw-sum{margin:0 4px 8px;padding:9px 11px 10px;border:1px solid var(--cpp-line);border-left:3px solid #5c9dff;border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,.08));}
+[data-cpp] .sw-sum-head{display:flex;align-items:center;gap:8px;margin-bottom:5px;color:var(--cpp-dim);font-size:10.5px;}
+[data-cpp] .sw-sum-title{font-weight:550;color:var(--dsw-alias-label-primary,#e8eaed);font-size:12px;}
+[data-cpp] .sw-sum-body{font-size:12px;line-height:1.55;white-space:pre-wrap;color:var(--dsw-alias-label-primary,#e8eaed);}
+[data-cpp] .sw-sum-err{color:#f0a83c;font-size:11.5px;line-height:1.5;overflow-wrap:anywhere;}
+[data-cpp] .sw-sum-x{margin-left:auto;border:0;background:transparent;color:var(--cpp-dim);font:inherit;font-size:10.5px;border-radius:6px;padding:2px 7px;cursor:pointer;white-space:nowrap;}
+[data-cpp] .sw-sum-x:hover{color:#5c9dff;}
+[data-cpp] .sw-toolbar{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:0 6px 8px;}
+[data-cpp] .sw-btn{border:1px solid var(--cpp-line);background:transparent;color:var(--cpp-dim);font:inherit;font-size:11px;border-radius:7px;padding:3px 8px;cursor:pointer;min-height:26px;}
+[data-cpp] .sw-btn:hover{color:var(--dsw-alias-label-primary,#e8eaed);border-color:rgba(79,143,247,.5);}
+[data-cpp] .sw-btn.is-on{color:#4f8ff7;border-color:rgba(79,143,247,.55);background:rgba(79,143,247,.12);}
+[data-cpp] .sw-label{color:var(--cpp-dim);font-size:11px;margin-right:2px;}
+[data-cpp] .sw-legend{display:flex;gap:10px;flex-wrap:wrap;padding:0 6px 8px;color:var(--cpp-dim);font-size:10.5px;}
+[data-cpp] .sw-lsample{display:inline-block;width:16px;border-top:2px solid #4f8ff7;vertical-align:middle;margin-right:3px;}
+[data-cpp] .sw-lsample.miss{border-top-color:#f2585e;border-top-style:dotted;}
+[data-cpp] .sw-nsample{display:inline-block;width:12px;height:9px;border-radius:3px;border:1px solid #4f8ff7;background:rgba(79,143,247,.16);vertical-align:-1px;margin-right:3px;}
+[data-cpp] .sw-nsample.rel{border-color:rgba(79,143,247,.45);background:rgba(79,143,247,.08);}
+[data-cpp] .sw-viewport{overflow-x:auto;overflow-y:hidden;border:1px solid var(--cpp-line);border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,.08));margin:0 4px;}
+[data-cpp] .sw-canvas{position:relative;min-width:100%;}
+[data-cpp] .sw-lane{--sw-bg:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.06));position:relative;background:var(--sw-bg);border-top:1px solid var(--cpp-line);border-bottom:1px solid var(--cpp-line);}
+[data-cpp] .sw-lane + .sw-lane{margin-top:6px;}
+[data-cpp] .sw-lane.is-ctx{--sw-bg:rgba(128,128,128,.04);}
+[data-cpp] .sw-lane.is-sel{--sw-bg:rgba(79,143,247,.14);border-color:rgba(79,143,247,.45);}
+[data-cpp] .sw-lane.is-rel{--sw-bg:rgba(79,143,247,.07);}
+[data-cpp] .sw-hit{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;cursor:pointer;padding:0;z-index:0;}
+[data-cpp] .sw-labell{position:sticky;left:0;display:inline-block;vertical-align:top;height:100%;padding:7px 8px;background:var(--sw-bg);border-right:1px solid var(--cpp-line);z-index:4;pointer-events:none;box-sizing:border-box;overflow:hidden;}
+[data-cpp] .sw-lrow{display:flex;align-items:baseline;gap:5px;min-width:0;}
+[data-cpp] .sw-lrow .cpp-fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+[data-cpp] .sw-lcount{color:var(--cpp-dim);font-size:10.5px;font-variant-numeric:tabular-nums;flex:none;}
+[data-cpp] .sw-lane.is-sel .sw-labell{box-shadow:inset 3px 0 0 #4f8ff7;}
+[data-cpp] .sw-lmeta{color:var(--cpp-dim);font-size:10.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+[data-cpp] .sw-prog{display:flex;height:4px;border-radius:4px;overflow:hidden;background:rgba(128,128,128,.15);margin-top:7px;}
+[data-cpp] .sw-prog i{display:block;height:100%;}
+[data-cpp] .sw-prog .pd{background:#3dd68c;}
+[data-cpp] .sw-prog .pa{background:#4f8ff7;}
+[data-cpp] .sw-prog .pr{background:rgba(154,160,166,.4);}
+[data-cpp] .sw-lfoot{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:5px;color:var(--cpp-dim);font-size:10.5px;}
+[data-cpp] .sw-expand{pointer-events:auto;border:0;background:transparent;color:#4f8ff7;font:inherit;font-size:10.5px;padding:2px 0;cursor:pointer;white-space:nowrap;}
+[data-cpp] .sw-edges{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:visible;}
+[data-cpp] .sw-edge{fill:none;stroke:rgba(154,160,166,.6);stroke-width:1.2;opacity:.5;}
+[data-cpp] .sw-edge.ext{stroke:rgba(79,143,247,.8);stroke-width:1.4;opacity:.75;}
+[data-cpp] .sw-edge.body{stroke:#b18cff;stroke-dasharray:5 4;opacity:.75;}
+[data-cpp] .sw-edge.miss{stroke:#f2585e;stroke-dasharray:2 4;}
+[data-cpp] .sw-edge.on{stroke:#4f8ff7;stroke-width:2.4;opacity:1;}
+[data-cpp] .sw-edge.body.on{stroke:#b18cff;}
+[data-cpp] .sw-edge.miss.on{stroke:#f2585e;}
+[data-cpp] .sw-edge.off{opacity:.08;}
+[data-cpp] .sw-issue{position:absolute;z-index:2;width:136px;height:52px;border:1px solid var(--cpp-line);border-left:3px solid var(--cpp-dim);border-radius:7px;background:var(--dsw-alias-bg-layer-4,rgba(128,128,128,.12));color:var(--dsw-alias-label-primary,#e8eaed);padding:4px 6px;text-align:left;font:inherit;font-size:11px;cursor:pointer;transition:opacity .12s;}
+[data-cpp] .sw-issue:hover{border-color:rgba(79,143,247,.6);}
+[data-cpp] .sw-issue.st-in-progress{border-left-color:#4f8ff7;background:rgba(79,143,247,.16);}
+[data-cpp] .sw-issue.st-in-review{border-left-color:#b18cff;background:rgba(177,140,255,.16);}
+[data-cpp] .sw-issue.st-mr-submitted{border-left-color:#5c9dff;background:rgba(92,157,255,.16);}
+[data-cpp] .sw-issue.st-needs-human{border-left-color:#f2585e;background:rgba(242,88,94,.16);}
+[data-cpp] .sw-issue.st-done{border-left-color:#3dd68c;background:rgba(61,214,140,.13);}
+[data-cpp] .sw-issue.st-missing{border-left-color:#f2585e;}
+[data-cpp] .sw-issue.is-miss{border-style:dashed;border-left-style:solid;background:rgba(242,88,94,.12);}
+[data-cpp] .sw-issue.is-selfeat{background:rgba(79,143,247,.2);border-color:rgba(79,143,247,.55);}
+[data-cpp] .sw-issue.is-rel{background:rgba(79,143,247,.1);border-color:rgba(79,143,247,.35);}
+[data-cpp] .sw-issue.is-seliss{box-shadow:0 0 0 2px #4f8ff7;}
+[data-cpp] .sw-issue.is-dim{opacity:.25;}
+[data-cpp] .sw-issue:disabled{cursor:default;}
+[data-cpp] .sw-iid{display:block;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+[data-cpp] .sw-ititle{display:block;color:var(--cpp-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+[data-cpp] .sw-ist{display:block;color:var(--cpp-dim);margin-top:1px;font-size:10.5px;}
+[data-cpp] .sw-detail{padding:9px 6px 4px;border-top:1px solid var(--cpp-line);font-size:11.5px;margin-top:8px;}
+[data-cpp] .sw-counts{display:flex;gap:12px;flex-wrap:wrap;color:var(--cpp-dim);margin-top:5px;}
+[data-cpp] .sw-counts b{color:var(--dsw-alias-label-primary,#e8eaed);font-weight:550;font-variant-numeric:tabular-nums;}
+@media (prefers-reduced-motion:reduce){[data-cpp] .sw-issue{transition:none;}}
 `
 
     const LABEL = { 'in-progress': '在跑', 'in-review': '评审中', 'mr-submitted': '待合并', 'needs-human': '等人' }
+    const FSTATE_LABEL = { closed: '已关闭', ready: '待派发', done: '已完结' }
     const DOT = { 'in-progress': 'run', 'in-review': 'review', 'mr-submitted': 'mr', 'needs-human': 'human' }
 
     function fmtRel(ms) {
@@ -153,15 +229,17 @@ window.__ModuleLoader__.load({
       const c = n.counts
       const inflight = (c.run || 0) + (c.review || 0) + (c.mr || 0) + (c.human || 0)
       const seg = (cls, v) => (v ? h('i', { key: cls, className: cls, style: { width: (100 * v / c.total) + '%' } }) : null)
-      return h('div', { className: 'cpp-row is-feat' + (focused ? ' cpp-node-focused' : ''), 'data-node-key': nodeKey(n) },
+      return h('div', { className: 'cpp-row is-feat' + (n.fstate ? ' is-muted' : '') + (focused ? ' cpp-node-focused' : ''), 'data-node-key': nodeKey(n) },
         h(Guide, { prefix: n.prefix }),
         kids
           ? h('button', { className: 'cpp-chev', 'aria-label': (folded ? '展开' : '折叠') + n.slug, onClick: onFold }, Chev({ open: !folded }))
           : h('span', { className: 'cpp-chev is-hidden' }, '›'),
         h('span', { className: 'cpp-fname' }, n.slug),
-        n.agents && n.agents.length
-          ? h('span', { className: 'cpp-agents' }, n.agents.map((a) => h('span', { key: a, className: 'cpp-agent' }, a)))
-          : null,
+        n.fstate
+          ? h('span', { className: 'cpp-bhint', title: '无在制票（与开发中视图同一判定）' }, FSTATE_LABEL[n.fstate] || '无在制')
+          : (n.agents && n.agents.length
+              ? h('span', { className: 'cpp-agents' }, n.agents.map((a) => h('span', { key: a, className: 'cpp-agent' }, a)))
+              : null),
         h('span', { className: 'cpp-fright' },
           h('span', { className: 'cpp-bar', title: `已完结 ${c.done} · 在途 ${inflight} · 待派发 ${c.ready || 0}，共 ${c.total} 票` },
             seg('s-closed', c.done), seg('s-inflight', inflight), seg('s-ready', c.ready)),
@@ -309,7 +387,7 @@ window.__ModuleLoader__.load({
                 h('dt', null, 'dev 清理'), h('dd', null, `${plan.dev_cleanup.files} 个过程文件 · ${fmtBytes(plan.dev_cleanup.bytes)}`)) : null),
             h('div', { className: 'cpp-plan' }, (plan.will || []).map((w, i) => h('div', { key: i, className: 'cpp-plan-item' }, w))),
             h('div', { className: 'cpp-safe' }, plan.mode === 'abandon'
-              ? '丢弃开发：不合入，删除 worktree 和本地分支；合并保留：先合入已提交内容再清理。未提交改动始终只保存在 salvage。'
+              ? '丢弃开发：不合入，删除 worktree 和本地分支，并把需求关闭（deferred）；合并保留：先合入已提交内容再清理，票状态不变。未提交改动始终只保存在 salvage。'
               : '确认后自动重验并执行；有任何变化会停止。')) : null,
           state.phase === 'apply' ? h('div', { className: 'cpp-loading' }, state.action === 'merge' ? '正在保存补丁并尝试合并，请稍候…' : '正在保存补丁并清理，请稍候…') : null,
           state.phase === 'result' && result ? h(React.Fragment, null,
@@ -337,6 +415,383 @@ window.__ModuleLoader__.load({
               : state.phase === 'confirm'
                 ? h('button', { className: 'cpp-btn danger', onClick: () => onApply('close'), autoFocus: true }, '确认清理')
                 : null)))
+    }
+
+    // ---------- 开发中泳道视图（横向泳道 + 跨需求依赖联动高亮） ----------
+
+    const SW_ACTIVE = ['in-progress', 'in-review', 'mr-submitted', 'needs-human']
+    // 未展开泳道的默认队列：在制票 + 已开票可派发（confirmed）的后续票；proposed（待确认草稿）不进
+    const SW_QUEUE = SW_ACTIVE.concat(['confirmed'])
+    const SW_STATUS = { 'in-progress': '在跑', 'in-review': '评审中', 'mr-submitted': '待合并', 'needs-human': '等人', done: '已完结', confirmed: '可派发', proposed: '待确认', '未知': '未知', missing: '目标缺失' }
+    const swNorm = (v) => String(v || '').replace(/[\s/]+/g, '').toLowerCase()
+
+    function swimRefFeature(data, edge) {
+      if (edge.to_feature) return edge.to_feature
+      const ref = String(edge.ref || '')
+      let label = ''
+      if (ref.includes('#')) label = ref.split('#')[0]
+      else if (ref.includes('/')) label = ref.split('/').slice(0, -1).join('/')
+      const key = swNorm(label)
+      const hits = (data.features || []).filter((f) => swNorm(f.id) === key || swNorm(f.slug) === key)
+      return hits.length === 1 ? hits[0].id : null
+    }
+
+    function swimRefIssue(edge) {
+      const parts = String(edge.ref || '').split(/[#/]/)
+      return parts[parts.length - 1] || '?'
+    }
+
+    function swimScene(data, opts) {
+      const { filter, selected, showAllContext, extra, vw } = opts
+      const issues = new Map()
+      const features = new Map()
+      ;(data.features || []).forEach((f) => {
+        features.set(f.id, f)
+        ;(f.issues || []).forEach((i) => issues.set(i.uid, i))
+      })
+      const trusted = (f) => new Set((f.agents || []).filter((a) => a.source !== 'branch').map((a) => a.host))
+      const developing = (data.features || []).filter((f) => f.active)
+      const primary = developing.filter((f) => filter === 'all'
+        || (filter === 'unassigned' ? trusted(f).size === 0 : trusted(f).has(filter)))
+      const ids = new Set(primary.map((f) => f.id))
+      const ctx = new Set()
+      ;(data.dependencies || []).forEach((e) => {
+        if (e.kind !== 'external' && e.kind !== 'body') return
+        const tf = swimRefFeature(data, e)
+        const linkedPrimary = ids.has(e.from_feature) || (tf && ids.has(tf))
+        const linkedSel = selected && (e.from_feature === selected || tf === selected)
+        if ((showAllContext && (filter === 'all' || linkedPrimary)) || (!showAllContext && linkedSel)) {
+          if (e.from_feature && !ids.has(e.from_feature)) ctx.add(e.from_feature)
+          if (tf && !ids.has(tf)) ctx.add(tf)
+        }
+      })
+      // 选中的需求始终可见：合并/关闭后脱离“开发中”时，以上下文泳道保持选中，不静默跳走
+      if (selected && !ids.has(selected) && features.has(selected)) ctx.add(selected)
+      const visible = [...primary, ...(data.features || []).filter((f) => ctx.has(f.id))]
+      const visIds = new Set(visible.map((f) => f.id))
+      const nodes = new Map()
+      // 已完结票只保留最近 3 天（完结时间随 payload 下发 done_ts）；未知完结时间视同过期
+      const doneCutoff = (data.generated || Date.now() / 1000) - 3 * 86400
+      const addActual = (uid) => {
+        const i = issues.get(uid)
+        if (i && visIds.has(i.feature) && !(i.status === 'done' && (!i.done_ts || i.done_ts < doneCutoff))) nodes.set(uid, i)
+      }
+      visible.forEach((f) => {
+        const expanded = f.id === selected || extra.has(f.id)
+        if (expanded) { (f.issues || []).forEach((i) => addActual(i.uid)); return }
+        const seeds = new Set()
+        ;(f.issues || []).forEach((i) => { if (SW_QUEUE.includes(i.status)) seeds.add(i.uid) })
+        ;(data.dependencies || []).forEach((e) => {
+          if (e.kind === 'milestone') return
+          if (e.from_feature === f.id && (e.kind === 'external' || e.kind === 'body')) seeds.add(e.from)
+          const t = e.to && issues.get(e.to)
+          if (t && t.feature === f.id && (e.kind === 'external' || e.kind === 'body')) seeds.add(e.to)
+        })
+        const include = new Set(seeds)
+        ;(data.dependencies || []).forEach((e) => {
+          if (e.kind !== 'internal' || e.from_feature !== f.id) return
+          if (seeds.has(e.from) || seeds.has(e.to)) { include.add(e.from); if (e.to) include.add(e.to) }
+        })
+        include.forEach(addActual)
+      })
+      const edges = []
+      ;(data.dependencies || []).forEach((e) => {
+        if (e.kind === 'milestone' || !nodes.has(e.from)) return
+        let source = e.to
+        if (source && !nodes.has(source)) return
+        if (!source) {
+          const tf = e.kind === 'internal' ? e.from_feature : swimRefFeature(data, e)
+          source = 'missing:' + (tf || e.from_feature) + '#' + swimRefIssue(e)
+          if (!nodes.has(source)) nodes.set(source, { uid: source, id: swimRefIssue(e), key: source,
+            feature: tf || e.from_feature, title: '目标 issue 不在当前票库', status: 'missing', missing: true })
+        }
+        const target = e.from
+        edges.push({ source, target, kind: e.kind, missing: !e.resolved, ref: e.ref, origin: e.origin,
+          cross: nodes.get(source).feature !== nodes.get(target).feature })
+      })
+      const levels = new Map([...nodes.keys()].map((uid) => [uid, 0]))
+      for (let k = 0; k < nodes.size; k++) {
+        let changed = false
+        edges.forEach((e) => {
+          const nx = (levels.get(e.source) || 0) + 1
+          if (nx > (levels.get(e.target) || 0)) { levels.set(e.target, nx); changed = true }
+        })
+        if (!changed) break
+      }
+      const narrow = vw < 560
+      const labelW = narrow ? 118 : 150
+      const col = narrow ? 128 : 150
+      const nodeW = col - 16
+      const positions = new Map()
+      const lanes = []
+      let y = 8
+      let maxLevel = 0
+      visible.forEach((f) => {
+        const own = [...nodes.values()].filter((n) => n.feature === f.id)
+        if (!own.length) return
+        const byLevel = new Map()
+        own.forEach((n) => {
+          const lv = levels.get(n.uid) || 0
+          maxLevel = Math.max(maxLevel, lv)
+          if (!byLevel.has(lv)) byLevel.set(lv, [])
+          byLevel.get(lv).push(n)
+        })
+        const rows = [...byLevel.values()].map((g) => g.length)
+        const laneH = Math.max(...rows) * 64 + 16
+        byLevel.forEach((group, lv) => group.sort((a, b) => String(a.id).localeCompare(String(b.id)))
+          .forEach((n, row) => positions.set(n.uid, { x: labelW + lv * col + 8, y: 8 + row * 64, laneY: y })))
+        lanes.push({ feature: f, y, height: laneH,
+          actual: own.filter((n) => !n.missing).length, missing: own.filter((n) => n.missing).length,
+          expanded: f.id === selected || extra.has(f.id) })
+        y += laneH + 6
+      })
+      return { nodes, edges, positions, lanes, labelW, nodeW, issues, features,
+        width: labelW + (maxLevel + 1) * col + 18, height: y }
+    }
+
+    function swimRelated(data, issues, selected) {
+      const related = new Set()
+      const relatedVirt = new Set()
+      const lanes = new Set()
+      if (!selected) return { related, relatedVirt, lanes }
+      ;(data.dependencies || []).forEach((e) => {
+        if (e.kind !== 'external' && e.kind !== 'body') return
+        const tf = swimRefFeature(data, e)
+        if (e.from_feature === selected) {
+          if (e.to) {
+            related.add(e.to)
+            const t = issues.get(e.to)
+            if (t) lanes.add(t.feature)
+          } else {
+            relatedVirt.add('missing:' + (tf || e.from_feature) + '#' + swimRefIssue(e))
+            if (tf) lanes.add(tf)
+          }
+        }
+        const t = e.to && issues.get(e.to)
+        if (t && t.feature === selected) { related.add(e.from); lanes.add(e.from_feature) }
+      })
+      return { related, relatedVirt, lanes }
+    }
+
+    // 开发摘要：宿主模型生成的项目管理总结（挂载时取一次，手动刷新旁路服务端缓存）
+    function SwimSummary({ repo, refreshKey, onRefresh }) {
+      const [state, setState] = React.useState({ phase: 'loading' })
+      React.useEffect(() => {
+        let alive = true
+        setState({ phase: 'loading' })
+        jget('/summary?repo=' + encodeURIComponent(repo) + (refreshKey > 0 ? '&force=1' : ''))
+          .then((d) => {
+            if (!alive) return
+            setState(d.ok
+              ? { phase: 'ok', text: d.summary, model: d.model, at: d.generated }
+              : { phase: 'hint', error: d.error || '摘要生成失败' })
+          })
+          .catch((e) => { if (alive) setState({ phase: 'hint', error: String(e.message ?? e) }) })
+        return () => { alive = false }
+      }, [repo, refreshKey])
+      const time = state.at ? new Date(state.at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+      return h('div', { className: 'sw-sum' },
+        h('div', { className: 'sw-sum-head' },
+          h('span', { className: 'sw-sum-title' }, '开发摘要'),
+          state.phase === 'ok' ? h('span', null, `${state.model} · ${time} 生成`) : null,
+          state.phase === 'loading' ? h('span', null, '正在请宿主模型总结…') : null,
+          h('button', { className: 'sw-sum-x', onClick: onRefresh },
+            state.phase === 'loading' && refreshKey === 0 ? '稍后再说' : '重新总结')),
+        state.phase === 'ok'
+          ? h('div', { className: 'sw-sum-body' }, state.text)
+          : state.phase === 'hint'
+            ? h('div', { className: 'sw-sum-err' }, state.error)
+            : null)
+    }
+
+    function SwimView({ data, repo, onCleanup, onCloseIssue, onRefresh }) {
+      const [filter, setFilter] = React.useState('all')
+      const [selected, setSelected] = React.useState(null)
+      const [selectedIssue, setSelectedIssue] = React.useState('')
+      const [showAll, setShowAll] = React.useState(false)
+      const [extra, setExtra] = React.useState(() => new Set())
+      const [summaryReload, setSummaryReload] = React.useState(0)
+      const viewportRef = React.useRef(null)
+      const [vw, setVw] = React.useState(360)
+      React.useEffect(() => {
+        const el = viewportRef.current
+        if (!el || typeof ResizeObserver === 'undefined') return
+        const ro = new ResizeObserver(() => setVw(el.clientWidth))
+        ro.observe(el)
+        setVw(el.clientWidth)
+        return () => ro.disconnect()
+      }, [])
+      const developing = (data.features || []).filter((f) => f.active)
+      const trusted = (f) => new Set((f.agents || []).filter((a) => a.source !== 'branch').map((a) => a.host))
+      const filtered = developing.filter((f) => filter === 'all'
+        || (filter === 'unassigned' ? trusted(f).size === 0 : trusted(f).has(filter)))
+      // 选中态以“需求仍存在于数据中”为准（脱离开发中时场景函数会以上下文泳道保留它）；
+      // 只有需求彻底消失才回退到第一个可见需求
+      let effSelected = (data.features || []).some((f) => f.id === selected) ? selected : null
+      if (selected && !effSelected) effSelected = filtered[0] ? filtered[0].id : null
+      const ctxCount = (data.features || []).filter((f) => !f.active
+        && (data.dependencies || []).some((e) => (e.kind === 'external' || e.kind === 'body')
+          && (e.from_feature === f.id || swimRefFeature(data, e) === f.id))).length
+      const scene = React.useMemo(
+        () => swimScene(data, { filter, selected: effSelected, showAllContext: showAll, extra, vw }),
+        [data, filter, effSelected, showAll, extra, vw])
+      const rel = React.useMemo(() => swimRelated(data, scene.issues, effSelected), [data, scene, effSelected])
+      const selectFeature = (id) => {
+        if (effSelected === id) { clearSel(); return }  // 再次点击同一需求区域 = 取消选中
+        setSelected(id); setSelectedIssue(''); setExtra(new Set())
+      }
+      const clearSel = () => { setSelected(null); setSelectedIssue(''); setExtra(new Set()) }
+
+      if (!(data.features || []).length) {
+        return h('div', { className: 'cpp-empty' }, '没有可展示的开发中需求')
+      }
+      const width = Math.max(vw - 2, scene.width)
+      const edgeEls = scene.edges.map((e, i) => {
+        const s = scene.positions.get(e.source)
+        const t = scene.positions.get(e.target)
+        if (!s || !t) return null
+        const sNode = scene.nodes.get(e.source)
+        const tNode = scene.nodes.get(e.target)
+        const touches = effSelected && (sNode.feature === effSelected || tNode.feature === effSelected)
+        const internal = effSelected && sNode.feature === effSelected && tNode.feature === effSelected
+        const on = !!effSelected && (internal || (e.cross && touches))
+        const x1 = s.x + scene.nodeW
+        const y1 = s.laneY + s.y + 26
+        const x2 = t.x
+        const y2 = t.laneY + t.y + 26
+        const bend = Math.max(32, Math.abs(x2 - x1) * .42)
+        const cls = (e.kind === 'body' ? ' body' : e.kind === 'external' ? ' ext' : '')
+          + (e.missing ? ' miss' : '') + (on ? ' on' : (effSelected ? ' off' : ''))
+        return h('path', { key: i, className: 'sw-edge' + cls,
+          d: `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`,
+          markerEnd: `url(#sw-arrow-${on ? 'a' : e.missing ? 'm' : 'n'})` },
+          h('title', null, `${e.origin} · ${e.ref}`))
+      })
+      const laneEls = scene.lanes.map((l) => {
+        const f = l.feature
+        const isSel = f.id === effSelected
+        const isRel = rel.lanes.has(f.id) && !isSel
+        const hidden = Math.max(0, (f.issues || []).length - l.actual)
+        const activeN = (f.issues || []).filter((i) => SW_ACTIVE.includes(i.status)).length
+        const total = f.counts.total || 1
+        const cls = 'sw-lane' + (f.active ? '' : ' is-ctx') + (isSel ? ' is-sel' : '') + (isRel ? ' is-rel' : '')
+        return h('section', { key: f.id, className: cls, style: { height: l.height + 'px' } },
+          h('button', { className: 'sw-hit', 'aria-label': (effSelected === f.id ? '取消选择 ' : '选择需求 ') + f.slug, onClick: () => selectFeature(f.id) }),
+          h('div', { className: 'sw-labell', style: { width: scene.labelW + 'px' }, title: `${f.module}/${f.slug}` },
+            h('div', { className: 'sw-lrow' },
+              h('span', { className: 'cpp-fname' }, f.slug),
+              h('span', { className: 'sw-lcount' }, `${f.counts.done || 0}/${f.counts.total}`)),
+            h('div', { className: 'sw-lmeta' }, `${f.module} · ${f.active ? '开发中' : (FSTATE_LABEL[f.fstate] || '依赖上下文')}`),
+            h('div', { className: 'sw-prog', 'aria-label': `已完结 ${f.counts.done || 0}，在制 ${activeN}，共 ${f.counts.total} 票` },
+              h('i', { className: 'pd', style: { width: (100 * (f.counts.done || 0) / total) + '%' } }),
+              h('i', { className: 'pa', style: { width: (100 * activeN / total) + '%' } })),
+            h('div', { className: 'sw-lfoot' },
+              h('span', null, `${l.actual}/${(f.issues || []).length} issue` + (l.missing ? ` · ${l.missing} 缺失` : '')),
+              isSel
+                ? h('span', null, '全部高亮')
+                : h('button', {
+                    className: 'sw-expand', 'aria-label': (l.expanded ? '收起 ' : '展开 ') + f.slug,
+                    onClick: (ev) => {
+                      ev.stopPropagation()
+                      setExtra((m) => { const nx = new Set(m); if (nx.has(f.id)) nx.delete(f.id); else nx.add(f.id); return nx })
+                    },
+                  }, l.expanded ? '收起' : hidden ? `展开 ${hidden} 票` : '已展开'))))
+      })
+      const nodeEls = [...scene.nodes.values()].map((n) => {
+        const p = scene.positions.get(n.uid)
+        if (!p) return null  // 目标缺失节点在不可见泳道时无坐标：跳过渲染，仅参与箭头判定（与原型一致）
+        const isSelF = n.feature === effSelected
+        const isRel = rel.related.has(n.uid) || rel.relatedVirt.has(n.uid)
+        const dim = effSelected && !isSelF && !isRel
+        return h('button', {
+          key: n.uid,
+          className: 'sw-issue st-' + n.status + (n.missing ? ' is-miss' : '')
+            + (isSelF ? ' is-selfeat' : '') + (isRel ? ' is-rel' : '') + (dim ? ' is-dim' : '')
+            + (selectedIssue === n.uid ? ' is-seliss' : ''),
+          style: { left: p.x + 'px', top: (p.laneY + p.y) + 'px', width: scene.nodeW + 'px' },
+          disabled: !!n.missing,
+          'aria-label': `${n.feature} ${n.id} ${n.title}`,
+          onClick: () => { if (n.missing) return; setSelected(n.feature); setSelectedIssue(n.uid); setExtra(new Set()) },
+        },
+          h('span', { className: 'sw-iid' }, n.id),
+          h('span', { className: 'sw-ititle' }, n.title),
+          h('span', { className: 'sw-ist' }, SW_STATUS[n.status] || n.status))
+      })
+      const f = scene.features.get(effSelected)
+      const selIss = selectedIssue ? scene.issues.get(selectedIssue) : null
+      let detail
+      if (!f) {
+        detail = [h('div', { key: 't', className: 'cpp-dtitle' }, '未选择需求'),
+          h('div', { key: 'l', className: 'cpp-dline' }, '点击任意需求块，查看本需求与跨需求依赖的联动高亮。')]
+      } else {
+        const relCount = rel.related.size + rel.relatedVirt.size
+        const selEdges = scene.edges.filter((e) => {
+          const s = scene.nodes.get(e.source)
+          const t = scene.nodes.get(e.target)
+          return (s.feature === effSelected && t.feature === effSelected)
+            || (e.cross && (s.feature === effSelected || t.feature === effSelected))
+        }).length
+        const drill = () => {
+          const text = selIss
+            ? `读 ${repo} 里 ${selIss.id} 的 impl-log、评审报告与票文件，用大白话讲这张票现在到哪一步、有没有卡住、下一步是什么`
+            : `读 ${repo} 里需求「${f.slug}」的全部在制票 impl-log 与票文件，讲各票进度与卡点`
+          navigator.clipboard?.writeText(text).catch(() => {})
+        }
+        const acts = []
+        if (selIss) {
+          acts.push(h('button', { key: 'd', className: 'cpp-drill', onClick: drill, title: '复制下钻提问，粘到会话即可' }, '复制下钻提问'))
+          acts.push(h('button', { key: 'c', className: 'cpp-drill cpp-cleanup-detail',
+            onClick: () => onCleanup({ branch: selIss.branch || null, issue: selIss.key }),
+            title: '按开发收尾规则预检；是否可执行以预检为准' }, '清理'))
+          if (selIss.status !== 'done') {
+            acts.push(h('button', { key: 'x', className: 'cpp-drill',
+              onClick: () => onCloseIssue({ key: selIss.key, title: selIss.title, status: selIss.status }),
+              title: '仅把需求状态改为 deferred，不删除分支/worktree/dev' }, '关闭需求'))
+          }
+        }
+        detail = [
+          h('div', { key: 't', className: 'cpp-dtitle' }, selIss ? `${selIss.id} · ${selIss.title}` : `${f.slug} · 已选择整个需求`),
+          h('div', { key: 's', className: 'cpp-dline' }, selIss
+            ? `${selIss.feature} · ${SW_STATUS[selIss.status] || selIss.status}`
+            : `${f.module} · 本需求全部 issue 已展开并高亮`),
+          selIss ? h('div', { key: 'p', className: 'cpp-dline' }, selIss.issue_path) : null,
+          h('div', { key: 'c', className: 'sw-counts' },
+            h('span', null, h('b', null, (f.issues || []).length), ' 本需求 issue'),
+            h('span', null, h('b', null, relCount), ' 跨需求直接关联'),
+            h('span', null, h('b', null, selEdges), ' 高亮箭头')),
+          acts.length ? h('div', { key: 'a', className: 'cpp-detail-actions' }, acts) : null]
+      }
+      const arrow = (id, fill) => h('marker', { key: id, id, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 5, markerHeight: 5, orient: 'auto' },
+        h('path', { d: 'M0 0L8 4L0 8Z', fill }))
+      return h('div', null,
+        h(SwimSummary, { repo, refreshKey: summaryReload, onRefresh: () => setSummaryReload((n) => n + 1) }),
+        h('div', { className: 'sw-toolbar' },
+          h('span', { className: 'sw-label' }, 'Agent 关联'),
+          [['all', '全部'], ['claude', 'Claude'], ['codex', 'Codex'], ['zcode', 'ZCode'], ['unassigned', '未绑定']].map(([k, label]) =>
+            h('button', { key: k, className: 'sw-btn' + (filter === k ? ' is-on' : ''),
+              'aria-pressed': String(filter === k),
+              onClick: () => { setFilter(k); setExtra(new Set()) } }, label)),
+          h('span', { style: { flex: 1 } }),
+          h('button', { className: 'sw-btn' + (showAll ? ' is-on' : ''), 'aria-pressed': String(showAll),
+            onClick: () => setShowAll((v) => !v) }, showAll ? '收起非开发中依赖' : `显示非开发中依赖 (${ctxCount})`),
+          h('button', { className: 'sw-btn', onClick: clearSel }, '清除选择'),
+          h('button', { className: 'sw-btn', 'aria-label': '刷新', title: '刷新', onClick: onRefresh }, '↻')),
+        h('div', { className: 'sw-legend' },
+          h('span', null, h('i', { className: 'sw-nsample' }), '所选需求全部 issue'),
+          h('span', null, h('i', { className: 'sw-nsample rel' }), '其他需求的直接关联 issue'),
+          h('span', null, h('i', { className: 'sw-lsample' }), '联动高亮箭头'),
+          h('span', null, h('i', { className: 'sw-lsample miss' }), '目标缺失')),
+        h('div', { className: 'sw-viewport', ref: viewportRef },
+          h('div', { className: 'sw-canvas', style: { width: width + 'px', height: scene.height + 'px' } },
+            laneEls,
+            h('svg', { className: 'sw-edges', width, height: scene.height, 'aria-hidden': true },
+              h('defs', null,
+                arrow('sw-arrow-n', 'rgba(154,160,166,.6)'),
+                arrow('sw-arrow-a', '#4f8ff7'),
+                arrow('sw-arrow-m', '#f2585e')),
+              edgeEls),
+            nodeEls)),
+        h('div', { className: 'sw-detail', 'aria-live': 'polite' }, detail))
     }
 
     function Tree({ data, openMap, foldMap, onToggle, onFold, onCleanup, onRefresh, focusKey, onCloseIssue }) {
@@ -405,6 +860,9 @@ window.__ModuleLoader__.load({
       const [reload, setReload] = React.useState(0)
       const [cleanup, setCleanup] = React.useState(null)
       const [closeRequest, setCloseRequest] = React.useState(null)
+      const [view, setView] = React.useState('tree')
+      const [swim, setSwim] = React.useState(null)
+      const [swimError, setSwimError] = React.useState(null)
 
       React.useEffect(() => {
         let alive = true
@@ -417,6 +875,19 @@ window.__ModuleLoader__.load({
         const t = setInterval(load, 10000)
         return () => { alive = false; clearInterval(t) }
       }, [reload, repo])
+
+      React.useEffect(() => {
+        if (view !== 'swim') return
+        let alive = true
+        setSwim(null)
+        setSwimError(null)
+        const load = () => jget('/swim?repo=' + encodeURIComponent(repo))
+          .then((d) => { if (alive) { setSwim(d); setSwimError(null) } })
+          .catch((e) => { if (alive) setSwimError(String(e.message ?? e)) })
+        load()
+        const t = setInterval(load, 10000)
+        return () => { alive = false; clearInterval(t) }
+      }, [view, reload, repo])
 
       const focusKey = React.useMemo(() => focusTarget(data, currentSession), [data, currentSession])
       const dataReady = !!data
@@ -501,18 +972,36 @@ window.__ModuleLoader__.load({
       return h('div', { 'data-cpp': true },
         h('style', null, CSS),
         h('div', { className: 'cpp-body' },
-          error
-            ? h('div', { className: 'cpp-err' }, '数据源不可达：' + error + '\n（当前工作区未登记或服务异常）')
-            : data
-              ? h(Tree, {
-                  data, openMap, foldMap, focusKey,
-                  onToggle: (k) => setOpenMap((m) => ({ ...m, [k]: !m[k] })),
-                  onFold: (k) => setFoldMap((m) => ({ ...m, [k]: !m[k] })),
-                  onCleanup: beginCleanup,
-                  onCloseIssue: beginCloseIssue,
-                  onRefresh: () => setReload((n) => n + 1),
-                })
-              : h('div', { className: 'cpp-loading' }, '读取中…')),
+          h('div', { className: 'cpp-viewtabs', role: 'tablist', 'aria-label': '进度视图' },
+            h('button', { role: 'tab', 'aria-selected': view === 'tree',
+              className: 'cpp-viewtab' + (view === 'tree' ? ' is-on' : ''),
+              onClick: () => setView('tree') }, '分支树'),
+            h('button', { role: 'tab', 'aria-selected': view === 'swim',
+              className: 'cpp-viewtab' + (view === 'swim' ? ' is-on' : ''),
+              onClick: () => setView('swim') }, '开发中')),
+          view === 'tree'
+            ? (error
+                ? h('div', { className: 'cpp-err' }, '数据源不可达：' + error + '\n（当前工作区未登记或服务异常）')
+                : data
+                  ? h(Tree, {
+                      data, openMap, foldMap, focusKey,
+                      onToggle: (k) => setOpenMap((m) => ({ ...m, [k]: !m[k] })),
+                      onFold: (k) => setFoldMap((m) => ({ ...m, [k]: !m[k] })),
+                      onCleanup: beginCleanup,
+                      onCloseIssue: beginCloseIssue,
+                      onRefresh: () => setReload((n) => n + 1),
+                    })
+                  : h('div', { className: 'cpp-loading' }, '读取中…'))
+            : (swimError
+                ? h('div', { className: 'cpp-err' }, '数据源不可达：' + swimError + '\n（当前工作区未登记或服务异常）')
+                : swim
+                  ? h(SwimView, {
+                      data: swim, repo,
+                      onCleanup: beginCleanup,
+                      onCloseIssue: beginCloseIssue,
+                      onRefresh: () => setReload((n) => n + 1),
+                    })
+                  : h('div', { className: 'cpp-loading' }, '读取中…'))),
         cleanup ? h(CleanupModal, {
           state: cleanup,
           onClose: () => { if (cleanup.phase !== 'apply') setCleanup(null) },

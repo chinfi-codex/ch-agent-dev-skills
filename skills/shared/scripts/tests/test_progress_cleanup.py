@@ -179,6 +179,38 @@ class CleanupFixture(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.repo), "apply", "--check", str(salvage / "branch.patch")],
                        check=True, capture_output=True)
 
+    def test_discard_closes_ticket_status(self):
+        """丢弃开发成功后票状态闭环为 deferred，并写关闭 digest 事件"""
+        branch, wt = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt)
+        self.write_issue("issue-001", "in-progress")  # 磁盘状态与场景一致（setUp 默认写 done）
+        plan = self.plan(branch, wt, status="in-progress")
+        result = pc.execute_plan(plan, "discard")
+        self.assertTrue(result["worktree_removed"])
+        progress.close_after_discard(plan, result)
+        self.assertEqual(result["status"], "deferred")
+        self.assertEqual(result["previous_status"], "in-progress")
+        text = (self.feature_dir / "issues" / "issue-001-sample.md").read_text(encoding="utf-8")
+        self.assertIn("status: deferred", text)
+        journal = (self.feature_dir / "progress.jsonl").read_text(encoding="utf-8")
+        self.assertIn("关闭需求", journal)
+
+    def test_merge_preserve_writes_merged_event(self):
+        """合并保留成功后补写 merged 事件（backfill）；合并失败不写任何事件"""
+        branch, wt = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt)
+        self.write_issue("issue-001", "in-progress")
+        plan = self.plan(branch, wt, status="in-progress")
+        result = pc.execute_plan(plan, "merge")
+        self.assertTrue(result["merge_commit"])
+        progress.record_merged_event(plan, result)
+        journal = (self.feature_dir / "progress.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"merged"', journal)
+        self.assertIn("backfill", journal)
+        # 票状态不被插件擅改（对账契约由监督循环收口）
+        text = (self.feature_dir / "issues" / "issue-001-sample.md").read_text(encoding="utf-8")
+        self.assertIn("status: in-progress", text)
+
     def test_abandoned_merge_preserve_merges_then_cleans(self):
         branch, wt = self.merged_worktree()
         self.add_unmerged_commit(branch, wt)

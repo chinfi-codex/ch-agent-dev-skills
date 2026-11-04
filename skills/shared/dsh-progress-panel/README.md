@@ -1,15 +1,19 @@
 # @ch-agent/dsh-progress-panel
 
-DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。按分支嵌套的票树（git 祖先链定父子）+ 活性探针 + 宿主会话绑定徽章；残留分支与中途搁置需求均提供「清理」操作。
+DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。两个视图：「分支树」（按分支嵌套的票树，git 祖先链定父子）与「开发中」（需求×issue 横向泳道，前置 → 后续，跨需求依赖箭头联动高亮）；均带活性探针 + 宿主会话绑定徽章；残留分支与中途搁置需求均提供「清理」操作。
 
 ## 结构
 
 - `index.js` 服务端半端：
-  - `GET /api/ch-progress/payload` → `../scripts/progress.py payload`（20s 进程内缓存）
+  - `GET /api/ch-progress/payload` → `../scripts/progress.py payload`（20s 进程内缓存，分支树视图）
+  - `GET /api/ch-progress/swim` → `../scripts/progress.py swim`（20s 进程内缓存，开发中泳道视图）
+  - `GET /api/ch-progress/summary?force=1` → `../scripts/progress.py summary`（宿主模型生成开发摘要；5 分钟进程内缓存，force 旁路；API Key 经进程环境传递、不进 argv）
   - `POST /api/ch-progress/cleanup/preview` → 只读预检
   - `POST /api/ch-progress/cleanup/apply` → 确认指纹执行（要求 JSON 与 `x-ch-progress-action: apply`）
-- `client.js` 浏览器半端：`window.__ModuleLoader__.load` 自注册；右侧栏 tab 类型 + body + title 三件套；tab 定义的 `guide` 数组在「开始」页提供「开发进度」工具卡（点击原生切换到进度页签）；切换对话时继承右侧栏展开状态（用户主动折叠则不强制重开）；10s 轮询，任务行折叠、票详情、清理确认弹窗
-- `../scripts/progress_cleanup.py`：清理原语与确认指纹；`tests/test_progress_cleanup.py` 覆盖安全边界
+- `client.js` 浏览器半端：`window.__ModuleLoader__.load` 自注册；右侧栏 tab 类型 + body + title 三件套；tab 定义的 `guide` 数组在「开始」页提供「开发进度」工具卡（点击原生切换到进度页签）；切换对话时继承右侧栏展开状态（用户主动折叠则不强制重开）；10s 轮询，视图切换、泳道折叠/展开、再次点击需求区域取消选中、票详情、清理确认弹窗。开发中泳道：issue 卡片按状态着底色（在跑蓝 / 评审紫 / 待合并浅蓝 / 等人红 / 已完结绿）；已完结票只显示最近 3 天（完结时间用 merged 事件或 status 注释日期，未知视同过期）；未展开泳道默认显示在制 + 可派发（confirmed）后续票，proposed 草稿不进
+- `../scripts/progress.py` `swim` 命令：泳道数据源——需求开发中判定只看票状态（在跑/评审中/待合并/等人），agent 关联区分 派发/会话/分支 三种来源；done 票带 `done_ts`（merged 事件优先，回退 status 注释日期）；依赖显式分类 `internal`（blocked-by，同需求内解析）/ `external`（external-blocked-by）/ `body`（正文「外部前置/外部依赖」，带 文件:行 证据）/ `milestone`（非 issue 引用）；目标缺失保留 `resolved:false`，不猜归属。仅 1 次分支名枚举，无祖先链开销
+- `../scripts/progress.py` `summary` 命令：开发摘要（项目管理视角：整体进展/各需求阶段/卡点风险/建议关注）。事实来源 = swim payload（含等人备注、复跑打回、评审轮次）；模型配置优先级：命令行参数 > `CH_PROGRESS_SUMMARY_BASE_URL/MODEL/API_KEY` 环境变量 > 宿主配置 `~/.config/pandu/host.json` 的 `/model`（api_key 按其 `api_key_ref_env` 先查进程环境、再回退同目录 `local.env`）；OpenAI 兼容 `/chat/completions`，max_tokens 3000（deepseek-flash 等推理模型的思考会先消耗预算，正文为空时报错并提示重试）。客户端在「开发中」视图顶部展示，挂载时取一次（服务端 5 分钟缓存），「重新总结」按钮旁路缓存
+- `../scripts/progress_cleanup.py`：清理原语与确认指纹；`tests/test_progress_cleanup.py`、`tests/test_progress_swim.py` 覆盖安全边界与数据口径
 
 ## 工作区与会话联动
 
@@ -22,7 +26,7 @@ DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。�
 
 ## 清理边界
 
-- 清理入口全状态可见。`done` 走普通收尾；非 done（除 `proposed` 未开工）按「中途搁置」提供两个选择：**丢弃开发**（保存补丁后删除 worktree 和本地分支）或**合并保留**（先尝试合入已提交内容，成功后再清理）。活跃后代分支仍禁止清理。
+- 清理入口全状态可见。`done` 走普通收尾；非 done（除 `proposed` 未开工）按「中途搁置」提供两个选择：**丢弃开发**（保存补丁后删除 worktree 和本地分支，并把票状态置 `deferred` 关闭——失败时如实告警）或**合并保留**（先尝试合入已提交内容，成功后再清理，票状态不变，验收收口后按正常流程置 done）。活跃后代分支仍禁止清理。
 - **无本地分支（issue-only）**：只清理该票 `dev/impl/<issue>/` 中明确可判的过程文件，不删除代码、分支或票状态；`proposed` 仍不可清理，dev 无安全候选时提示无可清理文件，不生成空清理。
 - 共同前置：confirm 指纹重验 + salvage。中途搁置未合入时额外保存完整 `branch.patch`；未提交改动保存 `uncommitted.patch` 和文件副本，不参与合并。合并保留要求目标 worktree 干净，冲突自动 abort，原 worktree 和分支保留；合并成功不自动把票置为 done，后续仍按正常验收收口。
 - 执行链：预检 → 用户选择 → 后台重验 → salvage → 按选择合并或直接进入 worktree 删除 → `git worktree prune` → 本地分支处理 → dev 过程文件清理。普通 done 未合入的分支仍保留，不删远端分支。
