@@ -163,8 +163,31 @@ def compatibility_view(records):
     return "\n".join(rows)+"\n"
 
 
+def homepage(records):
+    """Return a short, deterministic index; detailed architecture stays sharded."""
+    modules = sorted({r.get("module", "") for r in records
+                      if r.get("kind") == "module" and r.get("module")})
+    current = sum(r.get("status") == "current" for r in records)
+    release_only = sum(r.get("status") == "release_only" for r in records)
+    pending = sum(r.get("status") == "needs_verification" for r in records)
+    lines = [
+        "# 架构图谱", "",
+        "本页由 `docs/architecture/*.json` 确定性生成；请只编辑架构分片，不要在本页维护架构表。",
+        "读取与筛选：`python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]`。",
+        "", "## 覆盖范围", "",
+        f"- 模块：{len(modules)}（" + "、".join(modules) + "）",
+        f"- 架构记录：{len(records)}；current {current}，release_only {release_only}，needs_verification {pending}",
+        "", "## 写入规则", "",
+        "模块、接口与约束均以 `docs/architecture/*.json` 分片为唯一写入源；缺少代码、发布或决策证据的记录保持 `needs_verification`。",
+        "按票更新对应分片，并在记录中保留来源、验证证据、分支/版本适用范围及替代关系。",
+        "", "## 证据与历史", "",
+        "迁移审计、旧表逐行归档和未核实项见 `docs/architecture/evidence/`。历史记录不因本页生成而删除。",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def main(argv=None):
-    ap=argparse.ArgumentParser(); ap.add_argument("--repo",type=Path,default=Path.cwd()); ap.add_argument("--check",action="store_true"); ap.add_argument("--module"); ap.add_argument("--interface"); ap.add_argument("--version"); ap.add_argument("--status"); ap.add_argument("--compat-out",type=Path); a=ap.parse_args(argv)
+    ap=argparse.ArgumentParser(); ap.add_argument("--repo",type=Path,default=Path.cwd()); ap.add_argument("--check",action="store_true"); ap.add_argument("--module"); ap.add_argument("--interface"); ap.add_argument("--version"); ap.add_argument("--status"); ap.add_argument("--compat-out",type=Path); ap.add_argument("--homepage-out",type=Path); a=ap.parse_args(argv)
     graph_records, errors = check(a.repo)
     if a.check:
         for e in errors: print("FAIL "+e)
@@ -173,7 +196,8 @@ def main(argv=None):
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     records, _ = read_records(a.repo)
     selected=select(records,module=a.module,interface=a.interface,version=a.version,status=a.status)
-    if a.compat_out: a.compat_out.write_text(compatibility_view(selected),encoding="utf-8")
+    if a.homepage_out: a.homepage_out.write_text(homepage(records),encoding="utf-8")
+    elif a.compat_out: a.compat_out.write_text(compatibility_view(selected),encoding="utf-8")
     else: print(json.dumps(selected,ensure_ascii=False,indent=2))
     return 0
 if __name__ == "__main__": raise SystemExit(main())

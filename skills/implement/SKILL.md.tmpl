@@ -95,8 +95,8 @@ allowed-tools:
 - 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
 - **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现。scoped+ 级触发器（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 反向闭包；闭包不可枚举时标「闭包不完整」仍 scoped，由集成票与每日回归兜底；选择集大小不是升档理由；升档时同步更新票 `tier-reason`
-- **契约落现行态（票 DoD 含 ARCHITECTURE.md 契约条目时）**：实现完成后在 worktree 分支内就地更新 `docs/ARCHITECTURE.md`「接口现行态」表——新增 / 修改 / 废弃逐条对应 tech-spec 3.2，现行签名以最终代码为准，「来源」列填上游 tech-spec 文件名，「生效日期」填本票实现完成日。这是 dev 阶段唯一允许写的 docs/ 文件（开口规则见 GLOSSARY dev 段）；模块表 / 约束表不碰
-- **flow-back 契约补记**：本票 diff 实际改动了接口表已登记接口的「代码位置」文件，而票未声明契约 DoD → 同分支补记该表对应条目，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与补记原因（评审按契约 diff 复核，漏记视同红线）。没碰已登记接口的票不读不改该文件；发现登记与代码不符但本票未改它 → 记 impl-log「遗留」，由文档阶段统一处理
+- **契约落图谱（票 DoD 含架构契约条目时）**：实现完成后在 worktree 分支内按稳定 ID 更新对应 `docs/architecture/*.json` 分片——新增 / 修改 / 替代逐条对应 tech-spec 3.2；只有代码已合并且代码、发布或决策证据可复核时才标 `current`，否则保留 `needs_verification`。`docs/ARCHITECTURE.md` 是生成首页，禁止手改
+- **flow-back 契约补记**：本票 diff 改动接口记录绑定的代码位置而票未声明契约 DoD → 同分支补记对应图谱记录，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与原因。发现记录与代码不符但本票未改它，记入 impl-log「遗留」，由对应文档阶段更新分片
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 

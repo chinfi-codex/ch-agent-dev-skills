@@ -76,6 +76,13 @@ class GraphTest(unittest.TestCase):
     def test_unverified_excluded_from_current_query(self):
         self.put([self.row(status='needs_verification',verified_commit=None)]); records, errors=graph.check(self.root)
         self.assertEqual([],errors); self.assertEqual([],graph.select(records))
+
+    def test_homepage_is_deterministic_and_short(self):
+        rows=[self.row(status='needs_verification',verified_commit=None)]
+        first=graph.homepage(rows)
+        self.assertEqual(first,graph.homepage(rows))
+        self.assertLess(len(first.splitlines()),20)
+        self.assertIn('唯一写入源',first)
     def test_release_only_uses_historical_commit_when_source_moved(self):
         (self.root/'src.py').write_text('def run(): pass\n')
         subprocess.run(['git','init','-q',str(self.root)],check=True)

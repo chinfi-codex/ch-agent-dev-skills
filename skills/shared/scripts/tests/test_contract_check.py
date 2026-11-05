@@ -156,6 +156,26 @@ class InitTest(unittest.TestCase):
 
 
 class CheckTest(unittest.TestCase):
+    def test_legacy_project_without_graph_remains_compatible(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(Path(td), arch=ARCH_OK,
+                             code_files=[("src/config/loader.py", "def load_config(path):\n    return {}\n")])
+            (root / "src/config").mkdir(parents=True, exist_ok=True)
+            (root / "src/ingest").mkdir(parents=True, exist_ok=True)
+            r = run("--check", "--repo", str(root))
+            self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_graph_project_rejects_legacy_tables_negative_control(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(Path(td), arch=ARCH_OK)
+            graph_dir = root / "docs" / "architecture"
+            graph_dir.mkdir()
+            (graph_dir / "records.json").write_text(
+                '{"schema":"pandu.architecture-graph/v1","records":[]}', encoding="utf-8")
+            r = run("--check", "--repo", str(root))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("GRAPH-2", r.stdout)
+
     def test_consistent_project_passes(self):
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(

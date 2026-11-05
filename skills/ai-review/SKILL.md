@@ -43,7 +43,7 @@ allowed-tools:
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
-- `docs/ARCHITECTURE.md` 是禁写令的唯一例外，且仅限其「接口现行态」表：票 DoD 声明契约更新时，本票在 worktree 分支内就地更新该表（随代码同一 MR 合入，合入后即为现行态）；未声明的票不碰。实现期 diff 实际改动了接口表已登记接口而票未声明（flow-back）：同分支补记该表并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。模块表 / 约束表仍只由文档阶段直写，dev 阶段不碰
+- 架构事实唯一写入源是 `docs/architecture/*.json`。票 DoD 声明契约更新时，承接票在 worktree 分支内按稳定 ID 修改接口分片，随代码同一 MR 合入；flow-back 同样补记对应分片并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。`docs/ARCHITECTURE.md` 是确定性生成的只读短首页，所有开发阶段均不得手改。
 
 ## 完成状态协议
 
@@ -225,7 +225,7 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
 - **scoped 预算延期复核**：核对结果提示 `budget-partial` 时，只读 evidence 与 scoped-ref 的延期清单，复核延期项确为间接闭包、不是票 DoD 行为点的唯一覆盖，也未借「缩 scope」移除核心验收；机器分区、direct 通过、base / tree 与预算由 process_check 已核，不重算、不重跑。发现核心行为仅靠延期项覆盖 → BLOCKER（critical）；合法延期如实记录，不等待集成 full / CI，也不因此推迟评审结论
 - **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
-- **契约 diff 复核**（`docs/ARCHITECTURE.md`「接口现行态」表）：票 DoD 含契约条目时，核对 diff 中该表改动与 tech-spec 3.2 意图一致、现行签名与代码实现一致（以代码为准）、来源列填了上游 tech-spec、未顺手改无关条目——不一致或该更新没更新 → **BLOCKER（critical）**。票未声明契约条目而 diff 改了接口表已登记接口的「代码位置」文件（flow-back 情形）：漏补记接口表或 impl-log 映射缺失 → **BLOCKER（critical）**，视同红线；补记内容同样按上款复核
+- **契约 diff 复核**（`docs/architecture/*.json`）：票 DoD 含契约条目时，核对对应稳定 ID 的分片改动与 tech-spec 3.2 一致；`current` 必须有可复核来源哈希、提交和证据，缺证应为 `needs_verification`。票未声明契约条目而改动图谱记录绑定的代码位置（flow-back）：漏补分片或 impl-log 映射缺失 → **BLOCKER（critical）**。`docs/ARCHITECTURE.md` 是生成首页，不审核手工架构事实
 - 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 
 **与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判测试执行状态——full 是否已跑、归因是否完成、evidence 是否已更新到最终 commit，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；这些由 `process_check.py --phase merge` 在收口时把关。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。

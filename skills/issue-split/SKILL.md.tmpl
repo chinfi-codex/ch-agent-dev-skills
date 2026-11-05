@@ -68,7 +68,7 @@ allowed-tools:
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、`./docs/ARCHITECTURE.md`（存在才读：tech-spec 3.2 非空时，接口表是生成契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图核对）
+- 补读：`./docs/GLOSSARY.md`、通过 `architecture_graph.py --repo <项目根> --interface <关键词>` 查询接口图谱（tech-spec 3.2 非空时作为契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图核对）
 
 ---
 
@@ -96,7 +96,7 @@ allowed-tools:
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。
 
-**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里，条目形态可自动判定——``git diff <base>...HEAD -- docs/ARCHITECTURE.md | grep <接口名>`` → 期望命中接口条目；同一票的多个接口可合并为一条多 grep 的命令。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进 ARCHITECTURE」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
+**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里并引用稳定图谱 ID；用 `architecture_graph.py --interface <关键词> --status needs_verification` 核对迁移中记录，再检查对应分片 diff。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进入架构图谱」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
 
 **计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
 

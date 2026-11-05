@@ -1,13 +1,9 @@
-# ARCHITECTURE 初始模板
+# ARCHITECTURE 旧项目兼容初始化模板
 
 > 本文件是使用方项目 `./docs/ARCHITECTURE.md` 的初始结构。
-> 懒创建：第一次契约落笔时按本结构创建（初始化盘点 `/contract_check.py --init` 或首个含接口变更的票）。
-> ARCHITECTURE 是项目级唯一架构契约文件：原地更新，不加日期后缀，不新建版本文件。
+> 仅供尚无 `docs/architecture/*.json` 图谱分片的旧项目兼容读取。
 > 只记「现行是什么」——模块、接口、跨 feature 约束的当前状态；历史与决策理由不进本文件（在 tech-spec 快照链中，经其 frontmatter `supersedes` 追溯）。
-> 写入权限分节：
-> - 「模块现行态」：由 `/pd-plan` 在用户确认模块新建或归属时与 GLOSSARY「feature-module 归档」同步登记（主工作区直写）。
-> - 「跨 feature 架构约束」：由 `/tech-spec` 定稿时直写（仅跨 feature 级约束；单 feature 约束留在 tech-spec 约束栏）。
-> - 「接口现行态」：**只随 feature 分支更新**——接口在代码合并后才成为现行态，由承接票在 worktree 分支内就地更新、随 MR 原子合入；实现期发现已登记接口被本票 diff 改动而票未声明（flow-back），同分支补记并在 impl-log 登记。
+> 图谱项目中的模块、接口、约束必须按稳定 ID 写入分片；首页由同步后的 `architecture_graph.py --homepage-out docs/ARCHITECTURE.md` 生成。
 
 # ARCHITECTURE
 

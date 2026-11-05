@@ -337,13 +337,33 @@ def check_code(repo, results, arch_rows, arch_interfaces):
 
 
 def check_architecture_graph(repo, results):
-    """Validate optional sharded graph while keeping the legacy checks active."""
-    if not (repo / "docs" / "architecture").exists():
+    """Validate graph shards; once present, reject legacy tables as write targets."""
+    graph_dir = repo / "docs" / "architecture"
+    if not graph_dir.exists():
         return
     import architecture_graph
     _, errors = architecture_graph.check(repo)
     for error in errors:
         fail(results, "GRAPH-1", error)
+    graph_records, _ = architecture_graph.load_graph(repo)
+    module_records = [r for r in graph_records if r.get("kind") == "module"]
+    glossary_modules = module_set_from_glossary(repo)
+    if module_records and glossary_modules is not None:
+        graph_modules = {r.get("module") for r in module_records if r.get("module")}
+        if graph_modules != glossary_modules:
+            fail(results, "MOD-1", "图谱模块分片与 GLOSSARY 归档不一致："
+                 f"仅 GLOSSARY 有 {sorted(glossary_modules - graph_modules)}，"
+                 f"仅图谱有 {sorted(graph_modules - glossary_modules)}")
+    arch_path = repo / ARCH_REL
+    if arch_path.is_file():
+        text = arch_path.read_text(encoding="utf-8")
+        headings = ("模块现行态", "接口现行态", "跨 feature 架构约束")
+        present = [heading for heading in headings
+                   if re.search(r"^##\s+" + re.escape(heading) + r"\s*$", text, re.M)]
+        if present:
+            fail(results, "GRAPH-2",
+                 "图谱分片已存在，ARCHITECTURE.md 仍保留旧架构表标题："
+                 + "、".join(present) + "；首页只能生成，架构修改必须写入 docs/architecture/*.json")
 
 
 def run_check(repo):
@@ -353,8 +373,9 @@ def run_check(repo):
     if arch_text is None:
         info(results, "INIT", "docs/ARCHITECTURE.md 未创建；无契约需求的项目可跳过，有接口变更的需求应先 --init 建档")
     glossary_modules = module_set_from_glossary(repo)
-    arch_rows = parse_arch_modules(arch_text) if arch_text is not None else None
-    arch_interfaces = parse_arch_interfaces(arch_text) if arch_text is not None else []
+    graph_mode = (repo / "docs" / "architecture").is_dir()
+    arch_rows = parse_arch_modules(arch_text) if arch_text is not None and not graph_mode else None
+    arch_interfaces = parse_arch_interfaces(arch_text) if arch_text is not None and not graph_mode else []
     specs = find_tech_specs(repo)
 
     check_mod1(repo, results, glossary_modules, arch_rows)
