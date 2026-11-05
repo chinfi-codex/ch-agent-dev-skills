@@ -163,15 +163,17 @@ def compatibility_view(records):
     return "\n".join(rows)+"\n"
 
 
-def homepage(records):
+def homepage(records, baseline_date=None):
     """Return a short, deterministic index; detailed architecture stays sharded."""
     modules = sorted({r.get("module", "") for r in records
                       if r.get("kind") == "module" and r.get("module")})
     current = sum(r.get("status") == "current" for r in records)
     release_only = sum(r.get("status") == "release_only" for r in records)
     pending = sum(r.get("status") == "needs_verification" for r in records)
-    lines = [
-        "# 架构图谱", "",
+    lines = ["# 架构图谱", ""]
+    if isinstance(baseline_date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", baseline_date):
+        lines.extend([f"<!-- baseline: {baseline_date} -->", ""])
+    lines.extend([
         "本页由 `docs/architecture/*.json` 确定性生成；请只编辑架构分片，不要在本页维护架构表。",
         "读取与筛选：`python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]`。",
         "", "## 覆盖范围", "",
@@ -182,7 +184,7 @@ def homepage(records):
         "按票更新对应分片，并在记录中保留来源、验证证据、分支/版本适用范围及替代关系。",
         "", "## 证据与历史", "",
         "迁移审计、旧表逐行归档和未核实项见 `docs/architecture/evidence/`。历史记录不因本页生成而删除。",
-    ]
+    ])
     return "\n".join(lines) + "\n"
 
 
@@ -196,7 +198,13 @@ def main(argv=None):
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     records, _ = read_records(a.repo)
     selected=select(records,module=a.module,interface=a.interface,version=a.version,status=a.status)
-    if a.homepage_out: a.homepage_out.write_text(homepage(records),encoding="utf-8")
+    if a.homepage_out:
+        baseline_date = None
+        audit_path = a.repo / "docs" / "architecture" / "evidence" / "cutover-audit.json"
+        if audit_path.is_file():
+            try: baseline_date = json.loads(audit_path.read_text(encoding="utf-8")).get("spec_baseline_date")
+            except (OSError, json.JSONDecodeError): pass
+        a.homepage_out.write_text(homepage(records, baseline_date),encoding="utf-8")
     elif a.compat_out: a.compat_out.write_text(compatibility_view(selected),encoding="utf-8")
     else: print(json.dumps(selected,ensure_ascii=False,indent=2))
     return 0
