@@ -24,6 +24,7 @@ const fragmentMap: Record<string, string> = {
   DEV_CONFIG: "dev-config.md",
   DISPATCH_PROTOCOL: "dispatch-protocol.md",
   SUPERVISION_LOOP: "supervision-loop.md",
+  ARCHITECTURE_GRAPH: "architecture-graph.md",
 };
 
 const templatesDir = join(rootDir, "shared", "templates");

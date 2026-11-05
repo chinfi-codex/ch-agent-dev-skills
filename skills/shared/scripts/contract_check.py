@@ -336,6 +336,16 @@ def check_code(repo, results, arch_rows, arch_interfaces):
                          f"接口「{row[0]}」登记的符号在 {path_part} 中检索不到：{symbol.strip()}（漂移或已改名）")
 
 
+def check_architecture_graph(repo, results):
+    """Validate optional sharded graph while keeping the legacy checks active."""
+    if not (repo / "docs" / "architecture").exists():
+        return
+    import architecture_graph
+    _, errors = architecture_graph.check(repo)
+    for error in errors:
+        fail(results, "GRAPH-1", error)
+
+
 def run_check(repo):
     results = []
     arch_path = repo / ARCH_REL
@@ -348,6 +358,7 @@ def run_check(repo):
     specs = find_tech_specs(repo)
 
     check_mod1(repo, results, glossary_modules, arch_rows)
+    check_architecture_graph(repo, results)
     check_spec1(repo, results, specs)
     check_spec2(repo, results, specs, arch_text)
     if arch_text is not None:

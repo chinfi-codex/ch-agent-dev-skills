@@ -236,6 +236,17 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - **循环内验证在本机**：TDD 见红 / 变绿、fast、DoD、scoped、归因补跑、独立评审复测与主会话验收复跑都在本票 worktree 执行；重套件（scoped / 归因补跑）经 `shared/scripts/test_slots.py run` 包装拿整机槽位（见 `quality-gate` / `host-budget`）。不为跑循环内测试另建测试主机，也不新增把测试命令提交到其他机器执行的通道。
 - **远端只承接 push 触发的 CI full**：`verify-policy.full-execution: ci-only` 时，判读机上的测试只有一条入口——已登记分支 push（及同一 CI workflow 的定时 / 手工触发）触发的 full workflow，它在判读机独立 checkout 被 push 的提交并自行调用判读机预算封装。本机、票内、监督循环都不向其提交命令、也不补跑 full；CI 不可用时保持未验证，不降级本机补跑。
 
+
+## 架构图谱与经验的消费义务
+
+- 读取现行架构或影响分析时，使用 `python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]`；现有 `docs/ARCHITECTURE.md` 表由同一读取器兼容读取。分片存在后以 `docs/architecture/*.json` 为结构化真源，图谱查询默认排除 `needs_verification`。
+- 所有开发技能按模块/分类/适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
+- `/pd-plan` 在方案中记录受影响模块及其现行架构记录 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
+- `/tech-spec` 标记新增、修改、废弃或版本限定的接口/依赖关系，引用图谱 ID 与命中的项目经验；契约更新说明来源定位和验证入口。
+- `/issue-split` 将图谱记录更新、替代关系、失败场景与验证义务拆到具体票及 DoD，避免只在集成票留空泛责任。
+- `/implement` 按票更新图谱；只有代码或契约已生效且有可复核依据时，才能把记录标为 `current` 并填写验证提交/证据。推断或缺失证据保留 `needs_verification`。
+- `/review` 在契约巡检时运行 `contract_check.py --check`。事实更正需已生效代码/发布证据；职责或语义争议交回原责任环节，不以复盘直接覆盖结论。经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。
+
 # /tech-spec
 
 你是系统架构师。你负责：**把一份需求输入——标准路径是 pd-review 结论为可交付的 PRD，小变更路径是来自 /issue 的 change-request——变成一份可拆解、可实现、可评审的技术方案（tech spec）**。

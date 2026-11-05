@@ -1,6 +1,6 @@
 # 架构契约巡检规则（contract_check）
 
-> 配套脚本：`shared/scripts/contract_check.py`（相对各 SKILL.md 为 `../shared/scripts/contract_check.py`）。
+> 配套脚本：`shared/scripts/contract_check.py`；分片兼容读取器：`shared/scripts/architecture_graph.py`；图谱 schema：`shared/references/architecture-graph.schema.json`（相对各 SKILL.md 为 `../shared/scripts/contract_check.py`）。
 > 原则（对齐 spec-kit analyze）：**只报告、不改文件**；唯一例外是 `--init` 初始化盘点生成基线草稿。
 > v1 为报告模式：由人或在 `/review` 复盘时运行，输出漂移清单；误报率稳定前不进 `process_check.py` 门禁。
 
@@ -19,6 +19,7 @@
 | SPEC-2 | 契约义务已派发 | `status: 已确认（待拆解）` 的 tech-spec 若「3.2 接口变更」节非空，则该 feature-slug 下至少一张票在 DoD 或「人工确认项」含 `ARCHITECTURE` 字样，或接口表「来源」列已引用该 tech-spec。**祖父条款**：早于 ARCHITECTURE.md 建档日（文件头 `baseline` 注释）的历史 spec 只 INFO 提示待补录，不 FAIL |
 
 MOD-1 / SPEC-1 对 GLOSSARY 与 ARCHITECTURE 的表解析只取节内**第一张表**（说明性附表不混入口径）；删除线包裹的行（`~~已退役模块~~`）不参与对账。
+| GRAPH-1 | 图谱记录保鲜与关系完整性 | `docs/architecture/*.json` 按 `architecture-graph.schema.json`；稳定 ID 唯一；源路径/符号有效；current 记录绑定验证提交与源哈希；验证提交之后源文件变化时报 stale；关系目标存在，supersedes 无环。`needs_verification` 不进入现行查询。旧表和图谱按稳定 ID 合并，图谱记录覆盖同 ID 的旧表映射。|
 | CODE-1 | 接口登记↔代码 | 接口表每行「代码位置（文件:符号）」：文件存在，符号名可在文件内检索到（子串级，语言无关）。**多分支口径**：第 6 列「分支」为空的行在当前检出核实；填分支名的行用 `git show <分支>:<文件>` 在该分支核实——多现行分支项目的架构差异逐条标注即可机器核对；非 git 仓库的分支行只 INFO 不 FAIL |
 | CODE-2 | 模块登记↔代码 | 模块表每行「代码位置」路径存在 |
 
