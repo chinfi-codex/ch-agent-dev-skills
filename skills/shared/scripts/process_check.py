@@ -294,6 +294,26 @@ class Report:
         return any(i["level"] == "FAIL" for i in self.items)
 
 
+def target_branch(config: dict, fm: dict) -> str:
+    """票的目标分支（worktree 基准 / rebase 目标 / 合并目标 / diff base）：
+    票 frontmatter target-branch 显式指定 > feature-closeout.mode=local-human 时代入 integration-branch > main-branch。
+    feature-closeout.since（YYYY-MM-DD）早于该日 created 的存量票不套用集成分支默认，保持在途票原行为。"""
+    explicit = str(fm.get("target-branch") or "").strip()
+    if explicit:
+        return explicit
+    fc = config.get("feature-closeout") or {}
+    since = str(fc.get("since") or "").strip()
+    created = str(fm.get("created") or "").strip()
+    legacy = bool(since and re.match(r"\d{4}-\d{2}-\d{2}", created) and created < since)
+    if str(fc.get("mode") or "") == "local-human" and not legacy:
+        pattern = str(fc.get("integration-branch") or "feat/<feature-slug>")
+        slug = str(fm.get("feature-slug") or "").strip()
+        if "<feature-slug>" in pattern and not slug:
+            raise InputError("local-human 模式下票 frontmatter 缺 feature-slug，无法代入集成分支；或显式写 target-branch")
+        return pattern.replace("<feature-slug>", slug)
+    return str(config.get("main-branch") or "main")
+
+
 def find_root(issue_path: Path) -> Path:
     for p in issue_path.resolve().parents:
         if (p / "dev" / "agents-config.md").is_file():
@@ -338,8 +358,14 @@ def run(args) -> tuple[Report, dict]:
     evidence = Path(args.evidence) if args.evidence else impl_dir / f"evidence-{issue_id}.md"
     repo = Path(args.repo)
     main_branch = str(config.get("main-branch") or "main")
+    target_ref = target_branch(config, fm)
+    if not args.base:
+        r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", target_ref], capture_output=True)
+        if r.returncode != 0:
+            raise InputError(f"目标分支 {target_ref} 不存在：local-human 须先建集成分支（监督循环 · 需求收口第 1 步），"
+                             f"或在票 frontmatter 写 target-branch")
     head = git(repo, "rev-parse", args.head).strip()
-    base = args.base or git(repo, "merge-base", main_branch, head).strip()
+    base = args.base or git(repo, "merge-base", target_ref, head).strip()
 
     rep = Report()
     files = changed_files(repo, base, head)
@@ -629,7 +655,7 @@ def run(args) -> tuple[Report, dict]:
                 rep.add("conformance", "FAIL", "conformance commit 与 HEAD 的本票文件不一致（核对过期，回修后须重核）")
 
     meta = {
-        "issue": issue_id, "phase": args.phase, "base": base, "head": head,
+        "issue": issue_id, "phase": args.phase, "target-branch": target_ref, "base": base, "head": head,
         "production-files": n_prod, "production-loc": loc,
         "ticket-tier": fm.get("verify-tier"), "tier-reason": fm.get("tier-reason"), "tier-target": _name(target) if target is not None else None,
         "tier-required-by-rules": _name(required), "successors": succ,
@@ -659,7 +685,7 @@ def main(argv=None) -> int:
                     help="review=评审前置门；merge=转 ready 前；close=需求分支收口；promote=main 放行（需 CI 判决）")
     ap.add_argument("--ci-verdict", help="promote 所需的 pandu.test-verdict/v1 JSON")
     ap.add_argument("--ci-run-proof", help="受控监督通过真实 Gitea API 生成的 pandu.ci-run-proof/v1 JSON")
-    ap.add_argument("--base", help="固定点；默认 merge-base(main-branch, head)")
+    ap.add_argument("--base", help="固定点；默认 merge-base(目标分支, head)，目标分支见 target_branch()")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--impl-log")
     ap.add_argument("--evidence")

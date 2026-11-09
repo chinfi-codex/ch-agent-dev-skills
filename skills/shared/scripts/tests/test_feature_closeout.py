@@ -135,6 +135,50 @@ class FeatureCloseoutTest(unittest.TestCase):
         cand = json.loads((self.fdir / "integration" / "round2" / "candidate.json").read_text())
         self.assertEqual([i["id"] for i in cand["issues"]], ["issue-001"])
 
+    # ---- 目标分支 ----
+    def test_target_branch_resolution(self):
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        issue.write_text(f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: done\n---\n")
+        r = self.run_cli("target", "--issue", str(issue))
+        self.assertEqual(r.stdout.strip(), f"feat/{SLUG}", r.stderr)
+        issue.write_text("---\nissue-id: issue-001\nfeature-slug: x\ntarget-branch: main\nstatus: done\n---\n")
+        self.assertEqual(self.run_cli("target", "--issue", str(issue)).stdout.strip(), "main")
+        # since 之前创建的存量票保持 main-branch 默认
+        cfg = self.root / "dev" / "agents-config.md"
+        cfg.write_text(CONFIG.replace("  mode: local-human\n", "  mode: local-human\n  since: 2026-11-09\n"))
+        issue.write_text("---\nissue-id: issue-001\nfeature-slug: x\ncreated: 2026-11-01\nstatus: done\n---\n")
+        self.assertEqual(self.run_cli("target", "--issue", str(issue)).stdout.strip(), "main")
+        issue.write_text("---\nissue-id: issue-001\nfeature-slug: x\ncreated: 2026-11-10\nstatus: done\n---\n")
+        self.assertEqual(self.run_cli("target", "--issue", str(issue)).stdout.strip(), "feat/x")
+
+    def test_process_check_diffs_against_integration_branch(self):
+        # 票分支自集成分支切出：diff base 必须是集成分支，不得把前序票改动算进本票
+        issue = self.fdir / "issues" / "issue-002-y.md"
+        issue.write_text(f"---\nissue-id: issue-002\nfeature-slug: {SLUG}\nstatus: in-progress\nverify-tier: light\n"
+                         "declared-scope: [src/b.py]\n---\n")
+        tw = self.root / ".worktrees" / "issue-002"
+        sh(self.root, "git", "worktree", "add", "-q", str(tw), "-b", f"feat/{SLUG}-issue-002", f"feat/{SLUG}")
+        (tw / "src" / "b.py").write_text("y = 1\n")
+        sh(tw, "git", "add", "src/b.py")
+        sh(tw, "git", "commit", "-qm", "issue-002")
+        out = Path(self.tmp.name) / "pc.json"
+        pc = SCRIPT.parent / "process_check.py"
+        subprocess.run([sys.executable, str(pc), "--issue", str(issue), "--repo", str(tw), "--phase", "review",
+                        "--json", str(out)], capture_output=True, text=True)
+        meta = json.loads(out.read_text())
+        self.assertEqual(meta["target-branch"], f"feat/{SLUG}")
+        self.assertEqual(meta["base"], sh(self.wt, "git", "rev-parse", "HEAD"))
+        self.assertEqual(meta["production-files"], 1)
+
+    def test_process_check_missing_integration_branch(self):
+        issue = self.fdir / "issues" / "issue-003-z.md"
+        issue.write_text("---\nissue-id: issue-003\nfeature-slug: nobranch\nstatus: in-progress\n---\n")
+        pc = SCRIPT.parent / "process_check.py"
+        r = subprocess.run([sys.executable, str(pc), "--issue", str(issue), "--repo", str(self.root), "--phase", "review"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("须先建集成分支", r.stderr)
+
     # ---- verify ----
     def test_verify_passes_and_records(self):
         self.freeze()

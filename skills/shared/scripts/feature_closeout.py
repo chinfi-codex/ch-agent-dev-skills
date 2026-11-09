@@ -10,6 +10,7 @@
                          + main 自冻结起只在 main-drift-ignore 路径前进（--record 追加 feature-confirmed）
   record-merge --commit  核对主工作区合并提交与候选一致 → 回写 candidate.json + feature-merged 事件
   summary      按候选 / 证据 / 业务结果生成人工确认一页纸骨架（stdout）
+  target       打印票的目标分支（worktree 基准 / rebase 与合并目标），派发与合并前用它，不手猜
 
 用法：
   python3 feature_closeout.py freeze --feature-dir <主工作区 dev/features/<m>/<slug>> --repo <集成 worktree>
@@ -31,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_check import (  # noqa: E402  共享解析与 git 辅助，不另写第二份
-    InputError, Report, git, match_any, read_first_yaml_block, read_frontmatter,
+    InputError, Report, git, match_any, read_first_yaml_block, read_frontmatter, target_branch,
 )
 
 CANDIDATE_SCHEMA = "agent-dev.feature-candidate/v1"
@@ -384,9 +385,24 @@ def _emit(rep: Report, title: str, out) -> int:
     return 1 if rep.failed else 0
 
 
+def target(args) -> int:
+    issue = Path(args.issue)
+    root = None
+    for p in issue.resolve().parents:
+        if (p / "dev" / "agents-config.md").is_file():
+            root = p
+            break
+    if root is None:
+        raise InputError(f"{issue} 上溯找不到 dev/agents-config.md")
+    print(target_branch(read_first_yaml_block(root / "dev" / "agents-config.md"), read_frontmatter(issue)))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="需求收口（local-human）确定性门禁")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    pt = sub.add_parser("target", help="打印票的目标分支")
+    pt.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     for name in ("freeze", "check", "record-merge", "summary"):
         p = sub.add_parser(name)
         p.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
@@ -406,6 +422,8 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "summary":
             return summary(args)
+        if args.cmd == "target":
+            return target(args)
         fn = {"freeze": freeze, "check": check, "record-merge": record_merge}[args.cmd]
         rep = fn(args)
     except InputError as e:

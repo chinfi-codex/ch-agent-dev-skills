@@ -232,6 +232,7 @@ feature-closeout:
   mode: ci-promote        # ci-promote（默认）= 按 full-execution 的 promote / CI 判决放行；
                           # local-human = 本机冻结 → Agent 自动证据 → 人工测试 → 人显式确认 → 合 main → 发布 Prod，push 后 CI full 兜底
   integration-branch: "feat/<feature-slug>"   # local-human 要求每需求独立集成分支
+  since: null             # YYYY-MM-DD：此前创建的存量票不套用集成分支默认（保持 main-branch）；null = 全部套用
   verify-budget-seconds: 1200                 # 收口关联选择集 indirect 预算；direct 不受限
   main-drift-ignore:                          # 冻结后 main 只在这些路径前进时候选仍有效（非行为路径）
     - "dev/**"
