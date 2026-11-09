@@ -227,6 +227,19 @@ conformance:
   checker: main-session   # main-session = 主会话亲核（默认，输入有界不读全量代码）；
                           #   dispatched = 上下文紧张时按派发协议开独立对话核对（模型取当前宿主 supervisor-review）
 
+# 需求收口：全部票合入集成分支后，如何把需求合进 main（流程见「监督循环 · 需求收口」，门禁 feature_closeout.py）
+feature-closeout:
+  mode: ci-promote        # ci-promote（默认）= 按 full-execution 的 promote / CI 判决放行；
+                          # local-human = 本机冻结 → Agent 自动证据 → 人工测试 → 人显式确认 → 合 main → 发布 Prod，push 后 CI full 兜底
+  integration-branch: "feat/<feature-slug>"   # local-human 要求每需求独立集成分支
+  verify-budget-seconds: 1200                 # 收口关联选择集 indirect 预算；direct 不受限
+  main-drift-ignore:                          # 冻结后 main 只在这些路径前进时候选仍有效（非行为路径）
+    - "dev/**"
+    - "docs/**"
+  verify-instance: null   # 人工测试实例：null = 在集成 worktree 用开发启动器；有实例时填
+                          #   {name, deploy: "<部署命令，可含 {branch} {commit}>", lease: "<租约文件>"}
+  prod: null              # 合 main 后的发布：{instance, sync, dry-run, status, rollback} 命令；null = 不在收口内发布
+
 # 预授权机械刷新：随生产文件变更必然联动、可由机器证明「只动这些字段」的派生物，
 # 刷新不视为「修改既有测试 / 红线绕过验收」，无需停下等人授权；须在 impl-log 逐文件登记，评审独立复核 diff 只含所列字段
 mechanical-refresh:

@@ -852,9 +852,12 @@ def fmt_event(ev, now):
             detail.append(f"（第 {ev['attempts']} 次）")
     elif name == "verify-fail":
         detail.append(f"第 {ev.get('n', '?')} 次")
-    elif name == "merged":
+    elif name in ("merged", "feature-merged"):
         if ev.get("commit"):
             detail.append(ev["commit"])
+    elif name in ("feature-verified", "feature-confirmed"):
+        if ev.get("tree"):
+            detail.append(f"tree {ev['tree'][:8]}")
     if ev.get("note"):
         detail.append(ev["note"])
     age = (now - t) / 60 if t else 0

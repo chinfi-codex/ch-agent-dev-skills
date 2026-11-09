@@ -87,6 +87,15 @@ allowed-tools:
         <feature-summary>-review-issue-001-YYYY-MM-DD.md
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
+      integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
+        candidate.json            #   冻结候选（feature_closeout.py freeze 写）
+        evidence.md               #   自动证据头
+        business-results.json     #   每条 AC 的自动结果 + 人工结果
+        human-checklist.md        #   给人的一页纸
+        confirmation.md           #   人确认原话 + 候选 tree
+        conformance-feature.md    #   feature 级覆盖核对
+        verify-log.md             #   候选变更与回修轨迹
+        raw/  artifacts/
       unattended.md               # 无人值守授权边界（人离场时才产生）
       decisions.md                # 无人值守越界决策记录
       progress.md                 # 无人值守逐票进度留痕
