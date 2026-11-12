@@ -8,7 +8,7 @@
 
 **产品**：/ceo-office 判断值不值得做 · /pd-plan 拷打澄清出 feature brief · /issue 小变更（change-request）· /prd 写正式 PRD · /pd-review 审查补齐至可交付
 
-**开发**：/setup-dev 仓库初始化 · /tech-spec 技术方案 · /issue-split 拆票（阻塞 DAG、可判定 DoD、verify-tier）· /implement 一票一 worktree 跑 TDD · /ai-review ocr 独立评审（delegate/local/ci）
+**开发**：/setup-dev 仓库初始化 · /tech-spec 技术方案 · /issue-split 拆票（阻塞 DAG、可判定 DoD、改动边界与粒度红线）· /implement 一票一 worktree 跑 TDD · /ai-review ocr 独立评审（delegate/local/ci）
 
 **横切**：/prototype 不可拷打问题出一次性原型 · /review 发布后复盘沉淀两级经验 · /handoff 会话交接提示词
 

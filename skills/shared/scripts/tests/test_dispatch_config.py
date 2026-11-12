@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -109,6 +110,25 @@ class DispatchConfigTest(unittest.TestCase):
         bad["dispatch"]["hosts"]["codex"]["supervisor-review"]["model"] = "deepseek/deepseek-flash"
         with self.assertRaisesRegex(dc.ConfigError, "provider 前缀"):
             dc.validate(bad)
+
+    def test_zcode_accepts_namespaced_model_route(self):
+        candidate = fixture()
+        candidate["dispatch"]["hosts"]["zcode"]["supervisor-review"]["model"] = "magpie/group/never-stuck"
+        validated = dc.validate(candidate)
+        route = validated["hosts"]["zcode"]["supervisor-review"]
+        self.assertEqual(route["model"], "magpie/group/never-stuck")
+        self.assertEqual(dc.resolve(validated, "zcode", "supervisor")["native"]["model"],
+                         "magpie/group/never-stuck")
+        dsh_candidate = deepcopy(candidate)
+        dsh_candidate["dispatch"]["hosts"]["dsh"]["supervisor-review"]["model"] = "magpie/group/never-stuck"
+        with self.assertRaisesRegex(dc.ConfigError, "完整路由"):
+            dc.validate(dsh_candidate)
+
+    def test_zcode_still_requires_provider_route(self):
+        candidate = fixture()
+        candidate["dispatch"]["hosts"]["zcode"]["supervisor-review"]["model"] = "never-stuck"
+        with self.assertRaisesRegex(dc.ConfigError, "完整路由"):
+            dc.validate(candidate)
 
     def test_catalog_checks_model_and_effort(self):
         catalogs = {

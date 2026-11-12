@@ -58,7 +58,7 @@ allowed-tools:
 2. **状态翻译成人话**，不单独报状态名：`阻塞` → 卡在哪、需要什么才能继续；`需补充上下文` → 缺什么、缺了会影响什么判断；`needs-human` → 这个我定不了、需要你定什么；`已完成但有风险` → 结论照给，风险逐条说人话（什么风险、什么时候会爆、怎么留意）
 3. **需要人决策 / 接手时**说四件事：发生了什么、为什么我定不了、需要你定什么、每个选项的代价（改哪些模块 / 影响谁 / 什么风险）；并给推荐与理由
 4. **说改动时**说：改什么、为什么改、影响面（哪些模块 / 哪些人 / 什么行为变化）、怎么验证；不用 commit hash 与文件清单代替说明
-5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、验证范围加大、记录下来、本票专用分支）
+5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、需要重新拆票、记录下来、本票专用分支）
 
 对照（坏 → 好）：
 
@@ -76,6 +76,7 @@ allowed-tools:
     <feature-module>/
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
+      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
       issues/
         issue-001-<短名>.md
       impl/
@@ -88,10 +89,11 @@ allowed-tools:
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
       integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选（feature_closeout.py freeze 写）
+        candidate.json            #   冻结候选与计划哈希（feature_closeout.py freeze 写）
+        acceptance-plan.json      #   冻结时的计划快照
         evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的自动结果 + 人工结果
-        human-checklist.md        #   给人的一页纸
+        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+        acceptance-report.md      #   合并前功能验收报告（feature_closeout.py report 生成）
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹

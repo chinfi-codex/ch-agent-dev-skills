@@ -9,6 +9,7 @@
     <feature-module>/
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
+      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
       issues/
         issue-001-<短名>.md
       impl/
@@ -21,10 +22,11 @@
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
       integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选（feature_closeout.py freeze 写）
+        candidate.json            #   冻结候选与计划哈希（feature_closeout.py freeze 写）
+        acceptance-plan.json      #   冻结时的计划快照
         evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的自动结果 + 人工结果
-        human-checklist.md        #   给人的一页纸
+        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+        acceptance-report.md      #   合并前功能验收报告（feature_closeout.py report 生成）
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹

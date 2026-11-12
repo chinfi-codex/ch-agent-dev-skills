@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通用 scoped 选择器（scoped 档关联测试选择，仓库无关）。
+"""通用集成候选关联测试选择器（feature 收口使用，仓库无关）。
 
 做什么：合并提交差异、暂存/未暂存差异及未跟踪文件，对扫描根下的 .py 建静态 import 图，
 求变更模块的反向传递闭包；数据 / 配置文件查 dir-map 声明映射；得出受影响测试集（选择集）。
@@ -16,15 +16,15 @@
   未命中且属无行为消费者清单（仓库元信息 / dev/ / docs/）→ 不要求覆盖证明；
   否则退文本匹配（仅提示，不算可证明）。
 - 已删除代码、解析失败、没有可证明覆盖的代码、存在动态加载点且变更模块无静态入边：
-  输出 enumerable: false。--run 对此输出 deferred 不执行（套件级验证由集成票 full /
-  每日回归兜底，evidence 记 scoped-deferred: closure-incomplete）；--fallback-run 强制全量。
+  输出 enumerable: false 与 execution_scope: ci-full-required。--run 对此输出 deferred，
+  不在本机执行任何测试，也不提供全量兜底出口；延期部分由 CI full 或调用方 feature 级证据承接。
 - 可枚举选择集先跑 direct 再跑 indirect；--budget-seconds 只限制 indirect，到点停发新项，
   在途项自然结束。已执行项全绿时输出 budget-partial 与完整延期分区，direct 不得延期。
 
 用法：
   python3 scoped_select.py --repo <仓> [--base REV | --changed F ...] [--list | --run]
       [--jobs N] [--timeout S] [--budget-seconds S] [--report PATH] [--map PATH]
-      [--scan DIR ...] [--test-dir DIR] [--categories PATH] [--fallback-run]
+      [--scan DIR ...] [--test-dir DIR] [--categories PATH]
   --categories：测试分类清单（可选），只读 `gate: helper` 分类的 tests 名单——helper 用例
       不进测试清单与选择集（它们由公开入口间接覆盖，单独执行会误报）。
 退出码：--list 恒 0；--run 有失败即 1，deferred 恒 0。只依赖 Python 3.8+ 标准库。
@@ -459,13 +459,13 @@ def emit_result(result, report_path=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='scoped_select.py',
-        description='通用 scoped 选择器：import 反向闭包 + dir-map 数据映射；不可枚举不跑全量')
+        description='通用集成候选关联测试选择器：import 反向闭包 + dir-map 数据映射；不可枚举默认延期')
     ap.add_argument('--repo', default='.', help='仓库根（默认当前目录）')
     ap.add_argument('--base', help='比较基线 rev，默认 main 与 HEAD 的 merge-base')
     ap.add_argument('--changed', action='append', default=[], help='直接给变更文件（可重复），不读 git diff')
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument('--list', action='store_true', help='只列选择集（默认）')
-    mode.add_argument('--run', action='store_true', help='并行执行选择集')
+    mode.add_argument('--run', action='store_true', help='并行执行集成候选的关联测试选择集')
     ap.add_argument('--jobs', type=int, default=6, help='并发数，默认 6')
     ap.add_argument('--timeout', type=int, default=300, help='单项超时秒数，默认 300')
     ap.add_argument('--budget-seconds', type=float, default=0,
@@ -475,8 +475,6 @@ def main(argv=None):
     ap.add_argument('--scan', action='append', default=[], help='import 图扫描根（可重复，默认 tools skills）')
     ap.add_argument('--test-dir', default='tools/tests', help='测试目录，默认 tools/tests')
     ap.add_argument('--categories', help='测试分类清单路径（读 gate: helper 名单；默认探测 <repo>/tools/test_categories.yaml）')
-    ap.add_argument('--fallback-run', action='store_true',
-                    help='闭包不可证明时仍全量执行（默认 deferred 不执行，由集成票/每日回归兜底）')
     args = ap.parse_args(argv)
     if args.budget_seconds < 0:
         ap.error('--budget-seconds 须 ≥ 0')
@@ -495,7 +493,7 @@ def main(argv=None):
         changed = changed_files(repo, base)
     result = {'schema': 'scoped-selection/v1', 'base': base,
               **select(repo, changed, scan_roots, args.test_dir, map_path, categories)}
-    result['execution_scope'] = ('full_fallback' if not result['enumerable'] else
+    result['execution_scope'] = ('ci-full-required' if not result['enumerable'] else
                                  'selected' if result['selected'] else 'empty')
 
     if not args.run:
@@ -505,35 +503,28 @@ def main(argv=None):
     result['commit'] = revision(repo, 'HEAD')
     result['tree'] = revision(repo, 'HEAD^{tree}')
     result['budget_seconds'] = args.budget_seconds
-    if not result['enumerable'] and not args.fallback_run:
-        # 闭包不可证明时全量 = 变相每票 full；改为延期：不执行、如实输出，
-        # 套件级验证由集成票 full 与每日回归兜底（调用方记 evidence scoped-deferred）。
+    if not result['enumerable']:
+        # 闭包不可证明时不执行，延期部分由 CI full 或调用方 feature 级证据承接。
         result['deferred'] = 'closure-incomplete'
         result['ran'] = []
         emit_result(result, report_path)
         return 0
 
     names = result['selected']
-    if not result['enumerable']:
-        helpers = load_helper_tests(categories or (repo / 'tools' / 'test_categories.yaml'))
-        names = [t for t in test_files(repo, args.test_dir) if t not in helpers]
-        ran = run_tests(repo, args.test_dir, names, max(1, args.jobs), args.timeout)
-        deferred_tests = []
+    direct = [name for name in names if name in set(result['direct'])]
+    indirect = [name for name in names if name not in set(result['direct'])]
+    started = time.monotonic()
+    ran = run_tests(repo, args.test_dir, direct, max(1, args.jobs), args.timeout)
+    if args.budget_seconds > 0:
+        indirect_ran, deferred_tests, indirect_seconds = run_tests_with_budget(
+            repo, args.test_dir, indirect, max(1, args.jobs), args.timeout,
+            args.budget_seconds)
+        result['indirect_elapsed_seconds'] = round(indirect_seconds, 3)
     else:
-        direct = [name for name in names if name in set(result['direct'])]
-        indirect = [name for name in names if name not in set(result['direct'])]
-        started = time.monotonic()
-        ran = run_tests(repo, args.test_dir, direct, max(1, args.jobs), args.timeout)
-        if args.budget_seconds > 0:
-            indirect_ran, deferred_tests, indirect_seconds = run_tests_with_budget(
-                repo, args.test_dir, indirect, max(1, args.jobs), args.timeout,
-                args.budget_seconds)
-            result['indirect_elapsed_seconds'] = round(indirect_seconds, 3)
-        else:
-            indirect_ran = run_tests(repo, args.test_dir, indirect, max(1, args.jobs), args.timeout)
-            deferred_tests = []
-        ran.extend(indirect_ran)
-        result['elapsed_seconds'] = round(time.monotonic() - started, 3)
+        indirect_ran = run_tests(repo, args.test_dir, indirect, max(1, args.jobs), args.timeout)
+        deferred_tests = []
+    ran.extend(indirect_ran)
+    result['elapsed_seconds'] = round(time.monotonic() - started, 3)
     result['ran'] = ran
     result['deferred_tests'] = deferred_tests
     result['broken'] = [r['name'] for r in ran if r['exit'] != 0]

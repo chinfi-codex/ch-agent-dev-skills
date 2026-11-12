@@ -38,7 +38,8 @@ def _model(value, host: str, path: str) -> str:
         raise ConfigError(f"{path} 不是具体模型 ID: {value}")
     if host in {"zcode", "dsh"}:
         parts = value.split("/")
-        if len(parts) != 2 or not all(parts):
+        if ((host == "dsh" and len(parts) != 2)
+                or (host == "zcode" and len(parts) < 2) or not all(parts)):
             raise ConfigError(f"{path} 必须使用 <provider>/<model> 完整路由")
     elif "/" in value:
         raise ConfigError(f"{path} 不得包含宿主 provider 前缀")

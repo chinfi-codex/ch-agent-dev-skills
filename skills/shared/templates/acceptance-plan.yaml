@@ -1,0 +1,79 @@
+# 功能验收计划唯一真源。技术方案 §5.1 只放本文件的可读摘要，不另维护第二份分工。
+# cases 使用 AC 编号为键，便于 freeze / check 确定性对账；steps / evidence 使用内联列表。
+schema: agent-dev.feature-acceptance/v1
+prd: <PRD 文件名>
+tech_spec: <tech-spec 文件名>
+cases:
+  AC-01:
+    title: <一个可独立验收的业务行为>
+    source: "PRD#端到端验收场景-AC-01"
+    required: true
+    executor: command          # command | browser-agent | human：谁执行、采集结果
+    oracle: auto               # auto | auto+human-review | human：谁作最终验收判断
+    preconditions: [<前置状态>]
+    steps: [<操作步骤 1>, <操作步骤 2>]
+    expected: <可观察的业务结果>
+    command: <executor=command 时填写实际执行入口>
+    assertions:                # oracle=auto / auto+human-review 必填；写预期，不写实现后的现状
+      exit: 0
+      output: <关键输出或业务状态>
+    evidence: [log]
+    human_reason:              # oracle=auto 留空；其余见下方固定词表
+    human_steps: []            # 可空：空则复用 steps
+    human_expect:              # 可空：空则复用 expected
+
+  AC-02:
+    title: <需要浏览器操作且功能可自动判定的行为>
+    source: "PRD#端到端验收场景-AC-02"
+    required: true
+    executor: browser-agent
+    oracle: auto
+    preconditions: [<测试数据与登录状态>]
+    steps: [<打开页面>, <执行操作>]
+    expected: <DOM / 网络 / 业务状态结果>
+    assertions:
+      dom: <角色、文本、可见性或状态断言>
+      network: <请求与响应断言>
+      console: 无 console error / page error
+    evidence: [screenshot, dom, network, console]
+    human_reason:
+    human_steps: []
+    human_expect:
+
+  AC-03:
+    title: <AI 可先测功能、人必须最终把关的行为>
+    source: "PRD#端到端验收场景-AC-03"
+    required: true
+    executor: browser-agent
+    oracle: auto+human-review
+    preconditions: [<前置状态>]
+    steps: [<浏览器操作>]
+    expected: <功能结果与需要人确认的呈现 / 领域结果>
+    assertions:
+      dom: <功能断言>
+      network: <功能断言>
+    evidence: [screenshot, dom, network, console]
+    human_reason: visual-ux    # intent | visual-ux | domain-judgment | high-risk |
+                               # no-reliable-oracle | environment-unavailable | evidence-insufficient
+    human_steps: [<人只需复核的步骤；空则复用 steps>]
+    human_expect: <人最终判断什么>
+
+  AC-04:
+    title: <没有可靠机器判据、必须由人验收的行为>
+    source: "PRD#端到端验收场景-AC-04"
+    required: true
+    executor: human
+    oracle: human
+    preconditions: [<真实或代表性数据>]
+    steps: [<人工操作步骤>]
+    expected: <人工判断标准>
+    human_reason: domain-judgment
+    human_steps: []
+    human_expect:
+
+# 分类纪律：
+# 1. 预期来自已确认需求，且能安全执行、稳定观察、客观断言 → auto；有 UI 操作优先 browser-agent。
+# 2. 功能可自动断言，但意图 / 视觉手感 / 领域合理性 / 高风险后果需人判断 → auto+human-review。
+# 3. 没有可靠机器判据，或当前环境无法安全执行 → human；不得把未执行写成通过。
+# 4. 收口时只能向更严格方向调整（auto → auto+human-review → human，或自动执行 → human），
+#    并在结果 reclassification 记录原因；降低人工要求必须回到技术方案修订计划。

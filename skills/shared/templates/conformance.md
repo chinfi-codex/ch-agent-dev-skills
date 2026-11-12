@@ -5,7 +5,7 @@
 ```yaml
 issue: <issue-id>
 commit: <核对时的 HEAD>
-verdict: conform        # conform / deviate / missing；sampled 模式下未抽中的 light 档票写 skipped
+verdict: conform        # conform / deviate / missing；sampled 模式下未抽中的非集成票写 skipped，集成票必须实核
 checker: main-session   # main-session = 主会话亲核；dispatched = 派发独立主模型对话核对（句柄记下行）
 date: YYYY-MM-DD
 ```

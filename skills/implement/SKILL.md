@@ -5,9 +5,10 @@ default-mode: IMPLEMENT_MODE
 description: |
   Execution skill for one confirmed issue. Normally auto-dispatched by the
   main session as a fresh host-agent conversation (development model
-  resolved from dispatch.hosts for the current host, by ticket tier):
-  TDD in a dedicated worktree, per-round scope-drift checks with one-way
-  verify-tier escalation, on-disk evidence for the ticket's tier gate,
+  resolved from dispatch.hosts for the current host, using ordinary versus
+  integration / high-risk / review-alert routing): TDD in a dedicated
+  worktree, DoD + fast verification every implementation / repair /
+  conflict round, declared-scope drift records and ticket-size red lines,
   then independent /ai-review, BLOCKER fixes, and the merge request made
   ready. Main session supervises through merge — no human gate. Success
   is judged by on-disk evidence, never by self-report.
@@ -47,7 +48,7 @@ allowed-tools:
 2. **状态翻译成人话**，不单独报状态名：`阻塞` → 卡在哪、需要什么才能继续；`需补充上下文` → 缺什么、缺了会影响什么判断；`needs-human` → 这个我定不了、需要你定什么；`已完成但有风险` → 结论照给，风险逐条说人话（什么风险、什么时候会爆、怎么留意）
 3. **需要人决策 / 接手时**说四件事：发生了什么、为什么我定不了、需要你定什么、每个选项的代价（改哪些模块 / 影响谁 / 什么风险）；并给推荐与理由
 4. **说改动时**说：改什么、为什么改、影响面（哪些模块 / 哪些人 / 什么行为变化）、怎么验证；不用 commit hash 与文件清单代替说明
-5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、验证范围加大、记录下来、本票专用分支）
+5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、需要重新拆票、记录下来、本票专用分支）
 
 对照（坏 → 好）：
 
@@ -65,6 +66,7 @@ allowed-tools:
     <feature-module>/
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
+      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
       issues/
         issue-001-<短名>.md
       impl/
@@ -77,10 +79,11 @@ allowed-tools:
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
       integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选（feature_closeout.py freeze 写）
+        candidate.json            #   冻结候选与计划哈希（feature_closeout.py freeze 写）
+        acceptance-plan.json      #   冻结时的计划快照
         evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的自动结果 + 人工结果
-        human-checklist.md        #   给人的一页纸
+        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+        acceptance-report.md      #   合并前功能验收报告（feature_closeout.py report 生成）
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹
@@ -124,25 +127,31 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 - `tracker`：`local`（markdown 票文件）或 `gitlab`（glab CLI）
 - `main-branch`：主分支名（worktree 与 merge request 的基准）
 - `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
-- `quality-gate`：质量门命令，三档——快速档（fast：秒级，类型 / lint / 单文件测试）、关联档（scoped：按最终 diff 换算的受影响测试集）、全量档（full：完整测试套件）。**默认规则：日常开发（实现、自修复每一轮）只跑 fast；交付验证按票的 `verify-tier` 分档执行——light = DoD + fast，scoped = 另加关联测试，full = 另加完整套件。full 不再每票必跑，但 full 档票与集成票必跑**。scoped / full / 归因补跑一律经 `shared/scripts/test_slots.py run` 包装执行（拿整机槽位，并发度 = 分得数 `$JOBS`；后台执行、输出落文件后轮询），fast 不受限
-- `host-budget`：整机测试算力预算（`total` 重测试 worker 总数 / `max-runs` 重套件套数 / `queue-timeout` 排队秒数上限）。真源是机器级文件 `~/.cache/agent-dev/slots/budget.json`（同机各仓共享一份），agents-config 里只是镜像记录，执行以机器级文件为准
-- `verify-policy`：验证档位策略（阈值 / 两级升档触发器 / 漂移规则 / 选择机制 / 先在失败归因）。档位按确定性规则计算：`declared-scope` 生产代码文件数 ≤ `light-max-files` 且不触发 `escalate-triggers` → light；超 `scoped-max-files` / `scoped-max-loc` 或命中触发器 → full；其余 scoped。触发器分两级——full 级（数据迁移 schema / 鉴权权限）票内 full；scoped+ 级（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 静态反向闭包，闭包不可枚举时标「闭包不完整」仍 scoped。定档 / 升档原因写票 `tier-reason`。**选择机制（`selection`）= impact-map（静态反向闭包）+ dir-map（数据 / 配置文件按仓内声明映射表，命中即视为可证明覆盖；映射表路径随 `verify-policy.selection-map` 配置，默认 `dev/scoped-map.yaml`；仓库元信息 / `dev/` / `docs/` 等无行为消费者的文件不要求覆盖证明）**。选择器为共享脚本 `shared/scripts/scoped_select.py`（import 闭包 + dir-map + deferred 一体，仓内不写选择器代码）。**scoped 只在闭包可证明时票内执行**：选择集可枚举才跑；不可枚举（full fallback，跑了等于变相每票 full）→ 票内不跑选择集，evidence 头记 `scoped-deferred: closure-incomplete` 与原因，该票套件级验证由集成票 full 与每日回归兜底——不因此升档、`tier-target` 不变、评审照常（DoD + fast + 独立评审不缩水）。可枚举闭包按 `scoped-budget-seconds`（默认 1200，0 = 不限）限时：direct（直接改动 / 新增测试）全部先跑且不可延期，indirect 到点只停发新项、在途项自然结束；仅已执行项全绿且选择器报告分区完整时可写 `scoped-deferred: budget-partial` + `scoped-ref`，`tier-executed` 仍记 light，`process_check` 核同 base / tree、配置预算、direct 与分区，full / main 放行不豁免。**套件级回归三层**：集成票（feature 收尾）票内 full + main 每工作日定时 full（`daily-regression`，人自设定时任务触发，新失败在合入区间内二分到票）+ 迁移 / 鉴权票票内 full；其余票不跑票内 full。选择集大小不是升档理由（direct 全跑、indirect 按预算收口，占比 ≥ 50% 仅记录为评审信号）；DAG 无后继的集成票一律 full，动态依赖与跨模块交互风险由它统一兜底——唯一例外「模块隔离认定」：feature 全程只动不被外部依赖的叶子模块时，集成票按 module-scoped 跑该模块全闭包（不机械全仓），判定依据须可机器复核、有疑义仍 full。实测 diff 超出 `declared-scope`：同模块小漂移登记即可，命中触发器或超阈值则**只升不降**并补验证。先在失败按 `attribution` 隔离：默认 `quarantine`——落盘隔离清单内的用例以 skip（标 quarantined）执行，不产生 exit 1、不进 `all-passed` 分母、不逐项归因（套件退出码恢复语义：exit 1 = 有新东西坏了）；入册须 base 侧同签名稳定失败，且每条带 owner / 去向（修复票 / 永久删除决议）/ 首录日期，无去向不入册；未执行慢项不是先在失败，不得入册冒充通过，只能走 budget-partial 延期；清单由每日 full 顺带刷新（转绿销记、新先在追加），每日 full 另以「只跑隔离项、不判红」抽查签名漂移，超 `quarantine-max-age-days`（默认 14）未处理的条目在每日回归记录列出、主会话监督循环呈现；清单外失败 = 疑似本票引入，单项补跑 base 侧对照（不整套重跑）；`two-sided` 为保守档（每条失败双侧同命令对照）。**预计与实测分工**：拆票时**预估**文件数超 `scoped-max-files` 的票必须再拆、不得定档（`/issue-split` 粒度红线）；实现期**实测**超阈值才升档。**测试职责边界（`gate-scope`）**：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只执行一次并落盘记录，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖（环境变量 / 外部服务）的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过。**full 次数（`full-runs: once-at-final`）**：full 档每票只在评审通过后的最终 commit 跑一次；评审回修轮只跑 DoD + fast + 回修 diff 的 scoped；无冲突 rebase 且本票文件 blob 不变时复用证据不重跑
-- `verify-policy.full-execution`：full 执行位置。`ticket`（默认）沿用上述票内 / 集成票规则；`ci-only` 时 full 只由已登记分支 push 触发判读机 CI，票内、监督循环与本机任何 worktree 均不得执行 full。票级 evidence 写 `full-deferred: ci`，`process_check.py` 的 merge / close 只核循环内验证；feature / main 放行另核 `process_check.py --phase promote --ci-verdict <...> --ci-run-proof <trusted-gitea-run-proof.json>` 与实际 HEAD commit / tree，旧 `full-commit` / `full-ref` 不得冒充 CI 判决。人工重跑也只能复用同一 CI workflow，不设本机补跑出口；pandu 不启用 nightly，push 不自动部署。
-- `feature-closeout`：需求收口方式。`mode: ci-promote`（默认，缺此节同）沿用 `full-execution` 的 promote 放行；`mode: local-human` 时全部票合入每需求独立集成分支（`integration-branch`，默认 `feat/<feature-slug>`）后，本机冻结候选 → Agent 自动证据（关联选择集，预算 `verify-budget-seconds`）→ 人工测试（`verify-instance` 有则部署到测试实例，`null` 则在集成 worktree 用开发启动器）→ 人显式确认 → 合 main → 按 `prod` 发布并冒烟，push 后 CI full 兜底；main 冻结后只在 `main-drift-ignore` 路径前进时候选仍有效。门禁由 `shared/scripts/feature_closeout.py` 判定，流程见「监督循环 · 需求收口」。**票的目标分支**（worktree 基准、rebase 目标、合并目标、process_check / scoped_select 的 diff base、账实对账与清场的「已合并」判定）一律用 `feature_closeout.py target --issue <票文件>` 解析：票 frontmatter `target-branch` 显式指定 > local-human 下代入 `integration-branch` > `main-branch`；`since`（YYYY-MM-DD）之前创建的存量票保持 `main-branch` 默认。local-human 下票只合进集成分支，main 只接收需求收口的整需求合并；目标分支不存在即停，不退回 main
+- `quality-gate`：只配置票级 `fast` 命令（秒级，类型 / lint / 单文件测试）。每张票在实现、自修复、评审回修与 merge / close 时都只执行自己的 DoD + `quality-gate.fast`；不得按文件数、LOC、模块影响面或风险名义改跑其他票级套件，也不设置票级 scoped / full 命令
+- `host-budget`：本机重测试算力预算（`total` worker 总数 / `max-runs` 套数 / `queue-timeout` 排队秒数上限），只用于 local-human 需求收口的关联选择集与单项失败归因；fast 不受限。真源是机器级文件 `~/.cache/agent-dev/slots/budget.json`（同机各仓共享一份），agents-config 里只是镜像记录，执行以机器级文件为准；CI full 使用判读机自己的预算
+- `verify-policy`：票粒度、失败归因与测试职责边界。
+  - `ticket-max-files: 10` 与 `ticket-max-loc: 400` 只是拆票粒度上限：拆票时预估超任一上限必须再拆；实现期实测超任一上限必须 re-split，无法自动再拆则置 `needs-human`，不得把它解释成测试范围或模型路由的升级理由
+  - 实测 diff 超出 `declared-scope` 时在 impl-log「漂移记录」逐文件登记；超粒度上限按上述 re-split / needs-human 处理，不超上限且仍属本票范围时登记后继续
+  - `gate-scope`：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只在最终 commit 执行一次并落盘，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过
+  - `attribution`：先在失败默认按 `quarantine` 隔离。入册须 base 侧同签名稳定失败，且每条带 owner / 去向（修复票 / 永久删除决议）/ 首录日期，无去向不入册；清单内用例以 skip（标 quarantined）执行，不进 `all-passed` 分母，清单外失败按本票引入处理并只对单项补跑 base 侧对照。未执行项不是先在失败，不得入册冒充通过；feature 收口的预算延期只写 feature 级 deferred 证据。`two-sided` 为保守档（每条失败双侧同命令对照）。隔离清单由 CI full 报告刷新，超 `quarantine-max-age-days`（默认 14）的条目在 CI 回归记录与主会话监督输出中呈现
+  - **full 只有 CI 入口**：本机、票 worktree、集成 worktree 与监督循环均不得执行 full。`ci-promote` 的 feature / branch / main 放行必须执行 `process_check.py --phase promote --ci-verdict <...> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI verdict、run proof、实际 HEAD commit 与 tree 同源；分支前进或 tree 改变即重新验证。人工重跑也只能触发同一 CI workflow，不设本机补跑出口
+  - `daily-regression` 如启用，只能由 CI schedule / 手工 dispatch 触发同一个 CI full workflow；记录 CI run / verdict / tree / 合入区间 / 归因与隔离清单变化。漏跑时只能在 CI 补触发，不得创建本机 worktree 或保存可冒充 CI 判决的本地引用。pandu 不启用 nightly，push 不自动部署
+- `feature-closeout`：需求收口方式。`mode: ci-promote`（默认，缺此节同）以 feature / branch / main 的同 tree CI verdict + run proof 放行；`mode: local-human` 时全部票合入每需求独立集成分支（`integration-branch`，默认 `feat/<feature-slug>`）后，本机冻结候选与 `acceptance-plan.yaml` 计划哈希 → Agent 自动证据（`scoped_select.py` 关联选择集，indirect 预算 `verify-budget-seconds`；另按计划执行 command / browser-agent 功能 AC）→ 生成正式功能验收报告 → 按报告完成人工实测 / 复核 / 豁免 → 人显式确认 → 合 main → 按 `prod` 发布并冒烟，main push 后 CI full 作安全网而非合 main 前置。`selection-map` 是可选的 dir-map 映射表路径，缺省 / `null` 使用 `dev/scoped-map.yaml`；显式配置时给集成选择器追加 `--map <路径>`。feature 级 scoped 报告与 deferred 证据保留。`verify-instance` 有则部署到测试实例，`null` 则在集成 worktree 用开发启动器；功能验收计划的 `executor`（command / browser-agent / human）与 `oracle`（auto / auto+human-review / human）分离，合并前必须有脚本生成且未过期的 `acceptance-report.md`。main 冻结后只在 `main-drift-ignore` 路径前进时候选仍有效。门禁由 `shared/scripts/feature_closeout.py` 判定，流程见「监督循环 · 需求收口」。**票的目标分支**（worktree 基准、rebase 目标、合并目标、process_check 的 diff base、账实对账与清场的「已合并」判定）一律用 `feature_closeout.py target --issue <票文件>` 解析：票 frontmatter `target-branch` 显式指定 > local-human 下代入 `integration-branch` > `main-branch`；`since`（YYYY-MM-DD）之前创建的存量票保持 `main-branch` 默认。local-human 下票只合进集成分支，main 只接收需求收口的整需求合并；目标分支不存在即停，不退回 main
 - `max-fix-rounds`：自修复轮次上限，默认 99；`review-round-alert`（默认 3）：同票评审达此轮数时主会话介入判断拆票 / 缩范围 / 升级模型（预警，不是硬停）
-- `conformance`：需求符合性核对（主模型校验）——主会话在合并前核对「要的有没有、偏没偏」，与 ai-review 正交（两者都使用当前宿主 `supervisor-review`；评审判代码质量，需求语义符合性由主会话或另一独立监督评审会话核对）。方法：先独立枚举需求点（不看 impl-log 覆盖矩阵），再对照矩阵打开代码逐条核语义；结论落盘 `impl/<issue-id>/conformance-<issue-id>.md`，`process_check.py --phase close` 把关。`mode: always`（默认）每票必核，`sampled` 时实测 light 档抽查、其余档必核；`checker: main-session`（默认亲核）或 `dispatched`（派发独立监督评审对话，上下文紧张时用）。缺此节按默认执行，即默认启用
-- `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次
+- `conformance`：需求符合性核对（主模型校验）——主会话在合并前核对「要的有没有、偏没偏」，与 ai-review 正交（两者都使用当前宿主 `supervisor-review`；评审判代码质量，需求语义符合性由主会话或另一独立监督评审会话核对）。方法：先独立枚举需求点（不看 impl-log 覆盖矩阵），再对照矩阵打开代码逐条核语义；结论落盘 `impl/<issue-id>/conformance-<issue-id>.md`，`process_check.py --phase close` 把关。`mode: always`（默认）每票必核；`sampled` 时所有非集成票都按 `sample-rate` 抽查，未抽中写 `verdict: skipped`，集成票一律必核；`checker: main-session`（默认亲核）或 `dispatched`（派发独立监督评审对话，上下文紧张时用）。缺此节按默认执行，即默认启用
+- `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次；冲突解决后重跑受影响 DoD + fast
 - `mechanical-refresh`：预授权机械刷新白名单（路径 glob + 字段 / 生成块）；diff 可机器证明只动所列字段时直接刷新并登记，不停等人；白名单外的既有测试 / 夹具改动仍按红线处理——唯一例外「需求驱动更新」：票 DoD / tech-spec 明确改变的行为，其冲突旧测试随票更新并逐条登记映射（见 /implement Step 2），不按红线停
 - `artifact-budget`：impl-log / evidence 正文行数与 impl 目录体积上限；正文只留结论与指针，过程放 raw，中间轮原始产物只留最终轮
 - `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
-- `dispatch`：执行与模型配置。`schema-version: 1` + `executor: subagent`；`hosts.<claude-code|codex|zcode|dsh>` 按宿主分条。每条必须有：`supervisor-review.model / effort`（主会话监督、符合性核对与独立 `/ai-review` 共用角色模型，但评审另开独立会话）；`development.default / escalated.model / effort`（独立 `/implement`，light / scoped 用 default，full / 集成 / 高风险及评审预警后用 escalated）。开工前运行 `python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`；用 `resolve` 取当前宿主原生参数，缺当前宿主、旧 `dispatch.model`、字段缺失或模型 / effort 不在实时目录即停，不跨宿主套用、不静默继承。原生角色文件由 `render` 从本配置生成，不手工另建第二份模型真源。`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
+- `dispatch`：执行与模型配置。`schema-version: 1` + `executor: subagent`；`hosts.<claude-code|codex|zcode|dsh>` 按宿主分条。每条必须有：`supervisor-review.model / effort`（主会话监督、符合性核对与独立 `/ai-review` 共用角色模型，但评审另开独立会话）；`development.default / escalated.model / effort`（独立 `/implement`：普通票用 default，集成票 / 高风险票及评审预警后的回修用 escalated，绝不按测试范围路由）。开工前运行 `python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`；用 `resolve` 取当前宿主原生参数，缺当前宿主、旧 `dispatch.model`、字段缺失或模型 / effort 不在实时目录即停，不跨宿主套用、不静默继承。原生角色文件由 `render` 从本配置生成，不手工另建第二份模型真源。`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
 - `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
 
 
 ## 测试位置
 
-- **循环内验证在本机**：TDD 见红 / 变绿、fast、DoD、scoped、归因补跑、独立评审复测与主会话验收复跑都在本票 worktree 执行；重套件（scoped / 归因补跑）经 `shared/scripts/test_slots.py run` 包装拿整机槽位（见 `quality-gate` / `host-budget`）。不为跑循环内测试另建测试主机，也不新增把测试命令提交到其他机器执行的通道。
-- **远端只承接 push 触发的 CI full**：`verify-policy.full-execution: ci-only` 时，判读机上的测试只有一条入口——已登记分支 push（及同一 CI workflow 的定时 / 手工触发）触发的 full workflow，它在判读机独立 checkout 被 push 的提交并自行调用判读机预算封装。本机、票内、监督循环都不向其提交命令、也不补跑 full；CI 不可用时保持未验证，不降级本机补跑。
+- **票级循环内验证在本机**：TDD 见红 / 变绿、每条 DoD、fast、单项失败归因、独立评审复测与主会话验收复跑都在本票 worktree 执行；merge / close 仍只核 DoD + fast。fast 不经整机槽位包装，也不新增把票级测试提交到其他机器执行的通道
+- **local-human 需求级验证在本机**：需求收口的 `scoped_select.py` 关联选择集与其单项失败归因在集成 worktree 经 `shared/scripts/test_slots.py run` 包装执行，预算与 feature 级 deferred 证据按 `feature-closeout` 配置处理；`acceptance-plan.yaml` 声明的 command / browser-agent 功能 AC 也在同一候选测试环境执行并落标准证据。它们不是票级交付门，也不得扩大为 full；宿主无浏览器能力时对应 AC 记 unverified，不伪造通过
+- **远端只承接 CI full**：已登记 feature / branch / main 的 push，以及同一 CI workflow 的定时 / 手工触发，是完整套件的唯一入口。CI 在判读机独立 checkout 对应提交并自行调用判读机预算封装；本机、票内、监督循环都不向其提交命令、也不补跑 full。CI 不可用时保持未验证，不降级本机补跑
 
 ## 派发协议（标准角色配置）
 
@@ -152,8 +161,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 主会话开始监督、实现会话启动、发起评审前都先跑：`python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`（目录由 `/setup-dev` 从宿主实时能力生成，结构 `{host: {model: [effort...]}}`）。旧 `dispatch.model`、缺字段、当前宿主无条目、模型或 effort 不可用 → 停下修正配置，不跨宿主套用、不自动降级。
 - **主会话监督**：取 `dispatch.hosts.<当前宿主>.supervisor-review`，用 `resolve --role supervisor` 核对当前会话的实际 model / effort。不符即停下请人按配置新开或切换主会话；配置文件不会 retroactively 切换已经存在的会话，不得把「写进配置」冒充「当前已生效」。
-- **开发实现**：light / scoped 取 `development.default`，full / 集成 / 高风险及评审达 `review-round-alert` 轮后的续修取 `development.escalated`；用 `resolve --role development --tier <档>` 得到原生参数。
-- **独立评审与派发的符合性核对**：固定取 `supervisor-review`，用 `resolve --role review`；不随开发票档切换，但必须另开独立对话，写查分离不变。
+- **开发实现**：普通票取 `development.default`，集成票 / 高风险票及评审达 `review-round-alert` 轮后的续修取 `development.escalated`；用 `resolve --role development` 得到原生参数。不得按 light / scoped / full 或任何测试范围路由模型。
+- **独立评审与派发的符合性核对**：固定取 `supervisor-review`，用 `resolve --role review`；不随开发角色切换，但必须另开独立对话，写查分离不变。
 - 原生角色文件只从配置生成：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <宿主配置根>`。渲染器拒绝覆盖已有不同文件；确需更新时先核对差异并备份，再由 `/setup-dev` 明确重生，不手改第二份模型真源。DSH 的角色路由合并进目标 profile，不覆盖其他 profile。
 
 ### 派发原语
@@ -217,7 +226,7 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 运行身份：
 
 - 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
-- 被派发对话按「派发协议」先校验配置，再用 `resolve --role development` 取当前宿主 `development.default / escalated` 的原生角色绑定（light / scoped → default；full / 集成 / 高风险 → escalated）；不得只读模型名后在普通子会话里静默继承
+- 被派发对话按「派发协议」先校验配置，再用 `resolve --role development` 取当前宿主 `development.default / escalated` 的原生角色绑定（普通票 → default；集成 / 高风险票及评审达 `review-round-alert` 后的续修 → escalated）；不得只读模型名后在普通子会话里静默继承
 - 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
 
 ---
@@ -256,70 +265,62 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
 - **见红验证（不可省略）**：新测试在写实现前先单独运行一次——必须失败，且 ① 失败是断言失败，不是语法 / 导入 / 运行错误（error 不算见红）；② 失败输出指向预期行为差异（不是无关报错）。第一次跑就通过 = 在测已有行为或没接到代码路径，重写测试再往下走。见红要点（测试名 + 首次失败输出截取）随 TDD 登记写入 impl-log「做了什么」；没亲眼见过红的测试等于没写
 - **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
-- 每轮只跑 `quality-gate.fast`（**日常开发默认档**，秒级反馈）；交付档（scoped / full）只在 Step 5 按票 `verify-tier` 执行
+- 新测试先单独见红；此后**每个实现轮次只跑本票 DoD 验收命令 + `quality-gate.fast`**，秒级反馈，不运行其他票级套件。DoD 与 fast 的真实输出在 Step 5 汇总落盘
 - commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
-- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，登记进 impl-log「漂移与升档记录」——同模块小漂移只登记不升档；命中 `verify-policy.escalate-triggers` 或超 `scoped-max-*` 阈值 → **当场升档（只升不降）**，按新档补验证并记录，不留到 Step 5 才发现。scoped+ 级触发器（公共接口签名、共享模块 / 工具库、红线邻接）→ scoped，选择集 = 反向闭包；闭包不可枚举时标「闭包不完整」仍 scoped，由集成票与每日回归兜底；选择集大小不是升档理由；升档时同步更新票 `tier-reason`
+- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，所有偏差登记进 impl-log「漂移记录」；有依据的小漂移登记后继续，范围无依据或无法说明时置 `needs-human`。实测生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）或生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400）→ **立即停止，票置 `needs-human`，退回 `/issue-split` 再拆或请人裁决**；粒度红线不能靠增加测试解除，也不得自行扩大 `declared-scope` 放行
 - **契约落图谱（票 DoD 含架构契约条目时）**：实现完成后在 worktree 分支内按稳定 ID 更新对应 `docs/architecture/*.json` 分片——新增 / 修改 / 替代逐条对应 tech-spec 3.2；只有代码已合并且代码、发布或决策证据可复核时才标 `current`，否则保留 `needs_verification`。`docs/ARCHITECTURE.md` 是生成首页，禁止手改
 - **flow-back 契约补记**：本票 diff 改动接口记录绑定的代码位置而票未声明契约 DoD → 同分支补记对应图谱记录，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与原因。发现记录与代码不符但本票未改它，记入 impl-log「遗留」，由对应文档阶段更新分片
 
 ### Step 4：自修复循环（≤ max-fix-rounds）
 
-- 触发：构建 / fast 质量门失败 / 漂移升档后的档位门失败
-- 动作：定位 → 修复 → 重跑；每轮记入 impl-log「自修复轮次记录」
+- 触发：构建、任一票 DoD 验收命令或 fast 质量门失败
+- 动作：定位 → 修复 → 重跑本票 DoD + fast；每轮记入 impl-log「自修复轮次记录」
 - **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
-- 升档补验证的 scoped 属重套件，按 Step 5 的「重套件执行形态」包装执行（拿整机槽位 + 后台轮询）
 - 达到轮次上限仍未过：票置 `needs-human`，完整轨迹（命令 + 输出 + 已试路径）落盘，向用户用大白话说清：卡在哪一步、试过哪些办法、接下来建议怎么办；**停止，不硬磨**
 
 ### Step 5：证据落盘（成功判定唯一依据）
 
-- 在 worktree 内**实际执行**票的每条 DoD 验收命令，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出
-- **按档位出证据**（档位 = 票 `verify-tier`，发生升档则按升档后档位；规则见 `agents-config.verify-policy`）：
-  - `light`：DoD + fast
-  - `scoped`：DoD + fast + 关联测试——**选择集从最终 diff（merge-base..HEAD）重算**：滤出生产代码文件，用共享选择器换算受影响测试集：`python3 ../shared/scripts/scoped_select.py --repo <本票 worktree> --base <merge-base> --run --budget-seconds <verify-policy.scoped-budget-seconds> --report <主工作区 impl/<issue-id>/raw/scoped.json>`（import 闭包 + dir-map 声明映射；映射表按 `verify-policy.selection-map`，重套件经 test_slots 包装）；漂移碰到的文件天然进入选择集，无需改票；选择集占全套 ≥ 50% 时在 evidence 记录占比（评审信号），不因此升档。**direct（直接改动 / 新增测试）全部先跑且不可延期，indirect 才受预算限制**：到点只停发新 indirect，在途项按单项超时自然结束，不强杀、不把中断项记通过；不为已知慢红 / 超时同族反复跑第三轮整套。**选择器输出 `deferred: closure-incomplete`（闭包不可枚举）时票内不跑选择集**（跑了等于变相每票 full）：evidence 头记 `scoped-deferred: closure-incomplete` + 选择器 reasons，`tier-executed` 如实记 light，套件级验证由集成票 full 与每日回归兜底——不因此升档、`tier-target` 不变，DoD + fast + 评审照常。**输出 `deferred: budget-partial` 时**：确认 direct 与已执行 indirect 全绿、deferred_tests 全为未启动 indirect、selected = ran + deferred_tests，evidence 头记 `scoped-deferred: budget-partial` + `scoped-ref: <报告仓内相对路径>`，`tier-executed` 仍记 light；报告须绑定同 base / HEAD tree 且预算不超配置，由 `process_check` 机器复核，手写标记、旧报告、失败 / 超时项改名延期均无效，full / main 放行不豁免
-  - `full`：`full-execution: ticket` 时执行 DoD + fast + scoped + 完整测试套件（full 档票必跑：迁移 / 鉴权、超阈值、集成票；其余跨模块风险由 main 每日回归兜底，不在票内补跑 full）。集成票的合并候选 tree 与 `daily-regression.record-dir` 中某次通过记录的 tree 相同时，evidence 填 `full-ref` 指向该记录、免跑。集成票若票面已做「模块隔离认定」（feature 全程只动不被外部依赖的叶子模块），按 module-scoped 跑涉及模块的全闭包替代全仓，evidence 记录隔离判定依据（反向闭包为空 + 模块清单）；认定有疑义或前序票 diff 实际漂出该模块 → 仍跑 full。`full-execution: ci-only` 时只执行 DoD + fast + scoped，evidence 头写 `full-deferred: ci`，本票不得执行 full 或填写 `full-commit` / `full-ref`；full 由后续需求分支 push 在 CI 执行
-- **测试职责边界按 `verify-policy.gate-scope`**：档位门只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
-- **full 执行时机按 `verify-policy.full-runs`**（默认 `once-at-final`，仅 `full-execution: ticket`）：full 档票 / 集成票在本步只跑 DoD + fast + scoped 进入评审，完整套件推迟到 Step 8 评审通过后的最终 commit 跑**一次**；evidence 头 `tier-executed: full` 只在该次 full 落盘后填写。`ci-only` 不进入票内最终 full，票级 evidence 保持 `full-deferred: ci`
-- **先在失败按 `verify-policy.attribution` 隔离**：`quarantine` 模式下，落盘隔离清单内的用例以 skip（标 quarantined）执行——不产生 exit 1、不进 `all-passed` 分母、不逐项归因，evidence 只列隔离数与清单外补跑记录；清单外失败 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑；full 档执行顺带刷新清单（转绿销记、新先在追加须带 owner / 去向 / 首录日期）。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败；历史同签名归因只处理真实失败，未执行慢项不得记 quarantine 或通过，只能按预算延期
-- **重套件执行形态**（scoped / full / 归因补跑；fast 不受限）：一律 `python3 ../shared/scripts/test_slots.py run --label <feature-slug>/<issue-id>/<档> -- <质量门命令>` 包装拿整机槽位（上限见 `host-budget`），并发度 = 分得槽位数（命令内用 `$JOBS`）；**后台执行**、输出与退出码落 worktree `.logs/` 文件后轮询（full 墙钟可超宿主单次命令上限，不得前台久等）；排队超 `host-budget.queue-timeout` 报告而非死等。包装器 stderr 末行摘要的 queue-seconds / run-seconds / jobs 记入 evidence 档位门记录
-- **负载感知的超时处理**：单项超时且包装器记录的运行期 `load-peak` > ncpu → 先串行单独重跑该项一次再归因；重跑通过 = `load-flake`，evidence 列出，不算失败、不进归因；仍败才按归因流程。高负载下的超时不得直接记本票引入，也不得直接记先在失败
+- 在 worktree 内**实际执行**票的每条 DoD 验收命令与 `quality-gate.fast`，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出与完成时 commit hash
+- **票级验证只有 DoD + fast**：实现、自修复、评审回修与冲突回修都使用同一范围；不换算受影响测试集，不在票内运行完整套件。套件级完整回归只在分支 / main 的 CI full 中执行，票级 evidence 不代替、也不声称取得 CI full 判决
+- **测试职责边界按 `verify-policy.gate-scope`**：票级 DoD + fast 只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
+- **先在失败按 `verify-policy.attribution` 隔离**：`quarantine` 模式下，落盘隔离清单内的用例以 skip（标 quarantined）执行——不产生 exit 1、不进 `all-passed` 分母、不逐项归因，evidence 只列隔离数与清单外补跑记录；清单外失败 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败；历史同签名归因只处理真实失败，未执行项不得记 quarantine 或通过
 - **bug 票回归有效性（票 frontmatter `type: bug` 必做）**：修复转绿后证明「测试真的能抓住这个 bug」——临时 revert 生产修复（保留回归测试）→ 重跑回归测试，须见红（断言失败，记退出码与失败输出要点）→ 恢复修复 → 重跑须绿。三次结果记入 evidence「回归有效性」节；revert 后不变红 = 测试从未复现 bug，修复不算完成，回到 Step 3 重写复现测试
-- 全部实际执行的强制验收命令与已启动测试退出码为 0，且延期项已按政策落机器报告 → evidence 头部 `all-passed: true` + 记录 `verify-tier` / `tier-target`（升档后目标档位，未升档等于 `verify-tier`）/ `tier-executed` 与完成时 commit hash；`all-passed` 不表示完整闭包已跑，budget-partial 必须另列延期清单。**任何一条已执行检查不过、出现新增 / 未归因失败或延期报告不合法 = 未完成，回到 Step 4**
-- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；light / scoped 票不得虚标跑过 full
-- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / **需求覆盖矩阵** / 红线接触 / 漂移与升档 / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
+- 全部 DoD 验收命令与 fast 实际执行且退出码为 0 → evidence 头部 `all-passed: true` 并记录完成时 commit hash。**任何一条必跑检查不过、出现新增 / 未归因失败 = 未完成，回到 Step 4**；`all-passed` 只表示本票 DoD + fast 通过，不表示分支 / main 的 CI full 已通过
+- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；票完成、MR ready 或合入集成分支都不得写成套件级完整回归已通过
+- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / **需求覆盖矩阵** / 红线接触 / **漂移记录** / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
 - **需求覆盖矩阵逐条可证伪**：票 DoD 每条与「要做什么」每个行为点各一行——实现位置（文件:符号）+ 覆盖测试 + evidence 行；行为点没有对应实现就如实写「无对应实现」，不得留空、不得用无关行充数；需求行为主干实现标 ★。主会话合并前的需求符合性核对以本表为索引逐条核，缺行 / 空表在 `process_check.py` 即 FAIL
 - 证据引用的捕获物（截图 / 页面捕获 / 原始日志）落主工作区 `impl/<issue-id>/` 同目录并按「留存与体积控制」执行：中间轮只留最终轮，可重下载缓存与 merge 中间物不留
 
 ### Step 6：建 draft MR 并触发评审
 
-- **流程核对（评审前置门）**：`python3 ../shared/scripts/process_check.py --issue <主工作区票文件> --repo <本票 worktree> --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>`——红线登记、漂移登记、阈值 / 集成票档位下限、evidence 头与 HEAD 一致性一次判完；退出码非 0 → 补登记 / 升档补验证 / 刷新 evidence 后重跑（计入自修复轮次），通过才发起评审。评审员只读这份结果，不重做流程核对
+- **流程核对（评审前置门）**：`python3 ../shared/scripts/process_check.py --issue <主工作区票文件> --repo <本票 worktree> --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>`——红线登记、「漂移记录」、生产文件 / LOC 粒度红线、DoD + fast evidence 与 HEAD 一致性一次判完；退出码非 0 → 补登记 / 刷新 evidence 后重跑（计入自修复轮次），粒度超线则停止并置 `needs-human` 退回再拆，通过才发起评审。评审员只读这份结果，不重做流程核对
 - 票置 `in-review`；push 分支
 - **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort，不随开发票档变化）：
+- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort，不随开发角色切换）：
   - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec，并传入流程核对 JSON 路径；保留评审对话句柄（如 agentId），供 Step 7 复审续接
   - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
   - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
-- 评审报告落 `reviews/`；不指示、不引导评审结论。评审只判代码，不等待 full、不评判测试执行状态——full 及其归因在 Step 8 由流程核对 `--phase merge` 把关
+- 评审报告落 `reviews/`；不指示、不引导评审结论。评审只判代码、需求一致性与测试质量，不运行或等待 CI full；分支 / main 晋级时的 CI full 判决与可信运行证明由 promote 相位单独核对
 
 ### Step 7：BLOCKER 回修（同一上下文，计入轮次预算）
 
 - Critical / High（BLOCKER）：在当前 worktree 修复 → 新 commit → push（接 CI 时自动复审本轮改动）→ 复审：宿主支持对话续接时把「回修 commit 范围 + 上轮报告路径」发回**同一评审对话**（不新开实例、不重载评审上下文，见「派发协议」同票复审续接）；宿主不支持时重新走 Step 6 新开评审对话全量复审；直至无 BLOCKER 或轮次耗尽（耗尽 → `needs-human` + 完整轨迹）
-- **回修轮验证范围**：只跑 DoD + fast + 回修 diff（上轮 commit..HEAD）的 scoped 选择集，不重跑 full；full 留到 Step 8 最终 commit 一次
+- **回修轮验证范围**：每个 BLOCKER 回修轮只重跑本票 DoD + fast，并刷新与最终 HEAD 绑定的 evidence；不增加其他票级套件
 - Medium / Low：记入 impl-log「遗留」，不阻塞；评审关于性能 / 展示的意见（无功能错误时）列入 evidence「人工确认项」，不作 BLOCKER
 
 ### Step 8：MR 转正式（ready）与合并
 
 评审通过（pass / pass-with-notes）后：
 
-- **最终 full（仅 `full-execution: ticket` 的 full 档票 / 集成票）**：在评审通过的最终 commit 上跑一次完整套件并按 `attribution` 归因，补齐 evidence 头 `tier-executed: full` / `full-commit`（或复用每日回归时填 `full-ref`）；本票引入的失败 → 回修 → 回修 diff 的 scoped + 同一评审对话复审回修范围 → 再跑一次 full。rebase 无冲突且本票改动文件 blob 不变 → 复用该 full 证据，不重跑。执行形态同 Step 5（槽位包装 + 后台轮询；单项超时先按 load-flake 规则处理）。`ci-only` 跳过票内最终 full，保持 `full-deferred: ci`，不得在本机任何 worktree 补跑
-- **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6）；退出码非 0 → 按 `full-execution` 模式补齐证据或对应验证，不转 ready。主会话收口时以同一命令复核
+- **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6），只核票级 DoD + fast evidence、漂移与粒度记录、评审结论和最终 HEAD；退出码非 0 → 补齐对应证据或停止再拆，不转 ready。主会话收口时再运行 `--phase close` 复核 merge 全部项与 conformance，票级 merge / close 不要求、也不宣称 CI full 已执行
 
 - **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
 - **local 模式**：同模板产出 MR 草案文件到 `mr/`
-- **main 放行（仅 `full-execution: ci-only` 且合并目标为 main）**：先运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI 判决与实际 HEAD commit / tree、pass、run_id、必跑项完成状态；未通过不得合并 main。合入需求分支只做 close，不冒充 main 放行
+- **分支 / main 晋级（`feature-closeout.mode: ci-promote` 等适用场景）**：只接受当前候选的 CI full verdict + trusted run proof。运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI 判决与实际候选 commit / tree、pass、run_id、必跑项完成状态；未通过不得晋级。票合入需求分支只做 close，不冒充分支 / main 放行；`local-human` 的需求候选验证与人工确认按需求收口流程执行，push 后的 CI full 是套件级安全网
 - **合并由主会话执行，无需人审**：
   - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted` 并追加 `mr-submitted` 事件到 `./dev/features/<feature-module>/<feature-slug>/progress.jsonl`（行格式见「监督循环 · 状态与事件写入契约」），再把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
   - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在目标分支所在 checkout 执行 `git merge --no-ff feat/<feature-slug>-<issue-id>`——目标分支是集成分支时在集成 worktree `.worktrees/integration-<feature-slug>/` 内合，**不得合进 main**（main 只接收需求收口的整需求合并）；目标分支是 `main-branch` 时在主工作区合。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
-  - 合并冲突：先在 worktree 内 rebase 目标分支、重跑 `quality-gate.fast` 与冲突文件闭包的 scoped 后再合（不重跑 full）；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
+  - 合并冲突：先在 worktree 内 rebase 目标分支，每个冲突回修轮只重跑本票 DoD + fast 并刷新 evidence 后再合；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
 
 ### Step 9：收尾报告
 
@@ -333,8 +334,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 - 一切改动只在 worktree 分支；红线命中即停
 - 成功只认落盘证据（evidence + commit hash），不认自报
 - 替代即删除：不留注释残留、兼容开关、双路径并存；历史回溯靠 Git，不靠仓库留旧代码
-- 验证档位只升不降：升档必须命中 `verify-policy` 规则并留 evidence / impl-log 记录；light / scoped 票不得虚标跑过 full；不变式（红线 / DoD 功能项 / 独立评审 / 每 feature 至少一次 full）不因档位缩水；full 每票只在最终 commit 跑一次，性能 / 展示归人工确认不阻塞
+- 票级验证在所有实现 / 回修 / 冲突轮统一为 DoD + fast；实测生产文件 > `ticket-max-files` 或生产 LOC > `ticket-max-loc` 必须停止再拆 / `needs-human`，不以增加测试替代再拆。漂移始终登记「漂移记录」；红线 / DoD 功能项 / 独立评审不因票大小缩水。完整套件只有 CI full，分支 / main 晋级只认其判决与可信运行证明，票完成不冒充 CI full 通过
 - `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
-- 流程核对（红线 / 漂移 / 档位 / 证据一致性）以 `process_check.py` 的退出码为准：评审前 `--phase review`、转 ready 前 `--phase merge` 必须通过，不以自述代替
+- 流程核对（红线 / 漂移 / 票粒度 / 证据一致性）以 `process_check.py` 的退出码为准：评审前 `--phase review`、转 ready 前 `--phase merge`、主会话收口 `--phase close` 必须通过，不以自述代替；分支 / main 晋级另跑 `--phase promote`
 - 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
 - 用词遵循 GLOSSARY 标准术语

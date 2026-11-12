@@ -949,7 +949,6 @@ def issue_md(id, title, status, extra=""):
 issue-id: {id}
 title: {title}
 status: {status}
-verify-tier: light
 {extra}---
 正文略（原型演示数据）。
 """

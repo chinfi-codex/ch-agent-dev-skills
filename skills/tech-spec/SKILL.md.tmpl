@@ -1,6 +1,6 @@
 ---
 name: tech-spec
-version: 0.3.0
+version: 0.4.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -24,6 +24,8 @@ allowed-tools:
 ---
 
 {{MODE_GUARD}}
+
+本 skill 的文档产物有一个额外例外：允许写当前需求目录 `./dev/features/*/*/acceptance-plan.yaml`。它是结构化功能验收计划，不是运行配置；其他源码、测试与配置限制不变。
 
 {{GLOSSARY}}
 
@@ -93,7 +95,7 @@ allowed-tools:
 
 **旧实现清理属方案范围**：新实现替代旧实现时，被替代的旧代码、旧文件及其失效引用的删除一并进方案与影响面——版本回溯由 Git 承担，不留注释残留、兼容开关或双路径并存；确需保留的（如协议向后兼容）必须落约束栏并注明依据。
 
-**测试策略 = 预先约定 TDD 接缝**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案。这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。同时填 §5.1「验收判据」表：每条需求级 AC 标 `oracle: auto / auto+human-review / human`（能写出确定性判据的一律 auto；意图满足度、交互手感、展示样式、性能可接受度、真实数据结论合理性归 human）——它是需求收口时自动证据与人工清单的分工真源，不留到收口再定。
+**测试策略 = 预先约定 TDD 接缝 + 需求级功能验收计划**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案，这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。同时读取 `shared/templates/acceptance-plan.yaml`，在同目录产出 `acceptance-plan.yaml`：逐条承接 PRD 的稳定 AC 编号，填前置状态、步骤、期望、执行方式、最终判定、自动断言与证据。`executor` 与 `oracle` 必须分开——浏览器 Agent 能执行不等于能最终验收；有 UI 操作且能客观断言的优先 `browser-agent + auto`，功能可断但呈现 / 领域合理性 / 风险后果需人把关的用 `browser-agent + auto+human-review`，无可靠判据或无法安全执行的归 `human`。需要人工必须填写固定类型的 `human_reason` 和人工判断标准，不能只写“人工看一下”。tech-spec §5.1 只放从 YAML 同步的可读摘要，不另维护第二份分工。
 
 **原型 verdict 的消化**：若 `prototypes/` 下存在 verdict，已裁决结论作为方案输入边界；其中的决策性片段按模板「3.5 决策性片段」收录——裁剪到决策相关部分、逐片标注来源（原型路径 + verdict 日期）。片段是决策的精确化记录，不是实现，不得以片段替代方案文字。
 
@@ -105,7 +107,7 @@ allowed-tools:
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
-3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`
+3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`；同时按 `shared/templates/acceptance-plan.yaml` 写入同目录 `acceptance-plan.yaml`，保证 PRD 的每个端到端 AC 恰好承接一次，AI 自动 / AI 执行人工复核 / 人工验收的分类理由可解释。计划是结构化文档，不是运行配置
 4. 本轮确定的新术语立即回写 GLOSSARY
 5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」记录图谱 delta 与承接票更新义务，接口只有随代码合并且证据齐备后才可标 `current`。不直接编辑 `docs/ARCHITECTURE.md`；首页由图谱工具生成。
 6. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`；本方案整体取代某份旧 tech-spec 时，frontmatter `supersedes` 填该旧文件名（机器可读的取代链，巡检规则见 `shared/references/contract-check.md`）
@@ -126,4 +128,4 @@ allowed-tools:
 
 ## 输出格式
 
-最终输出一份 **Tech Spec**，模板见本 skill 包内 `shared/templates/tech-spec.md`。
+最终输出一份 **Tech Spec** 与同目录 `acceptance-plan.yaml`；前者模板见 `shared/templates/tech-spec.md`，后者模板见 `shared/templates/acceptance-plan.yaml`。两者都交付后才算完成技术方案。

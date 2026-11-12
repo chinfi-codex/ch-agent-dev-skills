@@ -87,8 +87,8 @@ allowed-tools:
 
 - **阶段时间线**：需求收敛 → PRD → pd-review → tech-spec → 拆票 → 实现与评审 → 合并；每段起止日期与时长，每段标注依据文件
 - **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、评审轮次（`reviews/` 下该票报告文件数）、BLOCKER 回修轮数（MR 文件记录）、是否进过 `needs-human`
-- **验证档位统计**：档位分布（各票 `verify-tier` vs evidence 的 `tier-executed`）、升档率（多少票发生升档及原因聚合）、各档验证耗时（evidence 档位门记录）、**逃逸缺陷**（合并后在 main 上才发现的问题，来源 git log 修复提交 / 人反馈；按其原票档位归因）
-- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 遗留」与各 review report 的 BLOCKER 清单
+- **票级验证统计**：各票 DoD / fast 的执行与复跑结果、耗时、失败原因、skip 与隔离数；**逃逸缺陷**（合并后在 main 或 CI full 才发现的问题，来源 git log 修复提交 / CI 判决 / 人反馈；归因到对应票 DoD 或 fast 的覆盖缺口）。历史产物中的旧 scoped / full 档位字段只作当时事实读取，不要求新票继续生成，也不把缺失旧字段记为缺陷
+- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移记录 / 遗留」与各 review report 的 BLOCKER 清单
 - **契约漂移巡检**（图谱分片或旧项目 ARCHITECTURE.md 存在时；只读，不改图谱）：运行 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/contract-check.md`），FAIL 项逐条进问题清单并标注归因；图谱事实错漏交由对应责任阶段更新分片，复盘报告记录建议与证据
 - 统计口径随数字给出；取不到标「缺失」
 
@@ -107,7 +107,7 @@ allowed-tools:
 - BLOCKER findings 按类别聚合
 - impl-log「假设了什么」中被证伪的假设
 - 轮次 >2 的重复修改热点票
-- 档位相关根因：升档集中出现在拆票时（declared-scope 报小了）还是实现时（真实需求就大）；scoped 票逃逸缺陷的漏测原因（dir-map 看不见跨模块 / 选择集换算错）→ 若 light / scoped 票存在逃逸缺陷，给出收紧 `verify-policy` 阈值的具体建议（只建议，不代改 agents-config）
+- 验证相关根因：漂移集中在拆票时（declared-scope 报小了）还是实现时（真实需求就大）；CI full 逃逸缺陷是否源于票 DoD 写窄、fast 未覆盖关键行为或需求级验收缺口 → 给出补 DoD / fast、改进拆票粒度或 CI 业务验收覆盖的具体建议（只建议，不代改 agents-config）；不得恢复票级 scoped / full 作为默认补救
 - 每条按根因分类：需求不清 / 方案缺口 / 实现疏忽 / 环境工具 / 验证档位失准
 
 每条关键点必须挂证据（文件 + 节 / issue 号），没有证据不写。

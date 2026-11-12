@@ -6,8 +6,8 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自�
 
 - 主会话开始监督、实现会话启动、发起评审前都先跑：`python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`（目录由 `/setup-dev` 从宿主实时能力生成，结构 `{host: {model: [effort...]}}`）。旧 `dispatch.model`、缺字段、当前宿主无条目、模型或 effort 不可用 → 停下修正配置，不跨宿主套用、不自动降级。
 - **主会话监督**：取 `dispatch.hosts.<当前宿主>.supervisor-review`，用 `resolve --role supervisor` 核对当前会话的实际 model / effort。不符即停下请人按配置新开或切换主会话；配置文件不会 retroactively 切换已经存在的会话，不得把「写进配置」冒充「当前已生效」。
-- **开发实现**：light / scoped 取 `development.default`，full / 集成 / 高风险及评审达 `review-round-alert` 轮后的续修取 `development.escalated`；用 `resolve --role development --tier <档>` 得到原生参数。
-- **独立评审与派发的符合性核对**：固定取 `supervisor-review`，用 `resolve --role review`；不随开发票档切换，但必须另开独立对话，写查分离不变。
+- **开发实现**：普通票取 `development.default`，集成票 / 高风险票及评审达 `review-round-alert` 轮后的续修取 `development.escalated`；用 `resolve --role development` 得到原生参数。不得按 light / scoped / full 或任何测试范围路由模型。
+- **独立评审与派发的符合性核对**：固定取 `supervisor-review`，用 `resolve --role review`；不随开发角色切换，但必须另开独立对话，写查分离不变。
 - 原生角色文件只从配置生成：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <宿主配置根>`。渲染器拒绝覆盖已有不同文件；确需更新时先核对差异并备份，再由 `/setup-dev` 明确重生，不手改第二份模型真源。DSH 的角色路由合并进目标 profile，不覆盖其他 profile。
 
 ### 派发原语

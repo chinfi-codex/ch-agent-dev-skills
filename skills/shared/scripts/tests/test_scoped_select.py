@@ -150,7 +150,7 @@ class SyntheticRepo(unittest.TestCase):
         self.assertTrue(any('orphan.py' in r for r in result['reasons']))
         self.assertTrue(self.pick('skills/s1/scripts/core.py')['enumerable'])
 
-    def test_deleted_code_and_parse_error_force_full_fallback(self):
+    def test_deleted_code_and_parse_error_require_ci_full(self):
         (self.root / 'skills/s1/scripts/core.py').unlink()
         deleted = self.pick('skills/s1/scripts/core.py')
         self.assertFalse(deleted['enumerable'])
@@ -160,22 +160,17 @@ class SyntheticRepo(unittest.TestCase):
         self.assertFalse(parsed['enumerable'])
         self.assertTrue(any('解析失败' in reason for reason in parsed['reasons']))
 
-    def test_run_non_enumerable_defers_unless_forced(self):
-        # 可执行测试：运行时写 marker，验证 deferred 什么都没跑
+    def test_run_non_enumerable_defers_to_ci(self):
+        # 可执行测试：运行时写 marker，验证 deferred 什么都没跑，本机没有全量兜底出口
         build(self.root, {'tools/tests/m1.py': 'open("m1.ran", "w").write("1")\n',
                           'tools/tests/m2.py': 'open("m2.ran", "w").write("1")\n'})
         code, report = self.run_cli('--run', '--changed', 'unmatched.md')
         self.assertEqual(code, 0)
         self.assertEqual(report['deferred'], 'closure-incomplete')
-        self.assertEqual(report['execution_scope'], 'full_fallback')
+        self.assertEqual(report['execution_scope'], 'ci-full-required')
         self.assertEqual(report['ran'], [])
         self.assertFalse((self.root / 'tools/tests/m1.ran').exists())
-        # --fallback-run：全量执行（含 synthetic 里会失败的惰性 import 测试，broken 如实列）
-        code, report = self.run_cli('--run', '--fallback-run', '--changed', 'unmatched.md')
-        self.assertEqual(code, 1)
-        self.assertNotIn('deferred', report)
-        self.assertTrue((self.root / 'tools/tests/m1.ran').exists())
-        self.assertIn('m1.py', [r['name'] for r in report['ran']])
+        self.assertFalse((self.root / 'tools/tests/m2.ran').exists())
 
     def test_run_selected_executes_and_reports_broken(self):
         build(self.root, {'tools/tests/ok1.py': 'print("ok")\n',

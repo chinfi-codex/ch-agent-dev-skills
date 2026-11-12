@@ -126,6 +126,7 @@ allowed-tools:
     <feature-module>/
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
+      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
       issues/
         issue-001-<短名>.md
       impl/
@@ -138,10 +139,11 @@ allowed-tools:
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
       integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选（feature_closeout.py freeze 写）
+        candidate.json            #   冻结候选与计划哈希（feature_closeout.py freeze 写）
+        acceptance-plan.json      #   冻结时的计划快照
         evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的自动结果 + 人工结果
-        human-checklist.md        #   给人的一页纸
+        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+        acceptance-report.md      #   合并前功能验收报告（feature_closeout.py report 生成）
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹
@@ -191,7 +193,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 2. **状态翻译成人话**，不单独报状态名：`阻塞` → 卡在哪、需要什么才能继续；`需补充上下文` → 缺什么、缺了会影响什么判断；`needs-human` → 这个我定不了、需要你定什么；`已完成但有风险` → 结论照给，风险逐条说人话（什么风险、什么时候会爆、怎么留意）
 3. **需要人决策 / 接手时**说四件事：发生了什么、为什么我定不了、需要你定什么、每个选项的代价（改哪些模块 / 影响谁 / 什么风险）；并给推荐与理由
 4. **说改动时**说：改什么、为什么改、影响面（哪些模块 / 哪些人 / 什么行为变化）、怎么验证；不用 commit hash 与文件清单代替说明
-5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、验证范围加大、记录下来、本票专用分支）
+5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、需要重新拆票、记录下来、本票专用分支）
 
 对照（坏 → 好）：
 
@@ -289,8 +291,8 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 
 - **阶段时间线**：需求收敛 → PRD → pd-review → tech-spec → 拆票 → 实现与评审 → 合并；每段起止日期与时长，每段标注依据文件
 - **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、评审轮次（`reviews/` 下该票报告文件数）、BLOCKER 回修轮数（MR 文件记录）、是否进过 `needs-human`
-- **验证档位统计**：档位分布（各票 `verify-tier` vs evidence 的 `tier-executed`）、升档率（多少票发生升档及原因聚合）、各档验证耗时（evidence 档位门记录）、**逃逸缺陷**（合并后在 main 上才发现的问题，来源 git log 修复提交 / 人反馈；按其原票档位归因）
-- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移与升档 / 遗留」与各 review report 的 BLOCKER 清单
+- **票级验证统计**：各票 DoD / fast 的执行与复跑结果、耗时、失败原因、skip 与隔离数；**逃逸缺陷**（合并后在 main 或 CI full 才发现的问题，来源 git log 修复提交 / CI 判决 / 人反馈；归因到对应票 DoD 或 fast 的覆盖缺口）。历史产物中的旧 scoped / full 档位字段只作当时事实读取，不要求新票继续生成，也不把缺失旧字段记为缺陷
+- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移记录 / 遗留」与各 review report 的 BLOCKER 清单
 - **契约漂移巡检**（图谱分片或旧项目 ARCHITECTURE.md 存在时；只读，不改图谱）：运行 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/contract-check.md`），FAIL 项逐条进问题清单并标注归因；图谱事实错漏交由对应责任阶段更新分片，复盘报告记录建议与证据
 - 统计口径随数字给出；取不到标「缺失」
 
@@ -309,7 +311,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 - BLOCKER findings 按类别聚合
 - impl-log「假设了什么」中被证伪的假设
 - 轮次 >2 的重复修改热点票
-- 档位相关根因：升档集中出现在拆票时（declared-scope 报小了）还是实现时（真实需求就大）；scoped 票逃逸缺陷的漏测原因（dir-map 看不见跨模块 / 选择集换算错）→ 若 light / scoped 票存在逃逸缺陷，给出收紧 `verify-policy` 阈值的具体建议（只建议，不代改 agents-config）
+- 验证相关根因：漂移集中在拆票时（declared-scope 报小了）还是实现时（真实需求就大）；CI full 逃逸缺陷是否源于票 DoD 写窄、fast 未覆盖关键行为或需求级验收缺口 → 给出补 DoD / fast、改进拆票粒度或 CI 业务验收覆盖的具体建议（只建议，不代改 agents-config）；不得恢复票级 scoped / full 作为默认补救
 - 每条按根因分类：需求不清 / 方案缺口 / 实现疏忽 / 环境工具 / 验证档位失准
 
 每条关键点必须挂证据（文件 + 节 / issue 号），没有证据不写。

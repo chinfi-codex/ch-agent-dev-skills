@@ -13,8 +13,8 @@
 
 ## 证据摘要
 
-- 实际执行的强制验收命令 N/N 通过，详见 `evidence-<issue-id>.md`（all-passed: true；仅指已执行项，不代表完整闭包）
-- 质量门：`full-execution: ticket` 时填票内 full 结果；`ci-only` 时填循环内验证 + `full-deferred: ci`，main 放行另附 `--phase promote` 核对通过的 CI run / tree，禁止写“票内全量已通过”。`budget-partial` 时另列 direct 已跑数 / indirect 已跑数 / 延期数与 deferred_tests 清单、机器报告链接及集成 full / CI 兜底状态，禁止只写 N/N 或“scoped 全部通过”
+- 实际执行的 DoD 验收命令与 `quality-gate.fast` 全部通过，详见 `evidence-<issue-id>.md`（`all-passed: true` 只代表本票 DoD + fast，不代表关联选择集或完整套件已运行）
+- 票级不执行 scoped / full，不记录任何票级测试档位。分支 / main 晋级另附 `--phase promote` 核对通过的 CI full run / tree / trusted run proof；禁止把本票证据写成 CI full 已通过
 - commit：`<hash>`
 
 ## 评审结论

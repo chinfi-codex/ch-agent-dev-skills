@@ -31,7 +31,7 @@ allowed-tools:
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
 
-默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），并监督执行直到完成合并。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 / 符合性核对 + 独立评审）与 `development`（独立实现，default / escalated 两档）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；质量门日常只跑 fast 档，交付验证按票的 verify-tier 分档（light / scoped / full，集成票强制 full）。
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），并监督执行直到完成合并。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 / 符合性核对 + 独立评审）与 `development`（独立实现，普通票 default，集成 / 高风险票及评审预警后的续修 escalated）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；票级质量门固定为 DoD + fast，不设 scoped / full 档；完整套件只由分支 / main 的 CI full 执行，本机不补跑。
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
@@ -44,7 +44,7 @@ allowed-tools:
 - ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）
 - 规则：`<repo>/.opencodereview/rule.json` 是否已存在
 - 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/` 与 `dev/`；`git ls-files dev` 是否已有跟踪条目（dev/ 一旦入库，每个 worktree checkout 自带一份完整副本，磁盘随票线性膨胀）
-- 测试选择基建：pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力是否可用——决定 `verify-policy.selection` 推荐 dir-map 还是 impact-map
+- 测试选择基建：仅在配置 `feature-closeout.mode: local-human` 时探查 pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力——决定需求集成候选的 dir-map 映射怎么配；不用于单票测试选择或定档
 - 宿主可选模型与原生适配：逐个探查本机已安装、会跑 dev 流程的 `claude-code / codex / zcode / dsh`。用宿主模型列举能力取得**精确模型 ID 与支持的 effort**，同时确认主会话模型设置、独立对话机制及角色绑定能力（Claude frontmatter / Codex 角色 TOML / ZCode frontmatter / DSH `subagent` 路由）；Claude 另查 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` / `CLAUDE_CODE_EFFORT_LEVEL` 等环境覆盖，存在与配置冲突时先报告，不得静默接受。把已核实目录写成 `dev/dispatch-model-catalog.json`（结构 `{host: {model: [effort...]}}`），不靠记忆补模型名
 - 整机预算：`~/.cache/agent-dev/slots/budget.json` 是否已存在及其取值（已存在 = 同机其他仓已设定，直接镜像进配置，不重新问）
 
@@ -59,20 +59,21 @@ allowed-tools:
 3. **ocr 端点**：仅 `local` / `ci` 需要——GLM（bigmodel.cn，境内）为默认推荐，`ocr config set custom_providers.glm.url https://open.bigmodel.cn/api/paas/v4`、`protocol openai`、`model` 与 `api_key` 由人提供；配置后必须 `ocr llm test` 通过。`delegate` 模式跳过本项
 4. **main-branch**：默认取探查结果
 5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
-6. **quality-gate**：fast / scoped / full 三档命令，从项目实际测试框架推导后请人确认。默认规则写进配置注释：**日常开发（实现、自修复每一轮）只跑 fast；交付验证按票 `verify-tier` 分档——light = DoD + fast，scoped = 另加按最终 diff 换算的受影响测试集，full = 完整套件（full 档票与集成票必跑）**
-7. **verify-policy**：档位阈值与选择机制——`light-max-files`（默认 3）/ `scoped-max-files`（默认 10）/ `scoped-max-loc`（默认 400）请人按仓库体量调整；`escalate-triggers` 默认五项、分两级（full 级：数据迁移 schema / 鉴权权限——票内全量；scoped+ 级：公共接口签名 / 共享模块 / 红线邻接——跑反向闭包，不可枚举时标「闭包不完整」由每日回归兜底）请人增删；`selection` 按探查结果推荐——代码变更走 `impact-map`（静态导入闭包，共享脚本 `shared/scripts/scoped_select.py`），数据 / 配置文件配 dir-map 声明映射表（`selection-map` 默认 `dev/scoped-map.yaml`，按该仓测试源码的数据路径引用生成初始版请人过目）；集成票「模块隔离认定」与 C 类仓末票用 `module-scoped`（按需求涉及模块跑该模块全闭包，不跨无关模块）；`attribution` 默认 `quarantine`（隔离清单内用例 skip 执行、不产生 exit 1，入册须 base 侧同签名稳定失败且带 owner / 去向 / 首录日期；存量 `known-failures` 清单迁移时逐条补登去向），保守可选 `two-sided`（每条失败双侧对照，成本翻倍）；执行形态（并行 / 超时分层 / slow 白名单）按套件实测写入配置注释；`gate-scope` 默认 non-gating = perf + display（AI 门只保功能，性能 / 展示归人工确认），有外部依赖用例时请人指定测试分类清单路径；`full-runs` 默认 `once-at-final`；`daily-regression` 默认启用——本 skill 不安装定时器，收尾时向人给出每日回归定时任务的 prompt（main HEAD 跑一次 full、tree 未变则跳过、新失败二分到合入票、隔离项签名漂移抽查与超期条目列出、落盘 `dev/full-runs/`），由人在自己的宿主里设定时间
-8. **host-budget**：整机测试算力预算——真源是机器级 `~/.cache/agent-dev/slots/budget.json`：已存在 → 把取值镜像进 agents-config 并用大白话告诉用户当前预算，不问人；不存在 → 推荐默认 `total = ncpu - 2`、`max-runs = 2`、`queue-timeout = 1200`，确认后用 `python3 ../shared/scripts/test_slots.py budget --total ... --max-runs ... --queue-timeout ...` 写入机器级文件并镜像进配置。必须提示人：这是整机预算，同机各仓 / 各会话共享一份，改动对全部项目生效
-9. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
-10. **max-fix-rounds**：默认 99，可调
-11. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督 / 符合性核对与独立评审；`development.default` 用于 light / scoped 实现，`development.escalated` 用于 full / 集成 / 高风险及评审预警后的续修。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2
-12. **review-round-alert / base-freeze / mechanical-refresh / artifact-budget**：默认 3 / true / 空清单 / 120 行 + 20MB；mechanical-refresh 按仓库实际的金样本指纹、生成块请人列出
-13. **conformance**：需求符合性核对（合并前主模型校验）——默认 `mode: always`（每票必核）+ `checker: main-session`（主会话亲核），落进配置不问人；人主动提出 light 票抽查或上下文紧张时，才改 `sampled` / `dispatched`
+6. **quality-gate**：只配置票级 `fast` 命令，从项目实际测试框架推导后请人确认。实现、自修复、评审回修与 merge / close 都只跑本票 DoD + fast，不设置票级 scoped / full 命令，也不按文件数、LOC 或风险增加票级测试范围
+7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限，预估或实测超限必须再拆，不得转成额外测试或模型升级；`attribution` 默认 `quarantine`（隔离清单内用例 skip 执行、不产生 exit 1，入册须 base 侧同签名稳定失败且带 owner / 去向 / 首录日期；存量 `known-failures` 清单迁移时逐条补登去向），保守可选 `two-sided`（每条失败双侧对照）；`gate-scope` 默认 non-gating = perf + display（AI 门只保功能，性能 / 展示归人工确认），有外部依赖用例时请人指定测试分类清单路径。**完整套件只有 CI full**：本机、票 worktree、集成 worktree 与监督循环均不得执行 full；`ci-promote` 放行须核同 tree CI verdict + trusted run proof；每日回归如启用，只能由 CI schedule / 手工 dispatch 触发同一 CI workflow，收尾给人工设定时任务的 prompt，不安装本机 full worktree 或定时器
+8. **host-budget**：整机测试算力预算只用于 local-human 需求收口的关联选择集与单项归因——真源是机器级 `~/.cache/agent-dev/slots/budget.json`：已存在 → 把取值镜像进 agents-config 并用大白话告诉用户当前预算，不问人；不存在 → 推荐默认 `total = ncpu - 2`、`max-runs = 2`、`queue-timeout = 1200`，确认后用 `python3 ../shared/scripts/test_slots.py budget --total ... --max-runs ... --queue-timeout ...` 写入机器级文件并镜像进配置。必须提示人：这是整机预算，同机各仓 / 各会话共享一份，改动对全部项目生效。票级 fast 与 CI full 不使用这份本机预算
+9. **feature-closeout**：默认 `ci-promote`；选择 `local-human` 时确认每需求独立集成分支、人工测试 / Prod 发布配置、`verify-budget-seconds` 与可选 `selection-map`。选择基建按 Step 0 探查结果推荐：代码变更走静态 import 反向闭包，数据 / 配置文件用 dir-map 映射（默认 `dev/scoped-map.yaml`）；它们只用于需求集成候选的关联验证，不是票级交付门
+10. **redlines**：默认给协议 / 密钥 / 测试三类候选 glob，请人按仓库实际增删
+11. **max-fix-rounds**：默认 99，可调
+12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督 / 符合性核对与独立评审；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及评审预警后的续修。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2
+13. **review-round-alert / base-freeze / mechanical-refresh / artifact-budget**：默认 3 / true / 空清单 / 120 行 + 20MB；mechanical-refresh 按仓库实际的金样本指纹、生成块请人列出
+14. **conformance**：需求符合性核对（合并前主模型校验）——默认 `mode: always`（每票必核）+ `checker: main-session`（主会话亲核），落进配置不问人；人主动提出抽查时改 `sampled` 并设 `sample-rate`，仅非集成票可跳过，集成票始终实核；上下文紧张时可改 `dispatched`
 
 ### Step 2：写配置与种子
 
 按模板落盘（写作前必须先读对应模板）：
 
-- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含标准 `dispatch` 节（schema-version + 宿主角色模型 / effort + 开发双档）、三档质量门与 `verify-policy`（档位阈值 / 两级升档触发器 / 漂移规则 / selection 机制 / attribution 归因 / 执行形态）、`host-budget`（机器级预算的镜像）。写完立即运行 `python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`
+- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`）；含标准 `dispatch` 节（schema-version + 宿主角色模型 / effort + 开发双档）、票级 `quality-gate.fast` 与 `verify-policy`（拆票粒度上限 / attribution 归因 / gate-scope）、CI full 晋级配置、`host-budget`（机器级预算的镜像）及需求收口配置。写完立即运行 `python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`
 - 按已确认宿主生成原生角色：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <.claude|.codex|.zcode>`；渲染器拒绝覆盖已有不同文件时先展示差异并请人确认，不强行覆盖。DSH 先用 `--dsh-profile <headless|desktop>` 渲染到临时目录，再只把主模型、完整 `tool-subagent` config 与 `allowedModels` 合并进人确认的目标 profile：headless 新增白名单插件必须使用 `- insert:`，已有 config 按整体替换处理；不动其他 profile，新建 DSH 会话才采样子代理白名单
 - `.gitignore` 追加 `.worktrees/` 与 `dev/`（已存在则跳过）；探查发现 dev/ 已被 git 跟踪 → 显式警示并建议 `git rm -r --cached dev/` 出库（dev/ 不入库是 worktree dev/ 软链约定的前提；入库会让每个 worktree 自带完整副本）
 - **仅当 ocr.mode = ci 时**：

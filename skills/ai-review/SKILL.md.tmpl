@@ -33,7 +33,7 @@ allowed-tools:
 
 你是独立评审员（Reviewer）。你负责：**用 open-code-review（`ocr`）对固定点以来的 diff 评审，解析评审结果为评审报告与 BLOCKER 清单，供回修与主会话合并判断使用**。
 
-复测位置：评审员默认只读实现方的 evidence 回执；需要独立复测时，在本票 worktree 对同一固定提交执行（重套件经 `test_slots.py` 包装），禁止引用实现对话自述。OCR本地筛文件/静态分析不是测试，不受此限制。
+复测位置：评审员默认只读实现方的 DoD + fast evidence 回执；需要独立复测时，在本票 worktree 对同一固定提交只重跑相关 DoD / fast，禁止引用实现对话自述，也不得加跑票级 scoped / full。OCR 本地筛文件 / 静态分析不是测试，不受此限制。
 
 铁律：**只评不改**。不修代码、不修测试、不改票；产出只有一份评审报告（`reviews/**`）。「顺手修了」是违规。
 
@@ -95,7 +95,7 @@ allowed-tools:
 
 ### Step 3：流程核对读取 + 语义复核（只判代码，不判测试执行）
 
-**职责切分**：可机器判定的流程核对（红线 glob 命中与登记、漂移登记、阈值 / 集成票档位下限、evidence 头字段与 commit 一致性）**只由** `../shared/scripts/process_check.py` 做一次——`/implement` 发起评审前已跑 `--phase review` 且必须通过，结果 JSON 路径随评审输入传入。评审员**读它，不重做**：不再自行 grep 红线、数文件、比对 evidence 头。
+**职责切分**：可机器判定的流程核对（红线 glob 命中与登记、漂移登记、票粒度上限、DoD + fast evidence 与 commit 一致性）**只由** `../shared/scripts/process_check.py` 做一次——`/implement` 发起评审前已跑 `--phase review` 且必须通过，结果 JSON 路径随评审输入传入。评审员**读它，不重做**：不再自行 grep 红线、数文件、比对 evidence 头。
 
 - 未收到核对结果 → 自行只读运行一次（`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <worktree> --phase review`，不加 `--json`，输出不落盘）；结果为 FAIL → 报告只引用其 FAIL 行列为 BLOCKER（critical），不展开复核，结论 `blocked`
 - 核对结果中的 `REVIEW` 项是交给评审的语义判断，按下方逐项处理
@@ -103,14 +103,12 @@ allowed-tools:
 **语义复核**（脚本判不了，评审独有）：
 
 - **测试改动映射**：核对结果列出的「已登记的既有文件改动」逐条对照 impl-log「红线接触记录」——`mechanical-refresh` 白名单内的确只动所列字段；「需求驱动更新」的「测试 → 票 DoD 条目 / tech-spec 节锚点」映射成立、冲突说明成立、改动限于被变更行为覆盖的断言与夹具 → 正常；映射不上或借机放宽无关断言 → **BLOCKER（critical）**，视同红线
-- **语义升档触发**：diff 实际含 `verify-policy.escalate-triggers` 的语义命中（full 级：数据迁移 / schema、鉴权权限；scoped+ 级：公共接口 / API 签名、共享模块——这些票须至少 scoped 且选择集含反向闭包），而核对结果的 `tier-target` 低于应有档位 → **BLOCKER（critical）**：该升没升（阈值与集成票类的升档由脚本判定，不在此重复）
-- **模块隔离认定**：核对结果提示集成票走 module-scoped 时，复核 evidence 记录的判定依据（反向闭包为空 + 模块清单）是否成立；不成立 → BLOCKER（critical）
-- **scoped 预算延期复核**：核对结果提示 `budget-partial` 时，只读 evidence 与 scoped-ref 的延期清单，复核延期项确为间接闭包、不是票 DoD 行为点的唯一覆盖，也未借「缩 scope」移除核心验收；机器分区、direct 通过、base / tree 与预算由 process_check 已核，不重算、不重跑。发现核心行为仅靠延期项覆盖 → BLOCKER（critical）；合法延期如实记录，不等待集成 full / CI，也不因此推迟评审结论
+- **票粒度复核**：核对结果显示实际生产文件数 / LOC 超过 `verify-policy.ticket-max-files` / `ticket-max-loc` 时，必须退回再拆；不得以补跑 scoped / full、模块隔离认定或提高模型档位代替。漂移是否仍属本票范围由主会话裁决，评审不得自行扩大 `declared-scope` 放行
 - **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
 - **契约 diff 复核**（`docs/architecture/*.json`）：票 DoD 含契约条目时，核对对应稳定 ID 的分片改动与 tech-spec 3.2 一致；`current` 必须有可复核来源哈希、提交和证据，缺证应为 `needs_verification`。票未声明契约条目而改动图谱记录绑定的代码位置（flow-back）：漏补分片或 impl-log 映射缺失 → **BLOCKER（critical）**。`docs/ARCHITECTURE.md` 是生成首页，不审核手工架构事实
 - 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
 
-**与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判测试执行状态——full 是否已跑、归因是否完成、evidence 是否已更新到最终 commit，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；这些由 `process_check.py --phase merge` 在收口时把关。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
+**与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判 CI full 或套件级测试状态——CI full 是否已跑、归因是否完成，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；分支 / main 晋级时由 `process_check.py --phase promote` 把关。票级 evidence 是否真实记录 DoD + fast 并与最终 commit 一致，由 `process_check.py --phase merge` 核对。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
 
 ### Step 4：解析与映射
 
@@ -132,7 +130,7 @@ allowed-tools:
 - 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
 - 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
 - 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；语义升档漏升、模块隔离认定不成立、旧实现该删没删（替代落地而旧代码留存、无约束依据）、旧测试改动映射不成立（需求驱动更新复核不通过）与契约更新缺失或偏离 tech-spec 3.2 意图（含 flow-back 漏补记）同列 BLOCKER
-- 不以测试执行状态（full 未跑 / 归因未完 / evidence 未更新）开 BLOCKER 或推迟结论；测试代码质量问题照常评
+- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；超票粒度上限、旧实现该删没删（替代落地而旧代码留存、无约束依据）、旧测试改动映射不成立（需求驱动更新复核不通过）与契约更新缺失或偏离 tech-spec 3.2 意图（含 flow-back 漏补记）同列 BLOCKER
+- 不以 CI full 未跑 / 归因未完 / evidence 未更新开 BLOCKER 或推迟结论；DoD + fast 证据的新鲜度由 process_check 把关，测试代码质量问题照常评
 - findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
 - 用词遵循 GLOSSARY 标准术语

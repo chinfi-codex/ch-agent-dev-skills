@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""确定性流程核对：红线 / 漂移 / 档位 / 证据完整性 / 需求符合性，一处计算、多方读取。
+"""确定性流程核对：红线 / 漂移 / 票大小 / DoD+fast 证据 / 需求符合性。
 
 dev 阶段的流程核对只在这里做一次：/implement 在发起评审前（--phase review）与
 转 ready 前（--phase merge）运行，主会话收口时运行 --phase close（= merge 全部项 +
 需求覆盖矩阵 + 需求符合性核对记录）；/ai-review 只读本脚本
-的输出，不再自行复核 glob、档位与 evidence。本脚本只做可机器判定的事——语义判断
-（需求驱动测试更新的映射是否成立、escalate-triggers 的语义命中、清理复核、
-需求点与实现是否语义相符）留给评审与主会话的符合性核对。
+的输出，不再自行复核 glob 与 evidence。本脚本只做可机器判定的事——语义判断
+（需求驱动测试更新的映射是否成立、清理复核、需求点与实现是否语义相符）
+留给评审与主会话的符合性核对。
 
 用法：
   python3 process_check.py --issue <票文件> --repo <票 worktree 或仓库> \
       --phase review|merge|close|promote [--base REV] [--head REV] [--json OUT]
-  ci-only main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json> \
+  CI 分支 / main 放行另加：--phase promote --ci-verdict <branch-ci-verdict.json> \
       --ci-run-proof <trusted-gitea-run-proof.json>
 
 退出码：0 = 全部通过；1 = 有 FAIL 项；2 = 输入 / 配置错误。
@@ -28,7 +28,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-TIERS = {"light": 0, "scoped": 1, "full": 2}
 # 非生产文件（不计入生产文件数 / LOC）；agents-config verify-policy.production-exclude 可覆盖
 DEFAULT_NON_PRODUCTION = [
     "tests/**", "**/tests/**", "test/**", "**/test/**", "**/test_*", "**/*_test.*",
@@ -152,75 +151,6 @@ def md_section(text: str, title: str) -> str:
     return m.group(1) if m else ""
 
 
-def validate_budget_partial(report: dict, base: str, tree: str, max_budget) -> list[str]:
-    """核验限时 scoped 的机器分区；任何形态不明都按不可豁免处理。"""
-    errors = []
-    if not isinstance(report, dict):
-        return ["机器报告不是 JSON 对象"]
-    checks = (
-        (report.get("schema") == "scoped-selection/v1", "schema 非法"),
-        (report.get("deferred") == "budget-partial", "deferred 不是 budget-partial"),
-        (report.get("execution_scope") == "selected-partial", "execution_scope 不是 selected-partial"),
-        (report.get("stop_reason") == "time-budget", "stop_reason 不是 time-budget"),
-        (report.get("enumerable") is True, "闭包不可枚举不能使用 budget-partial"),
-        (report.get("base") == base, "base 与本次流程核对不一致"),
-        (report.get("tree") == tree, "tree 与 HEAD 不一致"),
-        (bool(report.get("commit")), "缺执行时 commit"),
-    )
-    errors.extend(message for ok, message in checks if not ok)
-    budget = report.get("budget_seconds")
-    if (not isinstance(max_budget, (int, float)) or isinstance(max_budget, bool)
-            or max_budget <= 0):
-        errors.append("未配置正数 scoped-budget-seconds")
-    elif (not isinstance(budget, (int, float)) or isinstance(budget, bool)
-          or budget <= 0 or budget > max_budget):
-        errors.append("执行预算缺失、非正数或超过 scoped-budget-seconds")
-    elapsed = report.get("indirect_elapsed_seconds")
-    if (not isinstance(elapsed, (int, float)) or isinstance(elapsed, bool)
-            or not isinstance(budget, (int, float)) or isinstance(budget, bool)
-            or elapsed + 0.001 < budget):
-        errors.append("间接闭包实际耗时未达到所声明预算")
-
-    selected = report.get("selected")
-    direct = report.get("direct")
-    deferred = report.get("deferred_tests")
-    ran = report.get("ran")
-    broken = report.get("broken")
-    for value, label in ((selected, "selected"), (direct, "direct"),
-                         (deferred, "deferred_tests"), (broken, "broken")):
-        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
-            errors.append(f"{label} 不是字符串清单")
-    if not isinstance(ran, list) or not all(
-            isinstance(r, dict) and isinstance(r.get("name"), str) for r in ran):
-        errors.append("ran 不是执行结果清单")
-        return errors
-    if not all(isinstance(value, list) and all(isinstance(x, str) for x in value)
-               for value in (selected, direct, deferred, broken)):
-        return errors
-    ran_names = [r["name"] for r in ran]
-    if len(ran_names) != len(set(ran_names)):
-        errors.append("ran 含重复测试")
-    if any(r.get("exit") != 0 for r in ran):
-        errors.append("存在失败或超时的已执行测试")
-    if broken:
-        errors.append("broken 非空")
-    if isinstance(selected, list) and isinstance(deferred, list):
-        ran_set, deferred_set, selected_set = set(ran_names), set(deferred), set(selected)
-        if ran_set & deferred_set:
-            errors.append("已跑与延期测试重叠")
-        if ran_set | deferred_set != selected_set or len(ran_names) + len(deferred) != len(selected):
-            errors.append("selected 与 ran + deferred_tests 分区不完整")
-        if not deferred:
-            errors.append("延期清单为空")
-    if isinstance(direct, list):
-        passed = {r["name"] for r in ran if r.get("exit") == 0}
-        if not set(direct) <= passed:
-            errors.append("direct 测试未全部实际执行并通过")
-        if isinstance(deferred, list) and set(direct) & set(deferred):
-            errors.append("direct 测试不得延期")
-    return errors
-
-
 # ---------- glob ----------
 
 def glob_to_regex(pattern: str) -> re.Pattern:
@@ -321,10 +251,6 @@ def find_root(issue_path: Path) -> Path:
     raise InputError("向上找不到 dev/agents-config.md（先运行 /setup-dev）")
 
 
-def tier_of(v) -> int | None:
-    return TIERS.get(str(v).strip()) if v is not None else None
-
-
 def successors(issue_path: Path, issue_id: str):
     out = []
     for p in sorted(issue_path.parent.glob("issue-*.md")):
@@ -376,7 +302,7 @@ def run(args) -> tuple[Report, dict]:
     if not log_text:
         rep.add("impl-log", "FAIL", f"impl-log 不存在：{impl_log}")
     redline_sec = md_section(log_text, "红线接触")
-    drift_sec = md_section(log_text, "漂移与升档")
+    drift_sec = md_section(log_text, "漂移记录")
     done_sec = md_section(log_text, "做了什么")
     matrix_sec = md_section(log_text, "需求覆盖矩阵")
 
@@ -408,7 +334,7 @@ def run(args) -> tuple[Report, dict]:
         rep.add("tdd-red", "REVIEW",
                 "新增测试未见红登记（impl-log「做了什么」须记首次失败输出要点）：" + ", ".join(added_tests))
 
-    # 2. 漂移：declared-scope 外的文件须在「漂移与升档」节登记
+    # 2. 漂移：declared-scope 外的文件须在「漂移记录」节登记
     non_prod = policy.get("production-exclude") or DEFAULT_NON_PRODUCTION
     prod = [(st, p, a, d) for st, p, a, d in files if not match_any(p, non_prod)]
     declared = fm.get("declared-scope") or []
@@ -419,145 +345,36 @@ def run(args) -> tuple[Report, dict]:
     if unregistered_drift:
         rep.add("drift", "FAIL", "declared-scope 外的生产文件未登记漂移：" + ", ".join(unregistered_drift))
     if not drift_sec.strip():
-        rep.add("drift", "FAIL", "impl-log「漂移与升档记录」为空（无漂移也须留一行）")
+        rep.add("drift", "FAIL", "impl-log「漂移记录」为空（无漂移也须留一行）")
 
-    # 3. 档位：阈值下限 + 只升不降 + 集成票
+    # 3. 票大小：按实际生产 diff 判定，超限必须再拆票。
+    n_prod = len(prod)
+    loc = sum(a + d for _, _, a, d in prod)
+    ticket_max_files = int(policy.get("ticket-max-files") or 10)
+    ticket_max_loc = int(policy.get("ticket-max-loc") or 400)
+    is_integration = not successors(issue_path, issue_id)
+    if n_prod > ticket_max_files:
+        rep.add("ticket-size", "FAIL",
+                f"生产文件 {n_prod} > ticket-max-files {ticket_max_files}；票过大，须再拆票")
+    if loc > ticket_max_loc:
+        rep.add("ticket-size", "FAIL",
+                f"生产 LOC {loc} > ticket-max-loc {ticket_max_loc}；票过大，须再拆票")
+
+    # 4. 票级证据只核 DoD + fast：全部通过，且本票文件在证据 commit 与 HEAD 间未再变化。
     ev = read_first_yaml_block(evidence) if evidence.is_file() else {}
     if not ev:
         rep.add("evidence", "FAIL", f"evidence 不存在或缺 yaml 头：{evidence}")
-    n_prod = len(prod)
-    loc = sum(a + d for _, _, a, d in prod)
-    ticket_tier = tier_of(fm.get("verify-tier"))
-    target = tier_of(ev.get("tier-target")) if ev else None
-    if target is None:
-        target = ticket_tier
-        if ev:
-            rep.add("tier", "FAIL", "evidence 头缺 tier-target（升档后的目标档位，未升档时等于票 verify-tier）")
-    required = 0
-    reasons = []
-    if n_prod > int(policy.get("light-max-files") or 3):
-        required, reasons = 1, [f"生产文件 {n_prod} > light-max-files"]
-    if n_prod > int(policy.get("scoped-max-files") or 10):
-        required = 2
-        reasons.append(f"生产文件 {n_prod} > scoped-max-files")
-    if loc > int(policy.get("scoped-max-loc") or 400):
-        required = 2
-        reasons.append(f"生产 LOC {loc} > scoped-max-loc")
-    succ = successors(issue_path, issue_id)
-    isolation = str(ev.get("isolation") or "").strip() if ev else ""
-    if not succ:
-        if isolation == "module-scoped":
-            rep.add("tier", "REVIEW", "集成票按「模块隔离认定」跑 module-scoped：判定依据见 evidence 档位门记录")
-        else:
-            required = 2
-            reasons.append("集成票（无后继票）")
-    if ticket_tier is None:
-        rep.add("tier", "FAIL", f"票 verify-tier 非法：{fm.get('verify-tier')!r}")
-    elif target is not None and target < ticket_tier:
-        rep.add("tier", "FAIL", "tier-target 低于票 verify-tier（档位只升不降）")
-    if target is not None and target < required:
-        rep.add("tier", "FAIL", "该升没升：" + "；".join(reasons) + f" → 至少 {_name(required)}，当前 {_name(target)}")
-    if target is not None and ticket_tier is not None and target > ticket_tier:
-        rows = [ln for ln in drift_sec.splitlines()
-                if ln.strip().startswith("|") and not re.fullmatch(r"[|\s:-]+", ln.strip()) and "检查时点" not in ln]
-        if not any(_name(target) in ln for ln in rows):
-            rep.add("tier", "FAIL", f"tier-target 升至 {_name(target)}，但 impl-log「漂移与升档记录」无对应升档行")
-
-    # 4. 证据：按阶段核对执行档位、commit 与 all-passed
     ev_text = evidence.read_text(encoding="utf-8") if evidence.is_file() else ""
     if str(fm.get("type") or "").strip() == "bug" and ev_text and not md_section(ev_text, "回归有效性").strip():
         rep.add("evidence", "FAIL", "type: bug 票缺 evidence「回归有效性」节（revert 修复 → 见红 → 恢复 → 绿）")
-    if ev and target is not None:
-        executed = tier_of(ev.get("tier-executed"))
+    if ev:
         ev_commit = str(ev.get("commit") or "")
-        scoped_deferred = str(ev.get("scoped-deferred") or "").strip()
-        budget_partial_valid = False
-        full_execution = str(policy.get("full-execution") or "ticket").strip()
-        full_deferred = str(ev.get("full-deferred") or "").strip()
-        ci_only = full_execution == "ci-only"
-        if full_execution not in ("ticket", "ci-only"):
-            rep.add("evidence", "FAIL", f"verify-policy.full-execution 非法：{full_execution!r}")
-        if full_deferred == "ci" and not ci_only:
-            rep.add("evidence", "FAIL", "CI-only 配置未启用：full-deferred: ci 需要 verify-policy.full-execution: ci-only")
-        if ci_only and full_deferred not in ("", "ci"):
-            rep.add("evidence", "FAIL", f"CI-only 的 full-deferred 非法：{full_deferred!r}")
-        if ci_only and (ev.get("full-commit") or ev.get("full-ref")):
-            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得用 full-commit / full-ref 冒充分支 CI 判决")
-        if ci_only and executed == TIERS["full"]:
-            rep.add("evidence", "FAIL", "CI-only 票级 evidence 不得记录本票执行 full")
-        defer_to_ci = ci_only and full_deferred == "ci"
-        if scoped_deferred not in ("", "closure-incomplete", "budget-partial"):
-            rep.add("evidence", "FAIL", f"scoped-deferred 非法：{scoped_deferred!r}")
-        if scoped_deferred == "budget-partial":
-            partial_errors = []
-            if executed != TIERS["light"]:
-                partial_errors.append("tier-executed 必须如实记 light")
-            scoped_ref = str(ev.get("scoped-ref") or "").strip()
-            report = {}
-            if not scoped_ref:
-                partial_errors.append("缺 scoped-ref 机器报告")
-            else:
-                report_path = (root / scoped_ref).resolve()
-                try:
-                    report_path.relative_to(impl_dir.resolve())
-                except ValueError:
-                    partial_errors.append("scoped-ref 必须位于本票 impl 目录")
-                try:
-                    report = json.loads(report_path.read_text(encoding="utf-8"))
-                except (OSError, ValueError) as exc:
-                    partial_errors.append(f"机器报告不可读：{exc}")
-            if not partial_errors:
-                head_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
-                partial_errors = validate_budget_partial(
-                    report, base, head_tree, policy.get("scoped-budget-seconds"))
-            for message in partial_errors:
-                rep.add("evidence", "FAIL", f"budget-partial 无效：{message}")
-            budget_partial_valid = not partial_errors
-        need = target if args.phase in ("merge", "close") else min(target, TIERS["scoped"])
-        if defer_to_ci:
-            need = min(need, TIERS["scoped"])
-            rep.add("evidence", "REVIEW",
-                    "full-deferred: ci：票级只核循环内验证；feature / main 放行另核分支 CI 同 tree 判决")
-        if executed is None:
-            rep.add("evidence", "FAIL", f"tier-executed 非法：{ev.get('tier-executed')!r}")
-        elif executed < need:
-            # scoped-deferred：闭包不可枚举整包延期，或机器报告证明 direct 全绿、仅 indirect 因预算延期。
-            # 两者都不豁免 full 档最终 full（need=full）；budget-partial 更不能靠手写标记放行。
-            if (executed >= TIERS["light"] and need <= TIERS["scoped"]
-                    and scoped_deferred == "closure-incomplete"):
-                rep.add("evidence", "REVIEW",
-                        "scoped 选择集不可枚举已延期（scoped-deferred）：由集成票 full / 每日回归兜底，评审复核 DoD + fast 结论与延期原因")
-            elif (executed >= TIERS["light"] and need <= TIERS["scoped"]
-                  and scoped_deferred == "budget-partial" and budget_partial_valid):
-                rep.add("evidence", "REVIEW",
-                        "scoped indirect 闭包已按预算延期：direct 与已执行项全绿，评审复核延期清单；集成 full / CI 放行不豁免")
-            else:
-                rep.add("evidence", "FAIL", f"tier-executed {_name(executed)} < 本阶段要求 {_name(need)}")
-        full_ref = str(ev.get("full-ref") or "").strip()
-        if executed == TIERS["full"] and not ev.get("full-commit") and not full_ref:
-            rep.add("evidence", "FAIL", "tier-executed: full 但缺 full-commit / full-ref（档位虚标）")
-        if full_ref:
-            ref_path = root / full_ref
-            m = re.search(r"^\s*[-*]?\s*tree:\s*`?([0-9a-f]{7,40})", ref_path.read_text(encoding="utf-8"), re.M) \
-                if ref_path.is_file() else None
-            head_tree = git(repo, "rev-parse", f"{head}^{{tree}}").strip()
-            if not m:
-                rep.add("evidence", "FAIL", f"full-ref 记录不存在或缺 tree 行：{full_ref}")
-            elif not head_tree.startswith(m.group(1)):
-                rep.add("evidence", "FAIL", f"full-ref 记录 tree {m.group(1)[:8]} ≠ HEAD tree {head_tree[:8]}，不能复用")
-            elif not re.search(r"^\s*[-*]?\s*result:\s*`?pass", ref_path.read_text(encoding="utf-8"), re.M):
-                rep.add("evidence", "FAIL", f"full-ref 记录结果不是 pass：{full_ref}")
         if ev.get("all-passed") is not True:
-            rep.add("evidence", "FAIL", "all-passed 不是 true")
+            rep.add("evidence", "FAIL", "DoD + fast 证据的 all-passed 不是 true")
         if not _same_ticket_tree(repo, ev_commit, head, [p for _, p, _, _ in files]):
             rep.add("evidence", "FAIL", f"evidence commit {ev_commit[:8] or '<空>'} 与 HEAD {head[:8]} 的本票文件不一致（证据过期）")
-        if args.phase in ("merge", "close") and target == TIERS["full"] and ev.get("full-commit") and not full_ref:
-            if not _same_ticket_tree(repo, str(ev["full-commit"]), head, [p for _, p, _, _ in files]):
-                rep.add("evidence", "FAIL", "full-commit 与 HEAD 的本票文件不一致，须在最终 commit 重跑 full")
 
     if args.phase == "promote":
-        if str(policy.get("full-execution") or "ticket") != "ci-only":
-            rep.add("ci-verdict", "FAIL", "promote 仅用于 full-execution: ci-only；ticket 模式按原 main 放行流程")
         if not args.ci_verdict:
             rep.add("ci-verdict", "FAIL", "main 放行缺 --ci-verdict；不得把票级 close 当作 main 放行")
         else:
@@ -645,10 +462,10 @@ def run(args) -> tuple[Report, dict]:
         else:
             verdict = str(cv.get("verdict") or "").strip()
             if verdict == "skipped":
-                if not (mode == "sampled" and target == TIERS["light"]):
+                if not (mode == "sampled" and not is_integration):
                     rep.add("conformance", "FAIL",
-                            f"verdict: skipped 仅在 conformance.mode=sampled 且实测 light 档时允许"
-                            f"（当前 mode={mode}，档={_name(target) if target is not None else '?'}）")
+                            f"verdict: skipped 仅允许 conformance.mode=sampled 的非集成票"
+                            f"（当前 mode={mode}，集成票={'是' if is_integration else '否'}）")
             elif verdict != "conform":
                 rep.add("conformance", "FAIL", f"需求符合性核对结论为 {verdict or '<空>'}，须为 conform（deviate / missing 先回修）")
             elif not _same_ticket_tree(repo, str(cv.get("commit") or ""), head, [p for _, p, _, _ in files]):
@@ -657,15 +474,11 @@ def run(args) -> tuple[Report, dict]:
     meta = {
         "issue": issue_id, "phase": args.phase, "target-branch": target_ref, "base": base, "head": head,
         "production-files": n_prod, "production-loc": loc,
-        "ticket-tier": fm.get("verify-tier"), "tier-reason": fm.get("tier-reason"), "tier-target": _name(target) if target is not None else None,
-        "tier-required-by-rules": _name(required), "successors": succ,
+        "ticket-max-files": ticket_max_files, "ticket-max-loc": ticket_max_loc,
+        "integration-ticket": is_integration,
         "drift": drift, "redline-hits": redline_hits,
     }
     return rep, meta
-
-
-def _name(t):
-    return {v: k for k, v in TIERS.items()}.get(t, str(t))
 
 
 def _same_ticket_tree(repo: Path, a: str, b: str, paths) -> bool:
@@ -678,7 +491,7 @@ def _same_ticket_tree(repo: Path, a: str, b: str, paths) -> bool:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 档位 / 证据 / 需求符合性）")
+    ap = argparse.ArgumentParser(description="dev 流程确定性核对（红线 / 漂移 / 票大小 / DoD+fast 证据 / 需求符合性）")
     ap.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     ap.add_argument("--repo", required=True, help="票 worktree（或含该分支的仓库）路径")
     ap.add_argument("--phase", choices=["review", "merge", "close", "promote"], required=True,
@@ -698,8 +511,9 @@ def main(argv=None) -> int:
         return 2
     verdict = "FAIL" if rep.failed else "PASS"
     print(f"process-check {meta['issue']} phase={meta['phase']} {meta['head'][:8]} → {verdict}")
-    print(f"  生产文件 {meta['production-files']} / LOC {meta['production-loc']}；票档 {meta['ticket-tier']} → "
-          f"目标 {meta['tier-target']}（原因 {meta['tier-reason'] or '未填'}；规则下限 {meta['tier-required-by-rules']}）；后继票 {meta['successors'] or '无（集成票）'}")
+    print(f"  生产文件 {meta['production-files']} / 上限 {meta['ticket-max-files']}；"
+          f"LOC {meta['production-loc']} / 上限 {meta['ticket-max-loc']}；"
+          f"集成票 {'是' if meta['integration-ticket'] else '否'}")
     for i in rep.items:
         print(f"  [{i['level']}] {i['check']}: {i['msg']}")
     if args.json:

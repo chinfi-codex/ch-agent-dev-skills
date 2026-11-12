@@ -9,3 +9,7 @@ node_modules/
 *.bak
 .tmp-codex/
 .zcode/
+
+# 本机运行产物：skills 自测生成的 dev/ 与本地 worktree
+dev/
+.worktrees/

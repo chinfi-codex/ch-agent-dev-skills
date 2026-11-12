@@ -47,17 +47,23 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 预先约定哪些接缝先写测试（需求级接口测试优先）：接缝位置、测试形态（单测 / 集成 / 脚本级）、验收命令草案。
 
-### 5.1 验收判据（AC oracle，需求收口用）
+### 5.1 功能验收计划（需求收口用）
 
-每条需求级验收点标判据归属：Agent 证明「按规格跑通」，人判断「是不是要的」。`feature-closeout.mode: local-human` 时，收口按本表生成 `integration/business-results.json` 与人工清单（建议人工条目 ≤ 10）。
+唯一真源是同目录 `acceptance-plan.yaml`，按 `shared/templates/acceptance-plan.yaml` 编写。PRD 的每个端到端 AC 必须逐条承接，计划同时声明：
 
-| AC | 行为点 | oracle | 自动执行入口 / 人工步骤 | 期望 |
+- `executor`：`command | browser-agent | human`——谁执行操作、采集结果；
+- `oracle`：`auto | auto+human-review | human`——谁作最终验收判断；
+- 前置状态、操作步骤、业务期望、自动断言、证据要求；需要人工时填写固定类型的 `human_reason` 与人工判断标准。
+
+本表只是从 YAML 同步的可读摘要，不得单独编辑成分工真源：
+
+| AC | 行为点 | 执行方式 | 最终判定 | 人工原因 |
 |---|---|---|---|---|
-| AC-1 | 例：三态判读结果写入报告 | auto | `python3 tools/tests/<e2e>.py --evidence-dir <dir>` | 退出 0，三态计数与金样一致 |
-| AC-2 | 例：新图例在报告里看得清 | auto+human-review | 自动：DOM 断言图例存在；人：看版式 | 人确认可读 |
-| AC-3 | 例：真实工作簿判读结论合理 | human | 在测试实例跑 <代表性工作簿> | 领域结论与人判断一致 |
+| AC-01 | 例：三态判读结果写入报告 | command | auto | — |
+| AC-02 | 例：新图例功能正确且版式可读 | browser-agent | auto+human-review | visual-ux |
+| AC-03 | 例：真实工作簿判读结论合理 | human | human | domain-judgment |
 
-`oracle` 取值：`auto`（有确定性判据：退出码 / 断言 / 数值 / DOM）· `auto+human-review`（自动断功能，人再看呈现或领域合理性）· `human`（意图满足度、交互手感、展示样式、性能可接受度、真实数据结论合理性）。
+分类原则：能安全执行且有来自需求的客观断言 → 自动；功能可自动判断但呈现、领域合理性或风险后果需人把关 → AI 执行、人工复核；没有可靠机器判据或无法安全执行 → 人工。浏览器截图不能单独构成通过证据。`local-human` 冻结候选时同时冻结计划哈希，收口按计划逐条对账并生成正式验收报告。
 
 ## 6. 影响面与风险
 

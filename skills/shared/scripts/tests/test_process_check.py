@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""process_check.py 的红线 / 漂移 / 档位 / 证据 / full-ref / 覆盖矩阵 / 符合性核对 / worktree dev/ 卫生契约测试。
+"""process_check.py 的红线 / 漂移 / 票大小 / DoD+fast 证据 / 覆盖矩阵 / 符合性 / worktree / CI 契约测试。
 
-运行：python3 -m unittest discover -s skills/shared/scripts/tests -v
+运行：python3 -I skills/shared/scripts/tests/test_process_check.py -v
 每个用例在独立临时目录建合成 git 仓（main + feat 分支 + dev/ 产物；dev/ 按约定不入库）。
 """
 from __future__ import annotations
 
-import os
-import json
 import hashlib
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,9 +20,8 @@ SCRIPT = Path(__file__).resolve().parent.parent / "process_check.py"
 CONFIG = """```yaml
 main-branch: main
 verify-policy:
-  light-max-files: 1
-  scoped-max-files: 3
-  scoped-max-loc: 400
+  ticket-max-files: 10
+  ticket-max-loc: 400
 redlines:
   - "tests/**"
 ```
@@ -40,11 +39,11 @@ x
 ## 红线接触记录
 tests/test_a.py 需求驱动更新 -> DoD-1
 
-## 漂移与升档记录
+## 漂移记录
 
-| 检查时点 | 漂移文件清单 | 是否触发升档 | 处理 |
-|---|---|---|---|
-| r1 | src/b.py | 否 | 登记 |
+| 检查时点 | 漂移文件清单 | 处理 |
+|---|---|---|
+| r1 | src/b.py | 登记 |
 """
 
 
@@ -77,72 +76,51 @@ class ProcessCheckTest(unittest.TestCase):
         sh(r, "git", "commit", "-qm", "work")
         self.head = sh(r, "git", "rev-parse", "HEAD")
         self.issue = self.feat / "issues/issue-001-x.md"
-        self.write_issue(tier="scoped", reason="default")
+        self.write_issue()
         (self.feat / "issues/issue-002-y.md").write_text(
             "---\nissue-id: issue-002\nblocked-by: [issue-001]\n---\n", encoding="utf-8")
         self.log = self.feat / "impl/issue-001/impl-log-issue-001.md"
         self.log.write_text(LOG_OK, encoding="utf-8")
-        self.write_evidence(target="scoped", executed="scoped")
+        self.write_evidence()
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_issue(self, tier, reason):
-        self.issue.write_text(
-            f"---\nissue-id: issue-001\nblocked-by: []\nverify-tier: {tier}\ntier-reason: {reason}\n"
-            f'declared-scope: ["src/a.py"]\n---\n', encoding="utf-8")
+    @property
+    def evidence_path(self):
+        return self.feat / "impl/issue-001/evidence-issue-001.md"
 
-    def write_evidence(self, target, executed, extra=""):
-        (self.feat / "impl/issue-001/evidence-issue-001.md").write_text(
-            f"```yaml\ncommit: {self.head}\nverify-tier: scoped\ntier-target: {target}\n"
-            f"tier-executed: {executed}\n{extra}all-passed: true\n```\n", encoding="utf-8")
+    def write_issue(self, issue_type=None):
+        type_line = f"type: {issue_type}\n" if issue_type else ""
+        self.issue.write_text(
+            f"---\nissue-id: issue-001\n{type_line}blocked-by: []\n"
+            'declared-scope: ["src/a.py"]\n---\n', encoding="utf-8")
+
+    def write_evidence(self, all_passed=True, commit=None):
+        passed = "true" if all_passed else "false"
+        self.evidence_path.write_text(
+            f"```yaml\ncommit: {commit or self.head}\nall-passed: {passed}\n```\n",
+            encoding="utf-8")
+
+    def write_config(self, extra=""):
+        (self.root / "dev/agents-config.md").write_text(
+            CONFIG.replace("redlines:\n", extra + "redlines:\n"), encoding="utf-8")
 
     def make_integration(self):
         (self.feat / "issues/issue-002-y.md").unlink()
-        self.write_evidence(target="full", executed="scoped")
-        self.log.write_text(LOG_OK + "| r2 | - | 是 | 集成票升至 full |\n", encoding="utf-8")
-
-    def enable_scoped_budget(self):
-        config = self.root / "dev/agents-config.md"
-        config.write_text(config.read_text(encoding="utf-8").replace(
-            "  scoped-max-loc: 400\n", "  scoped-max-loc: 400\n  scoped-budget-seconds: 1200\n"),
-            encoding="utf-8")
-
-    def write_budget_report(self):
-        report = {
-            "schema": "scoped-selection/v1",
-            "base": sh(self.root, "git", "merge-base", "main", "HEAD"),
-            "commit": self.head,
-            "tree": sh(self.root, "git", "rev-parse", "HEAD^{tree}"),
-            "enumerable": True,
-            "selected": ["z_direct.py", "a_smoke.py", "b_smoke.py"],
-            "direct": ["z_direct.py"],
-            "ran": [{"name": "z_direct.py", "exit": 0}, {"name": "a_smoke.py", "exit": 0}],
-            "deferred_tests": ["b_smoke.py"],
-            "broken": [],
-            "budget_seconds": 1200,
-            "indirect_elapsed_seconds": 1200.1,
-            "deferred": "budget-partial",
-            "execution_scope": "selected-partial",
-            "stop_reason": "time-budget",
-        }
-        path = self.feat / "impl/issue-001/raw/scoped.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(report), encoding="utf-8")
-        return path, report
-
-    def use_budget_partial(self):
-        self.enable_scoped_budget()
-        path, report = self.write_budget_report()
-        ref = path.relative_to(self.root)
-        self.write_evidence(target="scoped", executed="light",
-                            extra=f"scoped-deferred: budget-partial\nscoped-ref: {ref}\n")
-        return path, report
 
     def check(self, phase, repo=None, extra=()):
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "--issue", str(self.issue),
-                            "--repo", str(repo or self.root), "--phase", phase, *extra], capture_output=True, text=True)
+                            "--repo", str(repo or self.root), "--phase", phase, *extra],
+                           capture_output=True, text=True)
         return r.returncode, r.stdout + r.stderr
+
+    def write_conformance(self, verdict="conform", commit=None):
+        (self.feat / "impl/issue-001/conformance-issue-001.md").write_text(
+            f"```yaml\nissue: issue-001\ncommit: {commit or self.head}\nverdict: {verdict}\n```\n",
+            encoding="utf-8")
+
+    # ---- 红线、漂移与票大小 ----
 
     def test_unregistered_redline_and_drift_fail(self):
         self.log.write_text(LOG_OK.replace("tests/test_a.py 需求驱动更新 -> DoD-1", "无")
@@ -156,157 +134,173 @@ class ProcessCheckTest(unittest.TestCase):
         code, out = self.check("review")
         self.assertEqual(code, 0, out)
         self.assertIn("[REVIEW] redline", out)
-        self.assertIn("原因 default", out)
+        self.assertIn("生产文件 2 / 上限 10", out)
+        self.assertIn("集成票 否", out)
 
-    def test_integration_ticket_requires_full_target(self):
-        (self.feat / "issues/issue-002-y.md").unlink()
+    def test_drift_record_section_is_required(self):
+        self.log.write_text(LOG_OK.replace("## 漂移记录", "## 其他记录"), encoding="utf-8")
         code, out = self.check("review")
         self.assertEqual(code, 1, out)
-        self.assertIn("集成票", out)
+        self.assertIn("impl-log「漂移记录」为空", out)
 
-    def test_integration_review_phase_defers_full(self):
-        self.make_integration()
-        self.assertEqual(self.check("review")[0], 0)
+    def test_too_many_production_files_require_resplit(self):
+        self.write_config()
+        path = self.root / "dev/agents-config.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "ticket-max-files: 10", "ticket-max-files: 1"), encoding="utf-8")
+        for phase in ("review", "merge", "close"):
+            with self.subTest(phase=phase):
+                code, out = self.check(phase)
+                self.assertEqual(code, 1, out)
+                self.assertIn("ticket-max-files 1", out)
+                self.assertIn("须再拆票", out)
+
+    def test_excess_production_loc_requires_resplit(self):
+        path = self.root / "dev/agents-config.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "ticket-max-loc: 400", "ticket-max-loc: 1"), encoding="utf-8")
         code, out = self.check("merge")
         self.assertEqual(code, 1, out)
-        self.assertIn("本阶段要求 full", out)
+        self.assertIn("生产 LOC 2 > ticket-max-loc 1", out)
+        self.assertIn("须再拆票", out)
 
-    def test_full_commit_passes_and_goes_stale(self):
-        self.make_integration()
-        self.write_evidence(target="full", executed="full", extra=f"full-commit: {self.head}\n")
+    def test_ticket_size_limits_have_defaults(self):
+        path = self.root / "dev/agents-config.md"
+        path.write_text("""```yaml
+main-branch: main
+redlines:
+  - "tests/**"
+```
+""", encoding="utf-8")
+        code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        self.assertIn("生产文件 2 / 上限 10", out)
+        self.assertIn("LOC 2 / 上限 400", out)
+
+    # ---- 所有票只核 DoD + fast 证据 ----
+
+    def test_ordinary_merge_and_close_need_only_dod_fast_evidence(self):
+        self.assertEqual(self.check("review")[0], 0)
         self.assertEqual(self.check("merge")[0], 0)
+        self.write_conformance()
+        code, out = self.check("close")
+        self.assertEqual(code, 0, out)
+
+    def test_integration_merge_and_close_need_only_dod_fast_evidence(self):
+        self.make_integration()
+        code, out = self.check("merge")
+        self.assertEqual(code, 0, out)
+        self.assertIn("集成票 是", out)
+        self.write_conformance()
+        self.assertEqual(self.check("close")[0], 0)
+
+    def test_evidence_requires_all_passed_and_fresh_commit(self):
+        self.write_evidence(all_passed=False)
+        code, out = self.check("review")
+        self.assertEqual(code, 1, out)
+        self.assertIn("DoD + fast", out)
+        self.assertIn("all-passed", out)
+
+        self.write_evidence()
         (self.root / "src/a.py").write_text("a\nb\nlate\n")
         sh(self.root, "git", "commit", "-qam", "late")
         code, out = self.check("merge")
         self.assertEqual(code, 1, out)
         self.assertIn("证据过期", out)
 
-    def _daily_record(self, tree, result="pass"):
-        rec = self.root / "dev/full-runs/2026-10-15-x.md"
-        rec.parent.mkdir(parents=True, exist_ok=True)
-        rec.write_text(f"# daily full\n\n- tree: `{tree}`\n- result: {result}\n", encoding="utf-8")
-        return "dev/full-runs/2026-10-15-x.md"
-
-    def test_full_ref_reuses_matching_daily_record(self):
-        self.make_integration()
-        tree = sh(self.root, "git", "rev-parse", "HEAD^{tree}")
-        ref = self._daily_record(tree)
-        self.write_evidence(target="full", executed="full", extra=f"full-ref: {ref}\n")
-        code, out = self.check("merge")
+    def test_json_metadata_reports_limits_and_integration_status(self):
+        output = self.root / "dev/process-check.json"
+        code, out = self.check("review", extra=("--json", str(output)))
         self.assertEqual(code, 0, out)
+        result = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result["ticket-max-files"], 10)
+        self.assertEqual(result["ticket-max-loc"], 400)
+        self.assertFalse(result["integration-ticket"])
+        self.assertNotIn("successors", result)
+        self.assertFalse(any(key.startswith("tier") or key == "ticket-tier" for key in result))
 
-    def test_full_ref_rejects_other_tree_or_failed_run(self):
         self.make_integration()
-        ref = self._daily_record("0123456789abcdef0123456789abcdef01234567")
-        self.write_evidence(target="full", executed="full", extra=f"full-ref: {ref}\n")
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("不能复用", out)
-        tree = sh(self.root, "git", "rev-parse", "HEAD^{tree}")
-        self._daily_record(tree, result="fail")
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("不是 pass", out)
-
-    def enable_ci_only(self):
-        path = self.root / "dev/agents-config.md"
-        path.write_text(path.read_text(encoding="utf-8").replace(
-            "verify-policy:\n", "verify-policy:\n  full-execution: ci-only\n"), encoding="utf-8")
-
-    def test_ci_only_defers_ticket_full_to_branch_ci(self):
-        self.make_integration()
-        self.enable_ci_only()
-        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
-        code, out = self.check("merge")
+        code, out = self.check("merge", extra=("--json", str(output)))
         self.assertEqual(code, 0, out)
-        self.assertIn("full-deferred", out)
+        self.assertTrue(json.loads(output.read_text(encoding="utf-8"))["integration-ticket"])
 
-    def test_ci_only_rejects_missing_deferred_and_legacy_full_evidence(self):
-        self.make_integration()
-        self.enable_ci_only()
-        self.write_evidence(target="full", executed="scoped")
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("本阶段要求 full", out)
-        self.write_evidence(target="full", executed="scoped",
-                            extra=f"full-deferred: ci\nfull-commit: {self.head}\n")
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("CI-only", out)
-
-    def test_ci_deferred_requires_opt_in(self):
-        self.make_integration()
-        self.write_evidence(target="full", executed="scoped", extra="full-deferred: ci\n")
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("CI-only", out)
+    # ---- CI 分支 / main 放行 ----
 
     def write_ci_verdict(self, **updates):
         value = {
-            'schema': 'pandu.test-verdict/v1', 'status': 'completed', 'pass': True,
-            'new_failures': [], 'unattributed_failures': [], 'skipped_env_n': 0,
-            'attribution_status': 'not-needed',
-            'quarantined_n': 0, 'commit': self.head,
-            'tree': sh(self.root, 'git', 'rev-parse', 'HEAD^{tree}'),
-            'ref': 'refs/heads/feat', 'run_id': '12345', 'ran_n': 1,
+            "schema": "pandu.test-verdict/v1", "status": "completed", "pass": True,
+            "new_failures": [], "unattributed_failures": [], "skipped_env_n": 0,
+            "attribution_status": "not-needed", "quarantined_n": 0,
+            "commit": self.head, "tree": sh(self.root, "git", "rev-parse", "HEAD^{tree}"),
+            "ref": "refs/heads/feat", "run_id": "12345", "ran_n": 1,
         }
         value.update(updates)
-        path = self.root / 'dev/ci-verdict.json'
-        path.write_text(json.dumps(value), encoding='utf-8')
+        path = self.root / "dev/ci-verdict.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
         return str(path)
 
-    def promote_args(self, verdict_path):
+    def promote_args(self, verdict_path, **proof_updates):
         proof = {
-            'schema': 'pandu.ci-run-proof/v1', 'run_id': '12345',
-            'event': 'push', 'status': 'completed', 'conclusion': 'success',
-            'commit': self.head, 'branch': 'feat', 'verdict_pass': True,
-            'verdict_sha256': hashlib.sha256(Path(verdict_path).read_bytes()).hexdigest(),
+            "schema": "pandu.ci-run-proof/v1", "run_id": "12345", "event": "push",
+            "status": "completed", "conclusion": "success", "commit": self.head,
+            "branch": "feat", "verdict_pass": True,
+            "verdict_sha256": hashlib.sha256(Path(verdict_path).read_bytes()).hexdigest(),
         }
-        path = self.root / 'dev/ci-run-proof.json'
-        path.write_text(json.dumps(proof), encoding='utf-8')
-        return ['--ci-verdict', verdict_path, '--ci-run-proof', str(path)]
+        proof.update(proof_updates)
+        path = self.root / "dev/ci-run-proof.json"
+        path.write_text(json.dumps(proof), encoding="utf-8")
+        return ["--ci-verdict", verdict_path, "--ci-run-proof", str(path)]
 
-    def test_ci_only_promote_requires_matching_green_verdict(self):
-        self.make_integration()
-        self.enable_ci_only()
-        self.write_evidence(target='full', executed='scoped', extra='full-deferred: ci\n')
+    def test_promote_requires_matching_green_ci_verdict_and_run_proof(self):
         verdict = self.write_ci_verdict()
-        code, out = self.check('promote', extra=['--ci-verdict', verdict])
+        code, out = self.check("promote", extra=["--ci-verdict", verdict])
         self.assertEqual(code, 1, out)
-        self.assertIn('ci-run-proof', out)
-        code, out = self.check('promote', extra=self.promote_args(verdict))
+        self.assertIn("ci-run-proof", out)
+
+        code, out = self.check("promote", extra=self.promote_args(verdict))
         self.assertEqual(code, 0, out)
-        stale = self.write_ci_verdict(tree='0'*40)
-        code, out = self.check('promote', extra=self.promote_args(stale))
+        self.assertIn("CI 判决与 HEAD commit / tree 一致", out)
+
+        stale = self.write_ci_verdict(tree="0" * 40)
+        code, out = self.check("promote", extra=self.promote_args(stale))
         self.assertEqual(code, 1, out)
-        self.assertIn('tree', out)
-        incomplete = self.write_ci_verdict(status='incomplete', **{'pass': False})
-        code, out = self.check('promote', extra=self.promote_args(incomplete))
+        self.assertIn("tree", out)
+
+        incomplete = self.write_ci_verdict(status="incomplete", **{"pass": False})
+        code, out = self.check("promote", extra=self.promote_args(incomplete))
         self.assertEqual(code, 1, out)
-        self.assertIn('pass', out)
+        self.assertIn("pass", out)
+
+        no_tests = self.write_ci_verdict(ran_n=0)
+        code, out = self.check("promote", extra=self.promote_args(no_tests))
+        self.assertEqual(code, 1, out)
+        self.assertIn("没有实际执行测试", out)
+
         overdue = self.write_ci_verdict(quarantine_overdue_n=1)
-        code, out = self.check('promote', extra=self.promote_args(overdue))
+        code, out = self.check("promote", extra=self.promote_args(overdue))
         self.assertEqual(code, 1, out)
-        self.assertIn('超期隔离', out)
+        self.assertIn("超期隔离", out)
+
         missing_hash = self.write_ci_verdict(quarantined_n=1)
-        code, out = self.check('promote', extra=self.promote_args(missing_hash))
+        code, out = self.check("promote", extra=self.promote_args(missing_hash))
         self.assertEqual(code, 1, out)
-        self.assertIn('配置哈希', out)
+        self.assertIn("配置哈希", out)
 
-    def test_promote_rejects_missing_verdict_and_legacy_mode(self):
-        self.make_integration()
-        self.enable_ci_only()
-        self.write_evidence(target='full', executed='scoped', extra='full-deferred: ci\n')
-        code, out = self.check('promote')
+    def test_promote_rejects_missing_verdict_and_mismatched_run_proof(self):
+        code, out = self.check("promote")
         self.assertEqual(code, 1, out)
-        self.assertIn('ci-verdict', out)
-        (self.root / 'dev/agents-config.md').write_text(CONFIG, encoding='utf-8')
+        self.assertIn("ci-verdict", out)
+
         verdict = self.write_ci_verdict()
-        code, out = self.check('promote', extra=self.promote_args(verdict))
+        code, out = self.check("promote", extra=self.promote_args(verdict, branch="other"))
         self.assertEqual(code, 1, out)
-        self.assertIn('ci-only', out)
+        self.assertIn("真实 run 分支", out)
 
-    # ---- 需求覆盖矩阵 ----
+        code, out = self.check("promote", extra=self.promote_args(verdict, verdict_sha256="0" * 64))
+        self.assertEqual(code, 1, out)
+        self.assertIn("哈希不一致", out)
+
+    # ---- 需求覆盖矩阵、TDD 与 bug 回归有效性 ----
 
     def test_matrix_section_missing_fails(self):
         self.log.write_text(LOG_OK.replace("## 需求覆盖矩阵", "## 覆盖矩阵（改名）"), encoding="utf-8")
@@ -314,119 +308,40 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("需求覆盖矩阵", out)
 
-    # ---- 见红告警与 bug 票回归有效性 ----
-
     def test_added_test_without_red_evidence_warns(self):
-        # 新增测试命中红线 tests/**，登记但不记见红 → 红线通过但收 REVIEW 告警
         (self.root / "tests/test_new.py").write_text("new\n")
         sh(self.root, "git", "add", "tests/test_new.py")
         sh(self.root, "git", "commit", "-qm", "add test")
         self.head = sh(self.root, "git", "rev-parse", "HEAD")
-        self.write_evidence(target="scoped", executed="scoped")
+        self.write_evidence()
         self.log.write_text(LOG_OK.replace("## 做了什么\nx", "## 做了什么\nx；tests/test_new.py 新增登记"),
                             encoding="utf-8")
         code, out = self.check("review")
         self.assertEqual(code, 0, out)
         self.assertIn("tdd-red", out)
-        # 补上见红记录 → 告警消失
-        self.log.write_text(LOG_OK.replace("## 做了什么\nx", "## 做了什么\nx；tests/test_new.py 见红：断言失败，预期 1 实得 0"),
-                            encoding="utf-8")
+
+        self.log.write_text(LOG_OK.replace(
+            "## 做了什么\nx", "## 做了什么\nx；tests/test_new.py 见红：断言失败，预期 1 实得 0"),
+            encoding="utf-8")
         code, out = self.check("review")
         self.assertEqual(code, 0, out)
         self.assertNotIn("tdd-red", out)
 
     def test_bug_ticket_requires_revert_section(self):
-        self.issue.write_text(
-            "---\nissue-id: issue-001\ntype: bug\nblocked-by: []\nverify-tier: scoped\ntier-reason: default\n"
-            'declared-scope: ["src/a.py"]\n---\n', encoding="utf-8")
+        self.write_issue(issue_type="bug")
         code, out = self.check("review")
         self.assertEqual(code, 1, out)
         self.assertIn("回归有效性", out)
-        # 补上回归有效性节 → 通过
-        ev_path = self.feat / "impl/issue-001/evidence-issue-001.md"
-        ev_path.write_text(ev_path.read_text(encoding="utf-8")
-                           + "\n## 回归有效性（仅 `type: bug` 票必填）\n\n- revert 后重跑：exit 1（断言失败）\n- 恢复后重跑：exit 0\n",
-                           encoding="utf-8")
-        self.assertEqual(self.check("review")[0], 0)
-        # feature 票（缺省类型）不要求该节
-        self.write_issue(tier="scoped", reason="default")
-        ev_path.write_text(f"```yaml\ncommit: {self.head}\nverify-tier: scoped\ntier-target: scoped\n"
-                           "tier-executed: scoped\nall-passed: true\n```\n", encoding="utf-8")
+
+        self.evidence_path.write_text(
+            self.evidence_path.read_text(encoding="utf-8")
+            + "\n## 回归有效性\n\n- revert 后重跑：exit 1（断言失败）\n- 恢复后重跑：exit 0\n",
+            encoding="utf-8")
         self.assertEqual(self.check("review")[0], 0)
 
-    def test_scoped_deferred_accepted_when_closure_incomplete(self):
-        # 选择集不可枚举：DoD+fast 照跑（tier-executed: light）+ deferred 标记 → 豁免 scoped 短档
-        self.write_evidence(target="scoped", executed="light", extra="scoped-deferred: closure-incomplete\n")
-        code, out = self.check("review")
-        self.assertEqual(code, 0, out)
-        self.assertIn("scoped-deferred", out)
-        self.assertEqual(self.check("merge")[0], 0)
-        # 无 deferred 标记的 light 仍 FAIL
-        self.write_evidence(target="scoped", executed="light")
-        code, out = self.check("review")
-        self.assertEqual(code, 1, out)
-        self.assertIn("本阶段要求", out)
-        # full 档票评审前可用 deferred 豁免 scoped，但 merge 相最终 full 不免跑
-        self.make_integration()
-        self.write_evidence(target="full", executed="light", extra="scoped-deferred: closure-incomplete\n")
+        self.write_issue()
+        self.write_evidence()
         self.assertEqual(self.check("review")[0], 0)
-        code, out = self.check("merge")
-        self.assertEqual(code, 1, out)
-        self.assertIn("本阶段要求 full", out)
-
-    def test_budget_partial_requires_valid_machine_report(self):
-        path, report = self.use_budget_partial()
-        code, out = self.check("review")
-        self.assertEqual(code, 0, out)
-        self.assertIn("indirect 闭包已按预算延期", out)
-        self.assertEqual(self.check("merge")[0], 0)
-
-        path.unlink()
-        code, out = self.check("review")
-        self.assertEqual(code, 1)
-        self.assertIn("机器报告不可读", out)
-
-    def test_budget_partial_rejects_stale_incomplete_or_broken_reports(self):
-        path, report = self.use_budget_partial()
-        cases = []
-        stale = dict(report, tree="0" * 40)
-        cases.append((stale, "tree 与 HEAD 不一致"))
-        direct_deferred = dict(report,
-                               ran=[{"name": "a_smoke.py", "exit": 0}],
-                               deferred_tests=["z_direct.py", "b_smoke.py"])
-        cases.append((direct_deferred, "direct 测试未全部实际执行并通过"))
-        over_budget = dict(report, budget_seconds=1201, indirect_elapsed_seconds=1201)
-        cases.append((over_budget, "超过 scoped-budget-seconds"))
-        broken = dict(report,
-                      ran=[{"name": "z_direct.py", "exit": 0}, {"name": "a_smoke.py", "exit": 1}],
-                      broken=["a_smoke.py"])
-        cases.append((broken, "broken 非空"))
-        incomplete = dict(report, selected=["z_direct.py", "a_smoke.py", "b_smoke.py", "lost.py"])
-        cases.append((incomplete, "分区不完整"))
-        for candidate, message in cases:
-            with self.subTest(message=message):
-                path.write_text(json.dumps(candidate), encoding="utf-8")
-                code, out = self.check("review")
-                self.assertEqual(code, 1)
-                self.assertIn(message, out)
-
-    def test_budget_partial_requires_config_and_never_exempts_full(self):
-        path, report = self.use_budget_partial()
-        config = self.root / "dev/agents-config.md"
-        config.write_text(CONFIG, encoding="utf-8")
-        code, out = self.check("review")
-        self.assertEqual(code, 1)
-        self.assertIn("未配置正数 scoped-budget-seconds", out)
-
-        self.enable_scoped_budget()
-        self.make_integration()
-        ref = path.relative_to(self.root)
-        self.write_evidence(target="full", executed="light",
-                            extra=f"scoped-deferred: budget-partial\nscoped-ref: {ref}\n")
-        self.assertEqual(self.check("review")[0], 0)
-        code, out = self.check("merge")
-        self.assertEqual(code, 1)
-        self.assertIn("本阶段要求 full", out)
 
     # ---- worktree dev/ 卫生（软链约定）----
 
@@ -440,7 +355,7 @@ class ProcessCheckTest(unittest.TestCase):
         code, out = self.check("review", repo=wt)
         self.assertEqual(code, 0, out)
         self.assertNotIn("worktree-dev", out)
-        # 软链（约定形态）同样通过
+
         os.symlink("../../dev", wt / "dev")
         code, out = self.check("review", repo=wt)
         self.assertEqual(code, 0, out)
@@ -456,35 +371,16 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertIn("实体副本", out)
 
     def test_worktree_dev_tracked_only_warns(self):
-        # dev/ 被入库的存量仓：worktree checkout 自带实体 dev/ → REVIEW 告警而非 FAIL
         sh(self.root, "git", "add", "dev")
         sh(self.root, "git", "commit", "-qm", "track dev")
         self.head = sh(self.root, "git", "rev-parse", "HEAD")
-        self.write_evidence(target="scoped", executed="scoped")
+        self.write_evidence()
         wt = self.make_worktree()
         code, out = self.check("review", repo=wt)
         self.assertEqual(code, 0, out)
         self.assertIn("[REVIEW] worktree-dev", out)
 
     # ---- 需求符合性核对（close 相）----
-
-    def write_conformance(self, verdict="conform", commit=None):
-        (self.feat / "impl/issue-001/conformance-issue-001.md").write_text(
-            f"```yaml\nissue: issue-001\ncommit: {commit or self.head}\nverdict: {verdict}\n```\n",
-            encoding="utf-8")
-
-    def write_config(self, extra=""):
-        (self.root / "dev/agents-config.md").write_text(CONFIG.replace("```\n", extra + "```\n"),
-                                                        encoding="utf-8")
-
-    def make_light_ticket(self):
-        sh(self.root, "git", "checkout", "-q", "main")
-        sh(self.root, "git", "checkout", "-qb", "feat-light")
-        (self.root / "src/a.py").write_text("a\nlight\n")
-        sh(self.root, "git", "commit", "-qam", "light work")
-        self.head = sh(self.root, "git", "rev-parse", "HEAD")
-        self.write_issue(tier="light", reason="default")
-        self.write_evidence(target="light", executed="light")
 
     def test_close_requires_conformance_record(self):
         code, out = self.check("close")
@@ -509,19 +405,24 @@ class ProcessCheckTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("核对过期", out)
 
-    def test_close_skipped_only_for_sampled_light(self):
-        # scoped 票即使 sampled 模式也不允许 skipped
-        self.write_config("conformance:\n  mode: sampled\n")
+    def test_sampled_skip_allowed_for_non_integration(self):
+        self.write_config("conformance:\n  mode: sampled\n  sample-rate: 0\n")
+        self.write_conformance(verdict="skipped")
+        code, out = self.check("close")
+        self.assertEqual(code, 0, out)
+
+    def test_sampled_skip_rejected_for_integration(self):
+        self.write_config("conformance:\n  mode: sampled\n  sample-rate: 100\n")
+        self.make_integration()
         self.write_conformance(verdict="skipped")
         code, out = self.check("close")
         self.assertEqual(code, 1, out)
-        self.assertIn("skipped", out)
-        # sampled 模式 + 实测 light 档 → skipped 合法
-        self.make_light_ticket()
-        self.write_conformance(verdict="skipped")
+        self.assertIn("非集成票", out)
+        self.write_conformance()
         self.assertEqual(self.check("close")[0], 0)
-        # 未配 conformance 节（默认 always）的 light 票不许 skipped
-        self.write_config()
+
+    def test_always_mode_rejects_skipped_for_non_integration(self):
+        self.write_conformance(verdict="skipped")
         code, out = self.check("close")
         self.assertEqual(code, 1, out)
         self.assertIn("skipped", out)

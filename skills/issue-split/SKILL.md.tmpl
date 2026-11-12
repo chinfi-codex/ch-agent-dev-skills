@@ -1,6 +1,6 @@
 ---
 name: issue-split
-version: 0.6.0
+version: 0.6.1
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -11,12 +11,13 @@ implementation-approval-phrases:
   - 开始实现
 description: |
   Documentation-first ticket splitting skill. Turns a confirmed tech spec
-  into tracer-bullet tickets with blocking edges, auto-checkable DoD
-  commands, and per-ticket verify-tiers from agents-config.verify-policy
-  (integration tickets forced to full), gets gate-2 human confirmation,
-  publishes — then the main session auto-dispatches each ticket as a fresh
-  host-agent conversation and supervises until merge with no further human
-  gates. Default mode is DOC_MODE.
+  into tracer-bullet tickets with blocking edges, executable DoD commands,
+  declared-scope and ticket-max-files / ticket-max-loc granularity red
+  lines, gets gate-2 human confirmation, publishes — then the main session
+  auto-dispatches each ticket as a fresh host-agent conversation and
+  supervises until merge with no further human gates. Every ticket uses
+  DoD + fast verification; feature / main CI full is the suite-level safety
+  net. Default mode is DOC_MODE.
 allowed-tools:
   - Read
   - Write
@@ -29,6 +30,8 @@ allowed-tools:
 ---
 
 {{MODE_GUARD}}
+
+本 skill 可额外执行一次只读文档校验：`python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>`。它只验证功能验收计划，不属于实现或测试执行；其他实现导向命令限制不变。
 
 {{GLOSSARY}}
 
@@ -68,7 +71,8 @@ allowed-tools:
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、通过 `architecture_graph.py --repo <项目根> --interface <关键词>` 查询接口图谱（tech-spec 3.2 非空时作为契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图核对）
+- 补读：`./docs/GLOSSARY.md`、通过 `architecture_graph.py --repo <项目根> --interface <关键词>` 查询接口图谱（tech-spec 3.2 非空时作为契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
 
 ---
 
@@ -94,17 +98,16 @@ allowed-tools:
 
 **DoD 必须写成可自动判定的验收命令**：每票 1–3 条「命令 + 期望输出」，从 tech-spec 测试策略的接缝与验收命令草案导出。禁止「功能正常」「符合预期」类不可判定表述；写不出可判定命令的验收标准，退回 `/tech-spec` 补测试策略。**DoD 只写功能实现度**：性能阈值、展示样式 / 版式类验收写进票的「人工确认项」节（可附采集命令，执行一次落盘、不阻塞交付），不进 DoD（`verify-policy.gate-scope`）。
 
-**DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。
+**DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：PRD 的每个稳定 AC 都必须在 `acceptance-plan.yaml` 恰好出现一次；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
 **契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里并引用稳定图谱 ID；用 `architecture_graph.py --interface <关键词> --status needs_verification` 核对迁移中记录，再检查对应分片 diff。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进入架构图谱」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
 
-**计算 verify-tier 与 declared-scope（确定性规则，不凭感觉）**：每票按 `agents-config.verify-policy` 定档——
+**确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
 - 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
-- **粒度红线（拆票时判定，先于定档）**：`declared-scope` 预计生产代码文件数 > `verify-policy.scoped-max-files`，或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆，不得以 `full` 档放行——`full` 是验证深度，不是粒度豁免
-- 命中 escalate-triggers 按两级定档：full 级（数据迁移 schema / 鉴权权限）→ `full`；scoped+ 级（公共接口签名、共享模块 / 工具库、红线邻接）→ `scoped`，选择集 = 静态反向闭包（闭包大不是升档理由）；闭包不可枚举时仍 `scoped`，票面标「闭包不完整」，剩余风险由集成票 full 与每日回归兜底。每张票在 frontmatter 写 `tier-reason`（命中的触发器名 / 阈值项 / `integration`；按默认规则定档写 `default`）。`declared-scope` 文件数 ≤ `light-max-files` 且属单点小改（文案 / 阈值 / 默认值 / 局部样式）→ `light`；其余 `scoped`（`scoped-max-loc` 只用于实现期实测升档，不参与拆票预估判定）
-- **集成票强制 `full`**：DAG 中无后继（没有其他票 blocked-by 它）的票一律 `full`——终点票的 worktree 基于 main + 前序票已合并，在它身上跑全量即对集成态做了整体验证；多终点时全部标 `full`。动态依赖与跨模块交互风险由终点票兜底，跨 feature 的回归由 main 每日回归（`verify-policy.daily-regression`）兜底，这正是前序票允许用闭包替代全量的前提。**唯一例外「模块隔离认定」**：本 feature 全部票的生产 diff 都落在同一叶子模块（按 selection 反向闭包判定不被本 feature 外生产代码 import）、未命中 full 级触发器、不碰共享模块 / 公共接口 → 集成票改按 module-scoped 跑该模块全闭包（不是只跑本票 diff），定档时在票面写明隔离判定依据；有疑义仍 full
-- `repo-level = C` 可在计算结果上再降一档（下限 light）；上游为 `/issue` 小变更单的拆票通常落在 light / scoped
+- **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期实测超任一红线同样停止并退回再拆
+- **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
+- **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与集成态核对；它仍只跑本票 DoD + fast，并始终接受 feature 级 conformance 核对，同样受上述粒度红线约束
 
 **判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
 
@@ -112,13 +115,14 @@ allowed-tools:
 
 向用户呈现编号清单，一次审全部：
 
-- 每票一行用大白话说清：这票交付什么、完成后系统 / 用户得到什么、怎么算做完（验收命令）、依赖哪票、验证做到什么深度及原因——该跑全量的不说 `full` 了事，要说「因为动数据迁移，所以全量回归」；`declared-scope` / `verify-tier` / `blocked-by` 等内部词不直接贴给用户，换成日常说法
+- 每票一行用大白话说清：这票交付什么、完成后系统 / 用户得到什么、怎么算做完（DoD 验收命令 + fast）、依赖哪票、预计触碰哪些生产文件；`declared-scope` / `blocked-by` 等内部词不直接贴给用户，换成日常说法
 - 附「需求点 → 票 / DoD」覆盖表（Step 1 覆盖性自查产物）：tech-spec 标注节的每个行为点落在哪张票、由哪条验收命令兜住，显式排除的写在哪张票的「不做什么」——人确认的不只是票清单，还有需求覆盖关系
-- 附整体依赖关系与建议执行顺序（哪几票可以立即开工、谁挡谁、收尾票是哪张）
-- 按「提问格式与对人表达」确认，问题说人话：拆得粗细合不合适、先后顺序对不对、验收方式能不能机器判定、验证深度够不够（该全量的有没有只跑局部）
+- 附功能验收分工摘要：AI 完整验收、AI 执行人工复核、纯人工验收各几条；逐条说明人工原因。它是既定验收计划的可读呈现，不新增一次人工审批，也不把票级 DoD 当成最终功能验收
+- 附整体依赖关系与建议执行顺序（哪几票可以立即开工、谁挡谁、收尾票是哪张），并说明集成票始终做 feature 级 conformance；完整回归由 feature / main 的 CI full 兜底
+- 按「提问格式与对人表达」确认，问题说人话：拆得粗细合不合适、先后顺序对不对、验收方式能不能机器判定、DoD + fast 是否覆盖本票行为
 - 用户要求调整 → 修订后重新呈现；**未获确认不发布任何票**
 
-粒度失败路径：单票改动横跨超过两个模块，或预计文件数超 `scoped-max-files` / scope 不可枚举 → 自动再拆或标记需人工裁决，不硬发。
+粒度失败路径：单票改动横跨超过两个模块，预计生产文件数 > `ticket-max-files`、预计生产 LOC > `ticket-max-loc`，或 scope 不可枚举 → 自动再拆或标记需人工裁决，不硬发；任何额外测试都不能豁免粒度红线。
 
 ### Step 3：发布
 
@@ -138,9 +142,9 @@ allowed-tools:
 
 ## 硬约束
 
-- tech-spec 未确认不开拆；拆解不改变方案内容
+- tech-spec 未确认不开拆；`acceptance-plan.yaml` 缺失或校验不过不开拆；拆解不改变方案与验收计划内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
-- 票一旦 confirmed，标题 / DoD / verify-tier / declared-scope 不得由本 skill 单方面修改；变更须重新过门②（实现期按 `verify-policy` 升档不算改票，由 `/implement` 在 evidence / impl-log 记录）
+- 票一旦 confirmed，标题 / DoD / declared-scope 不得由本 skill 单方面修改；变更须重新过门②。实现期登记实际 diff 漂移；超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以补跑测试代替
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语
