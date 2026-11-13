@@ -320,7 +320,9 @@ dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存�
 
 **旧实现清理属方案范围**：新实现替代旧实现时，被替代的旧代码、旧文件及其失效引用的删除一并进方案与影响面——版本回溯由 Git 承担，不留注释残留、兼容开关或双路径并存；确需保留的（如协议向后兼容）必须落约束栏并注明依据。
 
-**测试策略 = 预先约定 TDD 接缝 + 需求级功能验收计划**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案，这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。同时读取 `shared/templates/acceptance-plan.yaml`，在同目录产出 `acceptance-plan.yaml`：逐条承接 PRD 的稳定 AC 编号，填前置状态、步骤、期望、执行方式、最终判定、自动断言与证据。`executor` 与 `oracle` 必须分开——浏览器 Agent 能执行不等于能最终验收；有 UI 操作且能客观断言的优先 `browser-agent + auto`，功能可断但呈现 / 领域合理性 / 风险后果需人把关的用 `browser-agent + auto+human-review`，无可靠判据或无法安全执行的归 `human`。需要人工必须填写固定类型的 `human_reason` 和人工判断标准，不能只写“人工看一下”。tech-spec §5.1 只放从 YAML 同步的可读摘要，不另维护第二份分工。
+**测试策略 = 预先约定 TDD 接缝 + 需求级功能验收计划**：明确哪些接缝先写测试、测试形态（单测 / 集成 / 脚本级）、验收命令草案，这是 `/issue-split` 把 DoD 写成可自动判定命令的输入。同时读取 `shared/templates/acceptance-plan.yaml`，在同目录产出 `acceptance-plan.yaml`：逐条承接 PRD 的稳定 AC 编号，并把每条 AC 写成可独立执行的完整测试 case——前置条件明确测试环境、初始状态与测试数据，`steps` 每项写「操作 + 输入 + 本步预期」，`expected` 写整条 case 的最终量化结果，`assertions` / `human_expect` 分别写自动 / 人工验收标准，`evidence` 列出可核对证据。
+
+预期与验收标准必须包含观察对象 / 指标、比较符或精确目标值，并在适用时包含数值与单位、样本量 / 统计窗口、数据来源；不得只写「正常 / 合理 / 快速 / 正确 / 无异常」。所有阈值必须来自 PRD、change request 或已确认决策，上游未给阈值时进入「待确认项」，不得编造数值。`executor` 与 `oracle` 必须分开——浏览器 Agent 能执行不等于能最终验收；有 UI 操作且能客观断言的优先 `browser-agent + auto`，功能可断但呈现 / 领域合理性 / 风险后果需人把关的用 `browser-agent + auto+human-review`，无可靠判据或无法安全执行的归 `human`。需要人工必须填写固定类型的 `human_reason` 和量化人工验收标准，不能只写「人工看一下」。tech-spec §5.1 只放从 YAML 同步的可读摘要，不另维护第二份分工。
 
 **原型 verdict 的消化**：若 `prototypes/` 下存在 verdict，已裁决结论作为方案输入边界；其中的决策性片段按模板「3.5 决策性片段」收录——裁剪到决策相关部分、逐片标注来源（原型路径 + verdict 日期）。片段是决策的精确化记录，不是实现，不得以片段替代方案文字。
 

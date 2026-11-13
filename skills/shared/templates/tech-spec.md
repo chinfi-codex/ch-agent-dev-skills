@@ -49,11 +49,14 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 ### 5.1 功能验收计划（需求收口用）
 
-唯一真源是同目录 `acceptance-plan.yaml`，按 `shared/templates/acceptance-plan.yaml` 编写。PRD 的每个端到端 AC 必须逐条承接，计划同时声明：
+唯一真源是同目录 `acceptance-plan.yaml`，按 `shared/templates/acceptance-plan.yaml` 编写。PRD 的每个端到端 AC 必须逐条承接，并写成可独立执行的完整测试 case，计划同时声明：
 
 - `executor`：`command | browser-agent | human`——谁执行操作、采集结果；
 - `oracle`：`auto | auto+human-review | human`——谁作最终验收判断；
-- 前置状态、操作步骤、业务期望、自动断言、证据要求；需要人工时填写固定类型的 `human_reason` 与人工判断标准。
+- 前置条件中的测试环境、初始状态与测试数据，以及「操作 + 输入 + 本步预期」步骤、最终量化 `expected` 和证据要求；
+- `assertions` / `human_expect` 分别作为自动 / 人工验收标准，写明观察对象、比较符或精确目标值，并在适用时写明数值与单位、样本量 / 统计窗口、数据来源；需要人工时另填固定类型的 `human_reason`。
+
+所有阈值必须来自 PRD、change request 或已确认决策，缺失时进入「待确认项」，不得编造。每条 required case 的全部验收标准均满足且证据齐备才通过；未执行或证据不足只能记 `unverified`。
 
 本表只是从 YAML 同步的可读摘要，不得单独编辑成分工真源：
 
