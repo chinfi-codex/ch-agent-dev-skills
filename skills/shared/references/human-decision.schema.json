@@ -1,0 +1,631 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ch-agent.human-decision/v1",
+  "title": "Main-session owned human decision packet",
+  "definitions": {
+    "decision-id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "option-id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+    },
+    "nullable-id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable-datetime": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable-text": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 12000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "status",
+    "scope",
+    "source",
+    "basis",
+    "question",
+    "evidence",
+    "presentation",
+    "answer",
+    "route",
+    "expires_at",
+    "supersedes",
+    "superseded_by",
+    "cancellation",
+    "timestamps"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ch-agent.human-decision/v1"
+    },
+    "id": {
+      "$ref": "#/definitions/decision-id"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "waiting",
+        "answered",
+        "routing",
+        "resolved",
+        "expired",
+        "cancelled",
+        "superseded"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "required": ["repo", "feature", "issue"],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "feature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "issue": {
+          "type": "string",
+          "pattern": "^issue-[0-9]+[a-z0-9]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["host", "skill", "role", "dispatch_id", "session_id"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "skill": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "dispatch_id": {
+          "$ref": "#/definitions/nullable-id"
+        },
+        "session_id": {
+          "$ref": "#/definitions/nullable-id"
+        },
+        "parent_session_id": {
+          "$ref": "#/definitions/nullable-id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "basis": {
+      "type": "object",
+      "required": ["issue_sha256", "head_commit", "report_sha256"],
+      "properties": {
+        "issue_sha256": {
+          "type": "string",
+          "format": "sha256"
+        },
+        "head_commit": {
+          "type": "string",
+          "format": "git-sha"
+        },
+        "report_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "question": {
+      "type": "object",
+      "required": ["context", "decision", "why", "recommendation", "options"],
+      "properties": {
+        "context": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "decision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "recommendation": {
+          "$ref": "#/definitions/option-id"
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "description", "route"],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/option-id"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "route": {
+                "type": "object",
+                "required": ["action", "strategy", "role", "tier", "next_status", "prompt", "operation"],
+                "properties": {
+                  "action": {
+                    "enum": ["continue", "supervisor", "defer", "cancel"]
+                  },
+                  "strategy": {
+                    "enum": ["resume", "redispatch", "none"]
+                  },
+                  "role": {
+                    "anyOf": [
+                      {
+                        "enum": ["development", "review"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tier": {
+                    "anyOf": [
+                      {
+                        "enum": ["default", "escalated"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "next_status": {
+                    "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "deferred", "cancelled"]
+                  },
+                  "prompt": {
+                    "$ref": "#/definitions/nullable-text"
+                  },
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "enum": ["reconcile-routing", "re-split", "request-review", "collect-evidence"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "summary"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sha256": {
+            "type": "string",
+            "format": "sha256"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "required": ["header", "channel", "presented_at", "interruption"],
+      "properties": {
+        "header": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12
+        },
+        "channel": {
+          "enum": ["none", "component", "text"]
+        },
+        "presented_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "interruption": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["kind", "at", "presented_at"],
+              "properties": {
+                "kind": {
+                  "enum": ["cancel", "timeout"]
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "presented_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "answer": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["option_id", "text", "answered_at"],
+          "properties": {
+            "option_id": {
+              "$ref": "#/definitions/option-id"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "answered_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "route": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["route_id", "option_id", "action", "plan", "started_at", "ack", "acked_at", "failure", "failed_at"],
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "pattern": "^route-[a-f0-9]{32}$"
+            },
+            "option_id": {
+              "$ref": "#/definitions/option-id"
+            },
+            "action": {
+              "enum": ["continue", "supervisor", "defer", "cancel"]
+            },
+            "plan": {
+              "type": "object",
+              "required": ["kind", "action", "strategy", "host", "role", "tier", "next_status", "prompt", "operation", "dispatch_id", "session_id", "parent_session_id", "attempts_before", "attempts_after"],
+              "properties": {
+                "kind": {
+                  "enum": ["resume", "redispatch", "operation", "close"]
+                },
+                "action": {
+                  "enum": ["continue", "supervisor", "defer", "cancel"]
+                },
+                "strategy": {
+                  "enum": ["resume", "redispatch", "none"]
+                },
+                "host": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                },
+                "role": {
+                  "anyOf": [
+                    {
+                      "enum": ["development", "review"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tier": {
+                  "anyOf": [
+                    {
+                      "enum": ["default", "escalated"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "next_status": {
+                  "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "deferred", "cancelled"]
+                },
+                "prompt": {
+                  "$ref": "#/definitions/nullable-text"
+                },
+                "operation": {
+                  "anyOf": [
+                    {
+                      "enum": ["reconcile-routing", "re-split", "request-review", "collect-evidence"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "dispatch_id": {
+                  "$ref": "#/definitions/nullable-id"
+                },
+                "session_id": {
+                  "$ref": "#/definitions/nullable-id"
+                },
+                "parent_session_id": {
+                  "$ref": "#/definitions/nullable-id"
+                },
+                "attempts_before": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attempts_after": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "started_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "ack": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": ["host", "route_id", "at"],
+                  "allOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "required": ["receipt"]
+                        },
+                        {
+                          "required": ["dispatch_id"]
+                        },
+                        {
+                          "required": ["session_id"]
+                        }
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "route_id": {
+                      "type": "string",
+                      "pattern": "^route-[a-f0-9]{32}$"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "host": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "dispatch_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "receipt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 1000
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "acked_at": {
+              "$ref": "#/definitions/nullable-datetime"
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": ["reason", "at", "outcome_known"],
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "outcome_known": {
+                      "const": true
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failed_at": {
+              "$ref": "#/definitions/nullable-datetime"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expires_at": {
+      "$ref": "#/definitions/nullable-datetime"
+    },
+    "supersedes": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/decision-id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "superseded_by": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/decision-id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cancellation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["reason", "next_status", "cancelled_at"],
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "next_status": {
+              "const": "cancelled"
+            },
+            "cancelled_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["created_at", "updated_at", "presented_at", "answered_at", "route_started_at", "resolved_at", "expired_at", "cancelled_at", "superseded_at"],
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "presented_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "answered_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "route_started_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "resolved_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "expired_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "cancelled_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        },
+        "superseded_at": {
+          "$ref": "#/definitions/nullable-datetime"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

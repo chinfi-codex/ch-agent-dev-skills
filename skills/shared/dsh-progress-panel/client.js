@@ -1,7 +1,7 @@
 /**
  * ch-progress-panel —— 浏览器半端：右侧栏页签「进度」。
  * client bundle 是自注册脚本；三件套注册 tab 类型 / body / title。
- * 清理：仅 done 票残留分支显示入口，POST 预检 → 弹窗确认 → confirm 指纹执行。
+ * 清理：issue/feature-dir 只读预检 → operation ID + confirm → Saga 执行/恢复。
  */
 window.__ModuleLoader__.load({
   id: '@ch-agent/dsh-progress-panel',
@@ -211,7 +211,7 @@ window.__ModuleLoader__.load({
     const nodeKey = (n) => n.kind + ':' + (n.slug || n.key || n.name)
     const depthOf = (n) => Math.round(n.prefix.length / 3)
     const hasKids = (list, i) => i + 1 < list.length && depthOf(list[i + 1]) > depthOf(list[i])
-    const canCleanup = (n) => n.kind === 'branch' || n.kind === 'ticket'
+    const canCleanup = (n) => (n.kind === 'ticket' || (n.kind === 'branch' && n.resolved_key)) && !n.protected && n.cleanup_eligible !== false
 
     function Guide({ prefix }) {
       const segs = []
@@ -246,7 +246,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'cpp-fcount' }, c.done + '/' + c.total)))
     }
 
-    function TicketRow({ n, open, onToggle, onCleanup, onCloseIssue, focused }) {
+    function TicketRow({ n, open, onToggle, onCleanup, focused }) {
       const stalled = n.status === 'in-progress' && n.age_ts && (Date.now() - n.age_ts * 1000) >= (n.stallMin || 30) * 60000
       const bits = []
       if (n.ahead || n.behind) bits.push('↑' + n.ahead + '↓' + n.behind)
@@ -261,7 +261,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'cpp-rtitle', title: n.title }, n.title),
           bits.length ? h('span', { className: 'cpp-rmeta' + (stalled ? ' is-warn' : '') }, bits.join(' · ')) : null,
           h('span', { className: 'cpp-status ' + (DOT[n.status] || '') }, LABEL[n.status] || n.status)),
-        open ? Detail({ n, onCleanup, onCloseIssue }) : null)
+        open ? Detail({ n, onCleanup }) : null)
     }
 
     function BranchRow({ n, kids, folded, onFold, onCleanup, focused }) {
@@ -285,14 +285,19 @@ window.__ModuleLoader__.load({
         canCleanup(n)
           ? h('button', {
               className: 'cpp-cleanup', 'aria-label': '清理 ' + n.name,
-              title: '按开发收尾规则预检并清理',
-              onClick: (e) => { e.stopPropagation(); onCleanup(n.name) },
+              title: '只读预检后按 operation ID 授权；永不合并代码',
+              onClick: (e) => { e.stopPropagation(); onCleanup({ issue: n.resolved_key || n.key || n.iid, status: n.status }) },
             }, '清理')
           : null)
     }
 
-    function Detail({ n, onCleanup, onCloseIssue }) {
+    function Detail({ n, onCleanup }) {
       const lines = []
+      if (n.contract_error) lines.push('决定包契约错误：' + n.contract_error)
+      if (n.decision) {
+        lines.push('待决定：' + (n.decision.question?.decision || n.decision.id || '活动决定包'))
+        if (n.decision.status) lines.push('决定状态：' + n.decision.status)
+      }
       if (n.branch) {
         const b = n.branch
         lines.push('分支 ' + b.name + ' · ↑' + b.ahead + '↓' + b.behind + (b.dirty ? ' · 脏 ' + b.dirty + ' 文件' : '') + ' · ' + ageText(b.ts))
@@ -319,47 +324,14 @@ window.__ModuleLoader__.load({
         lines.map((t, i) => h('div', { key: i, className: 'cpp-dline' }, t)),
         h('div', { className: 'cpp-detail-actions' },
           h('button', { className: 'cpp-drill', onClick: drill, title: '复制下钻提问，粘到会话即可' }, '复制下钻提问'),
-          h('button', {
+          canCleanup(n) ? h('button', {
             className: 'cpp-drill cpp-cleanup-detail',
-            onClick: () => onCleanup({ branch: n.branch?.name, issue: n.key }),
-            title: '按开发收尾规则预检；是否可执行以预检为准',
-          }, '清理'),
-          n.status !== 'done' ? h('button', {
-            className: 'cpp-drill',
-            onClick: () => onCloseIssue(n),
-            title: '仅把需求状态改为 deferred，不删除分支/worktree/dev',
-          }, '关闭需求') : null))
+            onClick: () => onCleanup({ branch: n.branch?.name, issue: n.key, status: n.status }),
+            title: '先只读预检；是否可执行以授权计划为准',
+          }, n.status === 'done' ? '收尾清理' : '丢弃开发预检') : null))
     }
 
-    function CloseIssueModal({ state, onClose, onApply, onReason }) {
-      const result = state.result
-      return h('div', { className: 'cpp-modal-backdrop', onMouseDown: (e) => { if (e.target === e.currentTarget && state.phase !== 'apply') onClose() } },
-        h('section', { className: 'cpp-modal', role: 'dialog', 'aria-modal': true, 'aria-label': '关闭需求' },
-          h('h2', null, '关闭需求'),
-          h('div', { className: 'cpp-modal-sub' }, '只把票状态改为 deferred 并记录关闭事件；不删除分支、worktree 或 dev 文件。'),
-          h('code', { className: 'cpp-branch' }, state.issue),
-          state.phase === 'confirm' ? h(React.Fragment, null,
-            h('dl', { className: 'cpp-facts' },
-              h('dt', null, '标题'), h('dd', null, state.title),
-              h('dt', null, '当前状态'), h('dd', null, state.status)),
-            h('div', { className: 'cpp-warning' }, '关闭后该需求从在途列表消失；依赖它的其他票不会因此自动解锁。'),
-            h('input', {
-              className: 'cpp-reason', value: state.reason, autoFocus: true,
-              onChange: (e) => onReason(e.target.value),
-              placeholder: '关闭原因（写入 digest）',
-            })) : null,
-          state.phase === 'apply' ? h('div', { className: 'cpp-loading' }, '正在关闭需求并写入事件…') : null,
-          state.phase === 'result' && result ? h(React.Fragment, null,
-            result.error ? h('div', { className: 'cpp-err' }, result.error) : null,
-            !result.error ? h('div', { className: 'cpp-result-ok' }, `已关闭：${result.previous_status} → ${result.status}`) : null,
-            result.event?.note ? h('div', { className: 'cpp-dline' }, result.event.note) : null) : null,
-          h('div', { className: 'cpp-modal-actions' },
-            state.phase !== 'apply' ? h('button', { className: 'cpp-btn', onClick: onClose }, state.phase === 'result' ? '完成' : '取消') : null,
-            state.phase === 'confirm' ? h('button', { className: 'cpp-btn primary', onClick: onApply }, '关闭需求') : null)))
-    }
-
-    function CleanupModal({ state, onClose, onApply, onRetry }) {
-      const busy = state.phase === 'preview' || state.phase === 'apply'
+    function CleanupModal({ state, onClose, onApply, onRetry, onReconcile }) {
       React.useEffect(() => {
         const key = (e) => { if (e.key === 'Escape' && state.phase !== 'apply') onClose() }
         document.addEventListener('keydown', key)
@@ -367,54 +339,45 @@ window.__ModuleLoader__.load({
       }, [state.phase])
       const plan = state.plan
       const result = state.result
+      const discard = (plan?.intent || state.request?.intent) === 'discard'
       return h('div', { className: 'cpp-modal-backdrop', onMouseDown: (e) => { if (e.target === e.currentTarget && state.phase !== 'apply') onClose() } },
-        h('section', { className: 'cpp-modal', role: 'dialog', 'aria-modal': true, 'aria-label': '确认清理' },
-          h('h2', null, state.phase === 'result' ? (result?.error ? '清理未完成' : '清理结果') : (plan?.mode === 'abandon' ? '选择清理方式' : '确认清理')),
-          h('div', { className: 'cpp-modal-sub' }, '先保存完整分支补丁和未提交改动，再按你的选择执行。'),
+        h('section', { className: 'cpp-modal', role: 'dialog', 'aria-modal': true, 'aria-label': '授权清理' },
+          h('h2', null, state.phase === 'result' ? '清理结果' : discard ? '确认丢弃开发' : '确认收尾清理'),
+          h('div', { className: 'cpp-modal-sub' }, '清理永不合并代码。授权后锁内重验；有任何变化即停止。'),
           h('code', { className: 'cpp-branch' }, state.branch),
-          state.phase === 'preview' ? h('div', { className: 'cpp-loading' }, '正在检查分支、合并目标、软链与待抢救文件…') : null,
+          state.phase === 'preview' ? h('div', { className: 'cpp-loading' }, '正在检查目标/OID、ignored/.logs、会话、runtime 与 dev…') : null,
           state.phase === 'error' ? h('div', { className: 'cpp-err' }, state.error || '该节点不可清理') : null,
           state.phase === 'confirm' && plan ? h(React.Fragment, null,
             plan.warnings?.map((w, i) => h('div', { key: i, className: 'cpp-warning' }, w)),
             h('dl', { className: 'cpp-facts' },
-              h('dt', null, '票'), h('dd', null, `${plan.issue || '—'} · ${plan.title || ''}`),
-              plan.mode !== 'dev-only' ? h(React.Fragment, null,
-                h('dt', null, '合并目标'), h('dd', null, plan.merged_into || plan.merge_target || '未识别')) : null,
+              h('dt', null, '操作'), h('dd', null, discard ? 'discard：salvage 后 deferred，不解锁依赖' : 'close：只接受可验证的合并事实'),
+              h('dt', null, 'operation ID'), h('dd', null, plan.operation_id),
+              h('dt', null, '目标'), h('dd', null, plan.target_branch || '无'),
               h('dt', null, 'worktree'), h('dd', null, plan.worktree || '无'),
               plan.salvage?.files ? h(React.Fragment, null,
-                h('dt', null, '抢救'), h('dd', null, `${plan.salvage.files} 个文件 / ${plan.salvage.unique_files} 份内容 · ${fmtBytes(plan.salvage.bytes)} · ${plan.salvage.method === 'hardlink' ? '同设备硬链接去重' : '跨设备复制去重'}`)) : null,
+                h('dt', null, 'salvage'), h('dd', null, `${plan.salvage.files} 个文件 · ${fmtBytes(plan.salvage.bytes)} · 含 .logs`)) : null,
               plan.dev_cleanup?.files ? h(React.Fragment, null,
-                h('dt', null, 'dev 清理'), h('dd', null, `${plan.dev_cleanup.files} 个过程文件 · ${fmtBytes(plan.dev_cleanup.bytes)}`)) : null),
-            h('div', { className: 'cpp-plan' }, (plan.will || []).map((w, i) => h('div', { key: i, className: 'cpp-plan-item' }, w))),
-            h('div', { className: 'cpp-safe' }, plan.mode === 'abandon'
-              ? '丢弃开发：不合入，删除 worktree 和本地分支，并把需求关闭（deferred）；合并保留：先合入已提交内容再清理，票状态不变。未提交改动始终只保存在 salvage。'
-              : '确认后自动重验并执行；有任何变化会停止。')) : null,
-          state.phase === 'apply' ? h('div', { className: 'cpp-loading' }, state.action === 'merge' ? '正在保存补丁并尝试合并，请稍候…' : '正在保存补丁并清理，请稍候…') : null,
+                h('dt', null, 'dev/代际'), h('dd', null, `${plan.dev_cleanup.files} 个 · ${fmtBytes(plan.dev_cleanup.bytes)}`)) : null),
+            h('div', { className: 'cpp-plan' }, (plan.will || []).map((w, i) => h('div', { key: i, className: 'cpp-plan-item' }, w)))) : null,
+          state.phase === 'apply' ? h('div', { className: 'cpp-loading' }, '正在按 journal 分步执行并核对真实结果…') : null,
           state.phase === 'result' && result ? h(React.Fragment, null,
             result.error ? h('div', { className: 'cpp-err' }, result.error) : null,
-            !result.error ? h('div', { className: result.ok ? 'cpp-result-ok' : 'cpp-result-warn' }, result.ok ? '清理完成' : '清理已执行，部分项目保留') : null,
+            h('div', { className: result.ok ? 'cpp-result-ok' : 'cpp-result-warn' }, result.ok ? '清理完成' : '清理未完全完成，保留项需要关注'),
             h('dl', { className: 'cpp-facts' },
-              h('dt', null, '方式'), h('dd', null, result.action === 'merge' ? '合并保留' : result.action === 'discard' ? '丢弃开发' : result.action === 'dev-only' ? '仅 dev 清理' : '收尾清理'),
-              result.merge_commit ? h(React.Fragment, null,
-                h('dt', null, '合并提交'), h('dd', null, result.merged_into + ' @' + result.merge_commit.slice(0, 10))) : null,
-              result.branch_patch_saved ? h(React.Fragment, null,
-                h('dt', null, '分支补丁'), h('dd', null, '已保存 branch.patch')) : null,
-              h('dt', null, 'worktree'), h('dd', null, result.worktree_removed ? '已移除' : '未移除'),
-              h('dt', null, '本地分支'), h('dd', null, result.branch_deleted ? '已删除' : '已保留'),
-              h('dt', null, '抢救文件'), h('dd', null, String(result.salvaged_files || 0)),
-              h('dt', null, 'dev 过程文件'), h('dd', null, `清理 ${result.dev_files_removed || 0} 个 · ${fmtBytes(result.bytes_freed || 0)}`)),
+              h('dt', null, 'operation ID'), h('dd', null, result.operation_id || plan?.operation_id || '—'),
+              h('dt', null, '状态'), h('dd', null, result.state || 'needs-attention'),
+              h('dt', null, 'worktree'), h('dd', null, result.worktree_removed ? '已移除' : '未移除/不适用'),
+              h('dt', null, '本地 ref'), h('dd', null, result.branch_deleted ? '已删除' : '已保留/不适用'),
+              h('dt', null, 'dev'), h('dd', null, `清理 ${result.dev_files_removed || 0} 个 · ${fmtBytes(result.bytes_freed || 0)}`)),
             result.salvage_dir ? h('div', { className: 'cpp-path' }, 'salvage：' + result.salvage_dir) : null,
+            result.remaining_paths?.length ? h('div', { className: 'cpp-path' }, '保留：' + result.remaining_paths.join('；')) : null,
             result.warnings?.map((w, i) => h('div', { key: i, className: 'cpp-warning' }, w))) : null,
           h('div', { className: 'cpp-modal-actions' },
             state.phase === 'error' ? h('button', { className: 'cpp-btn', onClick: onRetry }, '重新预检') : null,
-            state.phase !== 'apply' ? h('button', { className: 'cpp-btn', onClick: onClose, autoFocus: state.phase !== 'confirm' }, state.phase === 'result' ? '完成' : '取消') : null,
-            state.phase === 'confirm' && plan.mode === 'abandon'
-              ? h(React.Fragment, null,
-                  h('button', { className: 'cpp-btn danger', onClick: () => onApply('discard') }, '丢弃开发'),
-                  plan.merge_target ? h('button', { className: 'cpp-btn primary', onClick: () => onApply('merge'), autoFocus: true }, '合并保留') : null)
-              : state.phase === 'confirm'
-                ? h('button', { className: 'cpp-btn danger', onClick: () => onApply('close'), autoFocus: true }, '确认清理')
-                : null)))
+            state.phase === 'result' && result?.operation_id && !result.ok ? h('button', { className: 'cpp-btn', onClick: onReconcile }, '按真实状态恢复') : null,
+            state.phase !== 'apply' ? h('button', { className: 'cpp-btn', onClick: onClose }, state.phase === 'result' ? '完成' : '取消') : null,
+            state.phase === 'confirm' && plan.eligible && !plan.protected
+              ? h('button', { className: 'cpp-btn danger', onClick: onApply }, discard ? '确认丢弃并清理' : '确认收尾清理') : null)))
     }
 
     // ---------- 开发中泳道视图（横向泳道 + 跨需求依赖联动高亮） ----------
@@ -604,7 +567,7 @@ window.__ModuleLoader__.load({
             : null)
     }
 
-    function SwimView({ data, repo, onCleanup, onCloseIssue, onRefresh }) {
+    function SwimView({ data, repo, onCleanup, onRefresh }) {
       const [filter, setFilter] = React.useState('all')
       const [selected, setSelected] = React.useState(null)
       const [selectedIssue, setSelectedIssue] = React.useState('')
@@ -741,13 +704,8 @@ window.__ModuleLoader__.load({
         if (selIss) {
           acts.push(h('button', { key: 'd', className: 'cpp-drill', onClick: drill, title: '复制下钻提问，粘到会话即可' }, '复制下钻提问'))
           acts.push(h('button', { key: 'c', className: 'cpp-drill cpp-cleanup-detail',
-            onClick: () => onCleanup({ branch: selIss.branch || null, issue: selIss.key }),
+              onClick: () => onCleanup({ issue: selIss.key, status: selIss.status }),
             title: '按开发收尾规则预检；是否可执行以预检为准' }, '清理'))
-          if (selIss.status !== 'done') {
-            acts.push(h('button', { key: 'x', className: 'cpp-drill',
-              onClick: () => onCloseIssue({ key: selIss.key, title: selIss.title, status: selIss.status }),
-              title: '仅把需求状态改为 deferred，不删除分支/worktree/dev' }, '关闭需求'))
-          }
         }
         detail = [
           h('div', { key: 't', className: 'cpp-dtitle' }, selIss ? `${selIss.id} · ${selIss.title}` : `${f.slug} · 已选择整个需求`),
@@ -755,6 +713,8 @@ window.__ModuleLoader__.load({
             ? `${selIss.feature} · ${SW_STATUS[selIss.status] || selIss.status}`
             : `${f.module} · 本需求全部 issue 已展开并高亮`),
           selIss ? h('div', { key: 'p', className: 'cpp-dline' }, selIss.issue_path) : null,
+          selIss?.contract_error ? h('div', { key: 'contract', className: 'cpp-err' }, selIss.contract_error) : null,
+          selIss?.decision ? h('div', { key: 'decision', className: 'cpp-dline' }, '待决定：' + (selIss.decision.question?.decision || selIss.decision.id)) : null,
           h('div', { key: 'c', className: 'sw-counts' },
             h('span', null, h('b', null, (f.issues || []).length), ' 本需求 issue'),
             h('span', null, h('b', null, relCount), ' 跨需求直接关联'),
@@ -794,7 +754,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'sw-detail', 'aria-live': 'polite' }, detail))
     }
 
-    function Tree({ data, openMap, foldMap, onToggle, onFold, onCleanup, onRefresh, focusKey, onCloseIssue }) {
+    function Tree({ data, openMap, foldMap, onToggle, onFold, onCleanup, onRefresh, focusKey }) {
       const list = data.tree || []
       const rows = []
       const main = data.main || {}
@@ -812,7 +772,7 @@ window.__ModuleLoader__.load({
           const kids = hasKids(list, i)
           rows.push(h(FeatureRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)), focused: focusKey === nodeKey(n) }))
         } else if (n.kind === 'ticket') {
-          rows.push(h(TicketRow, { key: nodeKey(n), n: stall, open: !!openMap[n.key], onToggle: () => onToggle(n.key), onCleanup, onCloseIssue, focused: focusKey === nodeKey(n) }))
+          rows.push(h(TicketRow, { key: nodeKey(n), n: stall, open: !!openMap[n.key], onToggle: () => onToggle(n.key), onCleanup, focused: focusKey === nodeKey(n) }))
         } else {
           const kids = hasKids(list, i)
           rows.push(h(BranchRow, { key: nodeKey(n), n: stall, kids, folded: !!foldMap[nodeKey(n)], onFold: () => onFold(nodeKey(n)), onCleanup, focused: focusKey === nodeKey(n) }))
@@ -859,7 +819,6 @@ window.__ModuleLoader__.load({
       const [foldMap, setFoldMap] = React.useState({})
       const [reload, setReload] = React.useState(0)
       const [cleanup, setCleanup] = React.useState(null)
-      const [closeRequest, setCloseRequest] = React.useState(null)
       const [view, setView] = React.useState('tree')
       const [swim, setSwim] = React.useState(null)
       const [swimError, setSwimError] = React.useState(null)
@@ -918,12 +877,14 @@ window.__ModuleLoader__.load({
       }, [focusKey, dataReady])
 
       const beginCleanup = (target) => {
-        const request = typeof target === 'string'
-          ? { repo, branch: target }
-          : target.branch ? { repo, branch: target.branch } : { repo, issue: target.issue }
-        const label = request.branch || request.issue
-        setCleanup({ branch: label, target, request, phase: 'preview' })
-        jpost('/cleanup/preview', request)
+        const value = typeof target === 'string' ? { issue: target } : target
+        const intent = value.intent || (value.status && value.status !== 'done' ? 'discard' : 'close')
+        const request = value.feature_dir
+          ? { repo, feature_dir: value.feature_dir, intent }
+          : { repo, issue: value.issue, intent }
+        const label = request.feature_dir || request.issue || '资源'
+        setCleanup({ branch: label, target: value, request, phase: 'preview' })
+        jpost('/close-clean/preview', request)
           .then((plan) => {
             if (!plan.eligible) {
               setCleanup((s) => s?.request === request ? { ...s, phase: 'error', error: plan.reason || plan.error || '该节点不可清理' } : s)
@@ -933,38 +894,33 @@ window.__ModuleLoader__.load({
           })
           .catch((e) => setCleanup((s) => s?.request === request ? { ...s, phase: 'error', error: String(e.message ?? e) } : s))
       }
-      const beginCloseIssue = (n) => {
-        setCloseRequest({
-          issue: n.key, title: n.title, status: n.status,
-          reason: '中途搁置，用户确认关闭', phase: 'confirm',
-        })
-      }
-      const applyCloseIssue = () => {
-        if (!closeRequest) return
-        const request = closeRequest
-        setCloseRequest((s) => ({ ...s, phase: 'apply' }))
-        jpost('/close', { repo, issue: request.issue, reason: request.reason }, 'close')
-          .then((result) => {
-            setCloseRequest((s) => s?.issue === request.issue ? { ...s, phase: 'result', result } : s)
-            setReload((n) => n + 1)
-          })
-          .catch((e) => {
-            setCloseRequest((s) => s?.issue === request.issue ? { ...s, phase: 'result', result: { ok: false, error: String(e.message ?? e) } } : s)
-            setReload((n) => n + 1)
-          })
-      }
 
-      const applyCleanup = (action) => {
+      const applyCleanup = () => {
         if (!cleanup?.plan) return
         const { request, plan } = cleanup
-        setCleanup((s) => ({ ...s, phase: 'apply', action }))
-        jpost('/cleanup/apply', { ...request, confirm: plan.confirm, action }, true)
+        setCleanup((s) => ({ ...s, phase: 'apply' }))
+        jpost('/close-clean/apply', { ...request, operation_id: plan.operation_id, confirm: plan.confirm }, true)
           .then((result) => {
             setCleanup((s) => s?.request === request ? { ...s, phase: 'result', result } : s)
             setReload((n) => n + 1)
           })
           .catch((e) => {
-            setCleanup((s) => s?.request === request ? { ...s, phase: 'result', result: { ok: false, error: String(e.message ?? e) } } : s)
+            setCleanup((s) => s?.request === request ? { ...s, phase: 'result', result: { ok: false, state: 'needs-attention', operation_id: plan.operation_id, error: String(e.message ?? e) } } : s)
+            setReload((n) => n + 1)
+          })
+      }
+      const reconcileCleanup = () => {
+        const operationId = cleanup?.result?.operation_id || cleanup?.plan?.operation_id
+        if (!operationId) return
+        setCleanup((s) => ({ ...s, phase: 'apply' }))
+        jpost('/reconcile/apply', { repo, operation_id: operationId }, true)
+          .then((result) => {
+            const operation = result.operations?.[0] || result
+            setCleanup((s) => ({ ...s, phase: 'result', result: operation }))
+            setReload((n) => n + 1)
+          })
+          .catch((e) => {
+            setCleanup((s) => ({ ...s, phase: 'result', result: { ok: false, state: 'needs-attention', operation_id: operationId, error: String(e.message ?? e) } }))
             setReload((n) => n + 1)
           })
       }
@@ -988,7 +944,6 @@ window.__ModuleLoader__.load({
                       onToggle: (k) => setOpenMap((m) => ({ ...m, [k]: !m[k] })),
                       onFold: (k) => setFoldMap((m) => ({ ...m, [k]: !m[k] })),
                       onCleanup: beginCleanup,
-                      onCloseIssue: beginCloseIssue,
                       onRefresh: () => setReload((n) => n + 1),
                     })
                   : h('div', { className: 'cpp-loading' }, '读取中…'))
@@ -998,7 +953,6 @@ window.__ModuleLoader__.load({
                   ? h(SwimView, {
                       data: swim, repo,
                       onCleanup: beginCleanup,
-                      onCloseIssue: beginCloseIssue,
                       onRefresh: () => setReload((n) => n + 1),
                     })
                   : h('div', { className: 'cpp-loading' }, '读取中…'))),
@@ -1007,12 +961,7 @@ window.__ModuleLoader__.load({
           onClose: () => { if (cleanup.phase !== 'apply') setCleanup(null) },
           onApply: applyCleanup,
           onRetry: () => beginCleanup(cleanup.target),
-        }) : null,
-        closeRequest ? h(CloseIssueModal, {
-          state: closeRequest,
-          onClose: () => { if (closeRequest.phase !== 'apply') setCloseRequest(null) },
-          onApply: applyCloseIssue,
-          onReason: (reason) => setCloseRequest((s) => ({ ...s, reason })),
+          onReconcile: reconcileCleanup,
         }) : null)
     }
 

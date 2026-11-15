@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.ci-proof/v2",
+  "title": "Online CI run and verdict artifact proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "provider", "repository", "base_url", "workflow", "run_id", "attempt",
+    "attempt_status", "event", "ref", "commit", "tree", "status", "conclusion", "run_url",
+    "artifact", "verdict"
+  ],
+  "properties": {
+    "schema": {"const": "agent-dev.ci-proof/v2"},
+    "provider": {"enum": ["gitea", "gitlab"]},
+    "repository": {"type": "string", "minLength": 1},
+    "base_url": {"type": "string", "minLength": 1},
+    "workflow": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "attempt": {"type": ["integer", "null"], "minimum": 1},
+    "attempt_status": {"enum": ["verified", "not-supported"]},
+    "event": {"type": "string", "minLength": 1},
+    "ref": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "format": "git-sha"},
+    "tree": {"type": "string", "format": "git-sha"},
+    "status": {"const": "completed"},
+    "conclusion": {"const": "success"},
+    "run_url": {"type": "string", "minLength": 1},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "url", "bytes", "sha256", "fetched_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "minLength": 1},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "format": "sha256"},
+        "fetched_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": [
+        "schema", "status", "pass", "commit", "tree", "ref", "run_id",
+        "ran_n", "skipped_env_n", "new_failures", "unattributed_failures",
+        "attribution_status", "quarantine_overdue_n", "quarantined_n"
+      ],
+      "properties": {
+        "schema": {"const": "pandu.test-verdict/v1"},
+        "status": {"const": "completed"},
+        "pass": {"const": true},
+        "commit": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "ref": {"type": "string", "minLength": 1},
+        "run_id": {"type": ["string", "integer"]},
+        "ran_n": {"type": "integer", "minimum": 1},
+        "skipped_env_n": {"const": 0},
+        "new_failures": {"type": "array", "maxItems": 0},
+        "unattributed_failures": {"type": "array", "maxItems": 0},
+        "attribution_status": {"enum": ["not-needed", "completed"]},
+        "quarantine_overdue_n": {"const": 0},
+        "quarantined_n": {"type": "integer", "minimum": 0},
+        "quarantine_config_sha256": {"type": "string", "format": "sha256"},
+        "executed": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "object", "required": ["id", "status"], "properties": {"id": {"type": "string", "minLength": 1}, "status": {"enum": ["pass", "quarantined"]}}, "additionalProperties": true}
+        },
+        "environment": {"type": "object"},
+        "failure_attribution": {"type": ["object", "null"]},
+        "quarantine": {"type": ["object", "null"]}
+      },
+      "additionalProperties": true
+    }
+  }
+}

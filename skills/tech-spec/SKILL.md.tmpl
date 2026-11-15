@@ -111,7 +111,7 @@ allowed-tools:
 2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
 3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`；同时按 `shared/templates/acceptance-plan.yaml` 写入同目录 `acceptance-plan.yaml`，保证 PRD 的每个端到端 AC 恰好承接一次，AI 自动 / AI 执行人工复核 / 人工验收的分类理由可解释。计划是结构化文档，不是运行配置
 4. 本轮确定的新术语立即回写 GLOSSARY
-5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」记录图谱 delta 与承接票更新义务，接口只有随代码合并且证据齐备后才可标 `current`。不直接编辑 `docs/ARCHITECTURE.md`；首页由图谱工具生成。
+5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」必须使用模板固定表逐条写 `稳定 ID / new|modify|retire / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，供 `/issue-split` 把每个 ID 写入承接票 `architecture-updates`。接口只有随代码合并且祖先、源码 hash 与证据齐备后才可标 current。不得直接编辑 `docs/ARCHITECTURE.md`；首页只能由 `architecture_graph.py render write` 生成，并经 `render check` 字节核对。
 6. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`；本方案整体取代某份旧 tech-spec 时，frontmatter `supersedes` 填该旧文件名（机器可读的取代链，巡检规则见 `shared/references/contract-check.md`）
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。

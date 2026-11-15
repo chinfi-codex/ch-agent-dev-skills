@@ -4,15 +4,22 @@
 
 ```yaml
 issue: <issue-id>
-commit: <核对时的 HEAD>
-verdict: conform        # conform / deviate / missing；sampled 模式下未抽中的非集成票写 skipped，集成票必须实核
-checker: main-session   # main-session = 主会话亲核；dispatched = 派发独立主模型对话核对（句柄记下行）
+context_digest: <ticket-context.gate2_context_digest>
+commit: <核对时的完整 HEAD>
+tree: <核对时的完整 HEAD tree>
+verdict: conform        # conform / deviate / missing；仅确定性未抽中的非集成票可写 skipped
+checker: main-session   # main-session / dispatched
+checker_session: <实际宿主会话或 agent ID；不能自报为独立会话>
+selection:
+  algorithm: sha256-v1
+  rate: <配置 sample-rate；always 写 1>
+  selected: true        # 由 ticket_context.select_conformance 复算，不接受手工跳票
 date: YYYY-MM-DD
 ```
 
 ## 需求点清单（反向枚举）
 
-**先不看 impl-log 覆盖矩阵**，从票「要做什么 / 不做什么」+ tech-spec 锚点节独立枚举需求点，再对照矩阵逐条判定——防止被实现方叙事带偏；本表专门抓「缺席」（diff 与命令退出码里看不见的东西）。票的契约更新 DoD（`docs/ARCHITECTURE.md` 接口表，若有）也在反向枚举范围：核对合入 diff 中该文件的改动与票 DoD 及代码实现三者一致（签名以代码为准），且未顺手改无关接口条目。
+**先不看 impl-log 覆盖矩阵**，从票「要做什么 / 不做什么」+ tech-spec 锚点节独立枚举需求点，再对照矩阵逐条判定——防止被实现方叙事带偏；本表专门抓「缺席」（diff 与命令退出码里看不见的东西）。票的 `architecture-updates` 契约条目也在反向枚举范围：逐稳定 ID 核对 tech-spec 3.2、票声明、`docs/architecture/*.json` 分片 diff 与代码实现四者一致，且未顺手修改无关接口；生成首页必须通过与分片的确定性比对。
 
 | # | 需求点 | 来源（DoD 条目 / 行为点 / spec 节锚点） | 判定（已实现 / 语义偏差 / 未实现） | 核对依据（文件:符号、测试、evidence 行） |
 |---|---|---|---|---|

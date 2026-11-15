@@ -81,8 +81,8 @@ def validate(config: dict, catalogs: dict | None = None) -> dict:
     for host, raw_host in hosts.items():
         path = f"dispatch.hosts.{host}"
         host_config = _mapping(raw_host, path)
-        _keys(host_config, {"supervisor-review", "development"}, path)
-        if set(host_config) != {"supervisor-review", "development"}:
+        _keys(host_config, {"supervisor-review", "development", "native_session_command"}, path)
+        if set(host_config) - {"native_session_command"} != {"supervisor-review", "development"}:
             raise ConfigError(f"{path} 必须同时配置 supervisor-review 与 development")
         supervisor = _route(host_config["supervisor-review"], host, f"{path}.supervisor-review")
         raw_development = _mapping(host_config["development"], f"{path}.development")
@@ -103,6 +103,13 @@ def validate(config: dict, catalogs: dict | None = None) -> dict:
             if route["effort"] not in efforts:
                 raise ConfigError(f"{host}/{route['model']} 不支持 effort={route['effort']}（{role}）")
         validated["hosts"][host] = {"supervisor-review": supervisor, "development": development}
+        native_command = host_config.get("native_session_command")
+        if native_command is not None:
+            if host != "dsh":
+                raise ConfigError(f"{path}.native_session_command 仅用于 DSH 原生会话核验")
+            if not isinstance(native_command, str) or not native_command.strip() or any(c in native_command for c in ("\x00", "\r", "\n")):
+                raise ConfigError(f"{path}.native_session_command 必须是单行非空命令")
+            validated["hosts"][host]["native_session_command"] = native_command.strip()
     return validated
 
 
@@ -184,9 +191,9 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
         "development-escalated": "独立 /implement 升档开发会话；在指定 worktree 实现、测试并落证据。",
     }
     bodies = {
-        "supervisor-review": "你是独立评审对话。先按派发提示词加载 ai-review skill 并严格执行；只评不改，除指定评审报告外不写文件，不参与实现。",
-        "development": "你是被派发的开发实现对话。先按派发提示词加载 implement skill 并严格执行；只在指定 worktree 改动，完成测试与落盘证据后结构化回报。",
-        "development-escalated": "你是被派发的升档开发实现对话。先按派发提示词加载 implement skill 并严格执行；只在指定 worktree 改动，完成测试与落盘证据后结构化回报。",
+        "supervisor-review": "你是独立评审对话。先按派发提示词加载 ai-review skill 并严格执行；只评不改，除指定评审报告外不写文件，不参与实现。返回结构化 receipt 候选和真实会话句柄；需要人裁决时只返回未持久化 human-decision 请求，不直接问人、不写票或事件。",
+        "development": "你是被派发的开发实现对话。先按派发提示词加载 implement skill 并严格执行；只在指定 worktree 改动，使用 verify_issue 真实执行测试并生成机器证据，独立评审后只到 MR ready，不合并、不清场。需要人裁决时只返回未持久化 human-decision 请求，不直接问人；成功或阻塞都结构化回报并保留 dispatch/session 句柄。",
+        "development-escalated": "你是被派发的升档开发实现对话。先按派发提示词加载 implement skill 并严格执行；只在指定 worktree 改动，使用 verify_issue 真实执行测试并生成机器证据，独立评审后只到 MR ready，不合并、不清场。需要人裁决时只返回未持久化 human-decision 请求，不直接问人；成功或阻塞都结构化回报并保留 dispatch/session 句柄。",
     }
     if host in {"claude-code", "zcode"}:
         files = {
@@ -263,6 +270,20 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
     return {"cordis.patch.yml": "\n".join(lines) + "\n"}
 
 
+def check_rendered(files: dict[str, str], output: Path) -> list[str]:
+    """Return generated native role files whose on-disk content is missing or stale."""
+    drift = []
+    for relative, content in files.items():
+        path = output / relative
+        try:
+            current = path.read_text(encoding="utf-8")
+        except OSError:
+            current = None
+        if current != content:
+            drift.append(relative)
+    return drift
+
+
 def write_rendered(files: dict[str, str], output: Path) -> list[str]:
     written = []
     for relative, content in files.items():
@@ -284,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tier", choices=TIERS, default="default")
     parser.add_argument("--catalog", type=Path, help="可选：{host: {model: [effort...]}} 实时模型目录")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--check", action="store_true", help="render：只读检查原生角色是否缺失或过期")
     parser.add_argument("--dsh-profile", choices=("headless", "desktop"), default="headless")
     args = parser.parse_args(argv)
     try:
@@ -301,8 +323,17 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 if not args.output:
                     raise ConfigError("render 必须指定 --output")
-                result = {"ok": True, "files": write_rendered(render(dispatch, args.host, args.dsh_profile), args.output)}
+                rendered = render(dispatch, args.host, args.dsh_profile)
+                if args.check:
+                    drift = check_rendered(rendered, args.output)
+                    result = {"ok": not drift, "host": args.host, "drift": drift}
+                else:
+                    result = {"ok": True, "files": write_rendered(rendered, args.output)}
+        if args.check and args.command != "render":
+            raise ConfigError("--check 仅适用于 render")
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.check and not result["ok"]:
+            return 1
         return 0
     except (ConfigError, InputError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

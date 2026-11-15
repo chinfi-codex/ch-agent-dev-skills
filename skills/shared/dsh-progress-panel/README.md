@@ -1,52 +1,45 @@
 # @ch-agent/dsh-progress-panel
 
-DSH 插件：多宿主开发进度面板，挂在右侧栏「进度」页签。两个视图：「分支树」（按分支嵌套的票树，git 祖先链定父子）与「开发中」（需求×issue 横向泳道，前置 → 后续，跨需求依赖箭头联动高亮）；均带活性探针 + 宿主会话绑定徽章；残留分支与中途搁置需求均提供「清理」操作。
+DSH 右侧栏开发进度面板：分支树与需求 × issue 泳道共用票、事件、会话和活动决定包投影。面板只读展示 `decision` / `contract_error`，不提供第二个人工批准入口。
 
-## 结构
+## HTTP 与清理
 
-- `index.js` 服务端半端：
-  - `GET /api/ch-progress/payload` → `../scripts/progress.py payload`（20s 进程内缓存，分支树视图）
-  - `GET /api/ch-progress/swim` → `../scripts/progress.py swim`（20s 进程内缓存，开发中泳道视图）
-  - `GET /api/ch-progress/summary?force=1` → `../scripts/progress.py summary`（宿主模型生成开发摘要；5 分钟进程内缓存，force 旁路；API Key 经进程环境传递、不进 argv）
-  - `POST /api/ch-progress/cleanup/preview` → 只读预检
-  - `POST /api/ch-progress/cleanup/apply` → 确认指纹执行（要求 JSON 与 `x-ch-progress-action: apply`）
-- `client.js` 浏览器半端：`window.__ModuleLoader__.load` 自注册；右侧栏 tab 类型 + body + title 三件套；tab 定义的 `guide` 数组在「开始」页提供「开发进度」工具卡（点击原生切换到进度页签）；切换对话时继承右侧栏展开状态（用户主动折叠则不强制重开）；10s 轮询，视图切换、泳道折叠/展开、再次点击需求区域取消选中、票详情、清理确认弹窗。开发中泳道：issue 卡片按状态着底色（在跑蓝 / 评审紫 / 待合并浅蓝 / 等人红 / 已完结绿）；已完结票只显示最近 3 天（完结时间用 merged 事件或 status 注释日期，未知视同过期）；未展开泳道默认显示在制 + 可派发（confirmed）后续票，proposed 草稿不进
-- `../scripts/progress.py` `swim` 命令：泳道数据源——需求开发中判定只看票状态（在跑/评审中/待合并/等人），agent 关联区分 派发/会话/分支 三种来源；done 票带 `done_ts`（merged 事件优先，回退 status 注释日期）；依赖显式分类 `internal`（blocked-by，同需求内解析）/ `external`（external-blocked-by）/ `body`（正文「外部前置/外部依赖」，带 文件:行 证据）/ `milestone`（非 issue 引用）；目标缺失保留 `resolved:false`，不猜归属。仅 1 次分支名枚举，无祖先链开销
-- `../scripts/progress.py` `summary` 命令：开发摘要（项目管理视角：整体进展/各需求阶段/卡点风险/建议关注）。事实来源 = swim payload（含等人备注、复跑打回、评审轮次）；模型配置优先级：命令行参数 > `CH_PROGRESS_SUMMARY_BASE_URL/MODEL/API_KEY` 环境变量 > 宿主配置 `~/.config/pandu/host.json` 的 `/model`（api_key 按其 `api_key_ref_env` 先查进程环境、再回退同目录 `local.env`）；OpenAI 兼容 `/chat/completions`，max_tokens 3000（deepseek-flash 等推理模型的思考会先消耗预算，正文为空时报错并提示重试）。客户端在「开发中」视图顶部展示，挂载时取一次（服务端 5 分钟缓存），「重新总结」按钮旁路缓存
-- `../scripts/progress_cleanup.py`：清理原语与确认指纹；`tests/test_progress_cleanup.py`、`tests/test_progress_swim.py` 覆盖安全边界与数据口径
+- `GET /api/ch-progress/payload`、`GET /api/ch-progress/swim`：20 秒缓存的只读视图。
+- `GET /api/ch-progress/summary?force=1`：宿主模型摘要，5 分钟缓存；密钥只经环境传递。
+- `POST /api/ch-progress/close-clean/preview`：`{repo, issue|feature_dir, intent}`，生成 operation ID 与确认指纹。
+- `POST /api/ch-progress/close-clean/apply`：同一对象加 `operation_id`、`confirm`，要求 `x-ch-progress-action: apply`。
+- `POST /api/ch-progress/reconcile`：只读聚合 cleanup、delivery、human_decision、runtime；提供方失败分类展示。
+- `POST /api/ch-progress/reconcile/apply`：恢复指定 operation ID，要求相同确认头；CLI 另需显式 `--kind`。
+- 仅支持 POSIX（macOS/Linux）真实文件锁和进程组；Windows 明确拒绝清理/恢复，不提供伪回退。超时终止整个进程组并等待退出，结果不明时保持占用并要求对账。
+- 旧 `close`、`cleanup/*` 和 merge/action 路由均返回 404。清理永不合并代码；stale/锁冲突返回 409，保护资源返回 403 且客户端不给执行按钮。
 
-## 工作区与会话联动
+`repo` 仅接受 profile 中登记的根目录。客户端每 10 秒轮询，写操作后同时失效两个视图缓存。操作结果展示 journal 状态、operation ID、salvage 和 `remaining_paths`；有 warning 即为 `needs-attention`，不会显示为完成。
 
-- 客户端通过 `uiWorkspace.selection` + `workspaces/sessions` 确定当前工作区；未选择工作区时不加载、不展示进度数据。切换工作区会重建面板，切换会话只移动焦点。
-- 服务端仅接受 `config.repo` / `config.repos` 中登记的仓库（本机 profile 配置，不写死在插件包内），按 repo 缓存 payload；清理请求也必须带同一 repo，未登记路径返回 403。
-- 当前会话先按 session id 匹配 session-title 绑定，再用标题中的 issue / feature 兜底；命中后展开祖先、滚动到条目并高亮。
-- 「复制下钻提问」与「清理」统一放在票详情动作排；清理入口不再按状态隐藏，所有票/分支都可预检，但执行仍受下方安全边界约束。
+## 数据契约
 
-- **关闭需求（独立生命周期操作）**：票详情提供「关闭需求」，确认后仅把 `status` 改为 `deferred` 并追加 `digest`（含原因），不删除分支、worktree 或 dev 文件；`deferred/cancelled/superseded` 不作为 `blocked-by` 的完成依据，避免误解锁下游。
+- 票 frontmatter 与 `progress.jsonl` 提供状态和过程事实；`done` 时间优先取 merged 事件，其次取 status 注释日期。
+- `needs-human` 必须能投影到 `human_decision.active_for_issue` 的活动包；缺包或坏包显示契约错误，旧 needs-human note 不再是决定真源。
+- 会话绑定区分主仓、实际 worktree、完整分支、issue 和 revision；已 release 的绑定不进入活动视图。
+- 依赖分 `internal` / `external` / `body` / `milestone`，目标缺失保留 `resolved:false`，不跨需求猜同号票。
 
-## 清理边界
+## 清理与资源边界
 
-- 清理入口全状态可见。`done` 走普通收尾；非 done（除 `proposed` 未开工）按「中途搁置」提供两个选择：**丢弃开发**（保存补丁后删除 worktree 和本地分支，并把票状态置 `deferred` 关闭——失败时如实告警）或**合并保留**（先尝试合入已提交内容，成功后再清理，票状态不变，验收收口后按正常流程置 done）。活跃后代分支仍禁止清理。
-- **无本地分支（issue-only）**：只清理该票 `dev/impl/<issue>/` 中明确可判的过程文件，不删除代码、分支或票状态；`proposed` 仍不可清理，dev 无安全候选时提示无可清理文件，不生成空清理。
-- 共同前置：confirm 指纹重验 + salvage。中途搁置未合入时额外保存完整 `branch.patch`；未提交改动保存 `uncommitted.patch` 和文件副本，不参与合并。合并保留要求目标 worktree 干净，冲突自动 abort，原 worktree 和分支保留；合并成功不自动把票置为 done，后续仍按正常验收收口。
-- 执行链：预检 → 用户选择 → 后台重验 → salvage → 按选择合并或直接进入 worktree 删除 → `git worktree prune` → 本地分支处理 → dev 过程文件清理。普通 done 未合入的分支仍保留，不删远端分支。
-- dev 软链不跟随。实体 dev 与主工作区逐文件比对，未收录内容写入 `dev/.salvage/<issue>-<时间>/`，含 `_manifest.json` 和未提交补丁。内容去重；同设备硬链接，跨设备才复制。
-- dev 只清可再生缓存、merge 中间物等明确候选；被 impl-log / evidence / 评审等 Markdown 引用的文件保留。票文件、impl-log、评审报告不在删除范围。
-- 成功后向本 feature 的 `progress.jsonl` 追加一条 `digest` 留痕。
+- 普通 `close` 只接受真实 done 且已并入票目标分支，或有完整 OID、可重验的精确 merged 记录。目标只由 `ticket_context.target_branch` 解析。
+- 非 done 必须显式 `discard`；先保存 branch.patch、未提交补丁和文件，再删除资源并将票置 deferred，不解锁依赖。
+- Saga 状态：authorized → quiesced → salvaged → accounted → worktree-removed → refs-updated → dev-compacted → completed。journal 在 Git common dir 的 `agent-dev/operations/`。
+- worktree 确认包含全量 ignored 快照；`.logs` 默认 salvage。正确 dev 软链不跟随，broken/wrong-target 拒绝。活动会话、活性未知、日志增长或未停服务阻止删除。
+- 主工作区、main/target/integration、backup、codex/preserve、bare 和无精确 journal 的 detached/branchless 资源受保护。remote-only 不降级 dev-only；本地 ref 用 expected-old CAS，远端仅处理 OID 未变的精确 upstream。
+- 产物只按 generation manifest 的 supersedes 链清理；当前、running、最近成功、活动引用、staging 和唯一恢复包保留。无 manifest 不按 mtime 猜。
 
-## 安装（profile: ~/.dsh/profiles/desktop）
-
-1. `package.json` 依赖加 `"@ch-agent/dsh-progress-panel": "link:<skills仓>/skills/shared/dsh-progress-panel"`（sync.sh 已铺到 `~/.dsh/skills/shared/`，用该路径）；`dsh.profile.bundles` 加 `"@ch-agent/dsh-progress-panel"`
-2. bundle 自带 `cordis.patch.yml` 声明挂载；要改默认仓库，在 profile 的 `cordis.patch.yml` 同 id 覆盖 `config.repo`
-3. 重启 DSH
-
-## 数据契约与性能
-
-票 frontmatter `status` / `dispatch` 块 + `dev/features/<m>/<s>/progress.jsonl` 事件流（见 `supervision-loop.md`「状态与事件写入契约」）；活性不落盘，查询时采样。活性遍历不扫 dev；完整 ahead/dirty 只算在途与集成分支；祖先链只给在途/集成子节点找父，避免大仓 done 残留两两检查。
-
-验证：
+## 验证
 
 ```bash
-python3 -m unittest skills/shared/scripts/tests/test_progress_cleanup.py -v
-python3 skills/shared/scripts/progress.py cleanup --repo /path/to/repo --branch feat/slug-issue-001  # 只读预检
+python3 -m unittest -v \
+  skills/shared/scripts/tests/test_progress_cleanup.py \
+  skills/shared/scripts/tests/test_progress_swim.py \
+  skills/shared/scripts/tests/test_artifact_gc.py \
+  skills/shared/scripts/tests/test_integration_runtime.py \
+  skills/shared/scripts/tests/test_host_adapters.py
+python3 -I skills/shared/scripts/progress.py close-and-clean --repo /path/to/repo --issue issue-001
+python3 -I skills/shared/scripts/progress.py reconcile --repo /path/to/repo --operation-id <id>
 ```

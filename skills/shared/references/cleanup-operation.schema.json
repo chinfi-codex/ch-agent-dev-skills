@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.cleanup-operation/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "intent", "subject", "authorized_at", "ticket", "target", "refs", "worktrees", "dev", "session_runtime", "patch_base", "feature_candidate", "view"],
+  "properties": {
+    "schema": {"const": "agent-dev.cleanup-operation/v2"},
+    "authorized_at": {"type": "string", "format": "date-time"},
+    "intent": {"enum": ["close", "discard"]},
+    "subject": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "id", "key", "title", "status", "feature", "feature_dir", "issue_path"],
+      "properties": {
+        "kind": {"enum": ["issue", "feature"]},
+        "id": {"type": "string", "minLength": 1},
+        "key": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "feature": {"type": "string", "minLength": 1},
+        "feature_dir": {"type": "string", "minLength": 1},
+        "issue_path": {"type": ["string", "null"]}
+      }
+    },
+    "ticket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "status", "config_path", "config_sha256"],
+      "properties": {
+        "path": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"], "format": "sha256"},
+        "status": {"type": ["string", "null"]},
+        "config_path": {"type": "string", "minLength": 1},
+        "config_sha256": {"type": "string", "format": "sha256"}
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["branch", "oid"],
+      "properties": {"branch": {"type": "string", "minLength": 1}, "oid": {"type": "string", "format": "git-sha"}}
+    },
+    "refs": {"type": "array", "items": {"$ref": "#/definitions/git-ref"}},
+    "worktrees": {"type": "array", "items": {"$ref": "#/definitions/worktree"}},
+    "dev": {
+      "type": "object", "additionalProperties": false, "required": ["entries", "skipped_referenced"],
+      "properties": {"entries": {"type": "array", "items": {"$ref": "#/definitions/file"}}, "skipped_referenced": {"type": "integer", "minimum": 0}}
+    },
+    "session_runtime": {"type": "object"},
+    "patch_base": {"type": ["string", "null"], "format": "git-sha"},
+    "feature_candidate": {"type": ["object", "null"]},
+    "view": {"type": "object"}
+  },
+  "definitions": {
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["abs", "path", "kind", "size", "sha256"],
+      "properties": {
+        "abs": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1}, "size": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "format": "sha256"}
+      }
+    },
+    "git-ref": {
+      "type": "object",
+      "required": ["ref", "name", "oid"],
+      "properties": {
+        "ref": {"type": "string", "pattern": "^refs/heads/"}, "name": {"type": "string", "minLength": 1},
+        "oid": {"type": "string", "format": "git-sha"}, "upstream": {"type": ["string", "null"]},
+        "upstream_ref": {"type": ["string", "null"]}, "upstream_oid": {"type": ["string", "null"], "format": "git-sha"},
+        "remote_delete": {"type": ["object", "null"]}, "protected": {"type": "boolean"}
+      }
+    },
+    "worktree": {
+      "type": "object", "additionalProperties": false, "required": ["resource", "analysis"],
+      "properties": {
+        "resource": {
+          "type": "object", "required": ["path", "head", "branch", "detached", "locked", "prunable", "bare"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1}, "head": {"type": ["string", "null"]},
+            "branch": {"type": ["string", "null"]}, "branch_name": {"type": ["string", "null"]},
+            "detached": {"type": "boolean"}, "locked": {"type": "boolean"}, "prunable": {"type": "boolean"},
+            "bare": {"type": "boolean"}, "branchless": {"type": "boolean"}, "main": {"type": "boolean"},
+            "protected": {"type": "boolean"}, "protected_reason": {"type": ["string", "null"]},
+            "locked_reason": {"type": ["string", "null"]}, "prunable_reason": {"type": ["string", "null"]}
+          }
+        },
+        "analysis": {
+          "type": "object", "required": ["entries", "snapshot", "snapshot_sha256", "dev_symlink", "logs"],
+          "properties": {
+            "entries": {"type": "array", "items": {"$ref": "#/definitions/file"}},
+            "snapshot": {"type": "array"}, "snapshot_sha256": {"type": "string", "format": "sha256"},
+            "dev_symlink": {"type": "object"}, "logs": {"type": "array"}, "symlinks": {"type": "array"},
+            "tracked_changes": {"type": "integer", "minimum": 0}, "dirty_entries": {"type": "integer", "minimum": 0},
+            "skipped_repro": {"type": "integer", "minimum": 0}, "skipped_same": {"type": "integer", "minimum": 0},
+            "logical_bytes": {"type": "integer", "minimum": 0}, "unique_bytes": {"type": "integer", "minimum": 0},
+            "unique_files": {"type": "integer", "minimum": 0}, "same_device": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  }
+}

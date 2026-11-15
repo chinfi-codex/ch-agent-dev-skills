@@ -37,6 +37,9 @@ import time
 import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from state_store import FileLock, atomic_json_write
+
 EXIT_QUEUE_TIMEOUT = 75
 DEFAULT_MAX_RUNS = 2
 DEFAULT_QUEUE_TIMEOUT = 1200  # 大于常见 full 套件 P90，避免正常排队被误杀
@@ -76,7 +79,11 @@ def load_budget(d: Path) -> tuple[dict, str]:
     f = d / "budget.json"
     if not f.is_file():
         b = default_budget()
-        f.write_text(json.dumps(b, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with AllocLock(d):
+            if not f.exists():
+                atomic_json_write(f, b, mode=0o644)
+            else:
+                return load_budget(d)
         return b, f"{f}（按内置默认值新建）"
     try:
         raw = json.loads(f.read_text(encoding="utf-8"))
@@ -105,23 +112,17 @@ class HeldLock:
 
 
 class AllocLock:
-    """alloc.lock 短临界区：文件创建 + flock + 元数据写入 + 盘点都必须在其内完成，
-    保证任何观察者不会看到「已建文件但未持锁 / 未写完」的中间态。"""
+    """alloc.lock 短临界区复用 state_store 的真实 flock，保持原有预算语义。"""
 
     def __init__(self, d: Path):
-        self.d = d
-        self.fd = -1
+        self.lock = FileLock(d / "alloc.lock")
 
     def __enter__(self):
-        self.fd = os.open(self.d / "alloc.lock", os.O_CREAT | os.O_RDWR, 0o644)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        self.lock.acquire()
         return self
 
     def __exit__(self, *_):
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_UN)
-        finally:
-            os.close(self.fd)
+        self.lock.release()
 
 
 def _gc_and_list(d: Path) -> tuple[list[dict], list[dict]]:
@@ -311,12 +312,14 @@ def cmd_budget(args) -> int:
         print(json.dumps(budget, ensure_ascii=False, indent=2))
         print(f"来源：{src}")
         return 0
-    current, _ = load_budget(d)
-    new = {"total": args.total if args.total is not None else current["total"],
-           "max-runs": args.max_runs if args.max_runs is not None else current["max-runs"],
-           "queue-timeout": args.queue_timeout if args.queue_timeout is not None else current["queue-timeout"]}
-    new = _validate_budget(new, "参数")
-    f.write_text(json.dumps(new, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    current, _ = load_budget(d)  # initialize before taking the nested allocation lock
+    with AllocLock(d):
+        current, _ = load_budget(d)
+        new = {"total": args.total if args.total is not None else current["total"],
+               "max-runs": args.max_runs if args.max_runs is not None else current["max-runs"],
+               "queue-timeout": args.queue_timeout if args.queue_timeout is not None else current["queue-timeout"]}
+        new = _validate_budget(new, "参数")
+        atomic_json_write(f, new, mode=0o644)
     print(f"已写入 {f}：" + json.dumps(new, ensure_ascii=False))
     print("注意：这是整机预算，同机各仓 / 各会话共享，改动对全部项目生效")
     return 0

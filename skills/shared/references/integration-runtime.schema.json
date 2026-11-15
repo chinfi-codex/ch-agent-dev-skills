@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.integration-runtime/v2",
+  "type": "object",
+  "required": ["schema", "repo", "feature_dir", "round", "candidate", "worktree", "log_generation", "machine_id"],
+  "properties": {
+    "schema": {"enum": ["agent-dev.verify-instance-lease/v2", "agent-dev.dev-service/v2"]},
+    "repo": {"type": "string", "minLength": 1},
+    "feature_dir": {"type": "string", "minLength": 1},
+    "round": {"type": ["string", "null"]},
+    "candidate": {"type": "string", "format": "git-sha"},
+    "worktree": {"type": "string", "minLength": 1},
+    "log_generation": {"type": "string", "minLength": 1},
+    "machine_id": {"type": "string", "minLength": 1},
+    "lease_id": {"type": "string", "minLength": 1},
+    "service_id": {"type": "string", "minLength": 1},
+    "acquired_at": {"type": "string", "format": "date-time"},
+    "heartbeat_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "released_at": {"type": ["string", "null"], "format": "date-time"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "ready_at": {"type": ["string", "null"], "format": "date-time"},
+    "stopped_at": {"type": ["string", "null"], "format": "date-time"},
+    "stop_started_at": {"type": "string", "format": "date-time"},
+    "state": {"enum": ["starting", "ready", "start-failed", "stopping", "stopped", "failed"]},
+    "pid": {"type": ["integer", "null"], "minimum": 1},
+    "log_path": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1}
+  },
+  "oneOf": [
+    {
+      "properties": {"schema": {"const": "agent-dev.verify-instance-lease/v2"}},
+      "required": ["lease_id", "acquired_at", "heartbeat_at", "expires_at", "released_at", "revision"]
+    },
+    {
+      "properties": {"schema": {"const": "agent-dev.dev-service/v2"}},
+      "required": ["service_id", "state", "started_at", "ready_at", "stopped_at", "log_path", "revision"]
+    }
+  ]
+}

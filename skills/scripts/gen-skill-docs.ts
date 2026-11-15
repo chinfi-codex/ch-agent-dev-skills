@@ -24,6 +24,8 @@ const fragmentMap: Record<string, string> = {
   DEV_CONFIG: "dev-config.md",
   DISPATCH_PROTOCOL: "dispatch-protocol.md",
   SUPERVISION_LOOP: "supervision-loop.md",
+  PROGRESS_EVENTS: "progress-events.md",
+  HUMAN_DECISION: "human-decision.md",
   ARCHITECTURE_GRAPH: "architecture-graph.md",
 };
 
@@ -97,7 +99,17 @@ function validateTemplateRefs(rendered: string, skillName: string): void {
   }
 }
 
+function validateSkillContract(template: string, skillName: string): void {
+  if (template.includes("- AskUserQuestion") && !template.includes("{{ASK_FORMAT}}")) {
+    throw new Error(`${skillName}: AskUserQuestion requires {{ASK_FORMAT}}`);
+  }
+  if (skillName === "implement" && template.includes("{{SUPERVISION_LOOP}}")) {
+    throw new Error(`${skillName}: implement must use focused execution contracts, not the supervisor loop`);
+  }
+}
+
 function main(): void {
+  const checkOnly = process.argv.includes("--check");
   const fragments = loadFragments();
   const skillDirs = findSkillDirs();
 
@@ -105,14 +117,35 @@ function main(): void {
     throw new Error(`No skill directories found under ${rootDir}`);
   }
 
+  let drift = false;
   for (const skillDir of skillDirs) {
     const templatePath = join(skillDir, "SKILL.md.tmpl");
     const outputPath = join(skillDir, "SKILL.md");
     const template = readFileSync(templatePath, "utf8");
-    const rendered = renderTemplate(template, fragments);
+    const skillName = skillDir.split(/[\\/]/).pop() ?? skillDir;
+    validateSkillContract(template, skillName);
+    const rendered = prependNotice(renderTemplate(template, fragments));
     validateTemplateRefs(rendered, templatePath);
-    writeFileSync(outputPath, prependNotice(rendered), "utf8");
-    console.log(`Generated ${outputPath}`);
+    if (checkOnly) {
+      let current = "";
+      try {
+        current = readFileSync(outputPath, "utf8");
+      } catch {
+        // Missing generated files are reported as drift below.
+      }
+      if (current !== rendered) {
+        drift = true;
+        console.error(`OUTDATED ${outputPath}`);
+      } else {
+        console.log(`OK ${outputPath}`);
+      }
+    } else {
+      writeFileSync(outputPath, rendered, "utf8");
+      console.log(`Generated ${outputPath}`);
+    }
+  }
+  if (drift) {
+    throw new Error("Generated skill documents are out of date; run the generator without --check");
   }
 }
 

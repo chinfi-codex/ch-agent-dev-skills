@@ -254,10 +254,47 @@ class SessionTitleTest(unittest.TestCase):
 
     def test_cli_title_is_read_only(self):
         self.brief()
-        result = subprocess.run([sys.executable, str(SCRIPT), "title", "--repo", str(self.root),
+        result = subprocess.run([sys.executable, "-I", str(SCRIPT), "title", "--repo", str(self.root),
                                  "--feature", "docs/features/交易链路/订单超时"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "[需求澄清] 订单超时")
+
+    def test_v2_binding_revision_conflict_and_release_preserve_transcript(self):
+        self.issue()
+        transcript = self.write(self.root / "transcripts/s1.jsonl", "keep\n")
+        binding = MODULE.set_binding("claude", "s1", self.issue_binding())
+        self.assertEqual(binding["repo_root"], str(self.root.resolve()))
+        self.assertEqual(binding["worktree"], str(self.root.resolve()))
+        self.assertIn("bound_at", binding)
+        self.assertIn("last_seen", binding)
+        self.assertIsNone(binding["released_at"])
+        self.assertEqual(binding["revision"], 1)
+        same = MODULE.set_binding("claude", "s1", self.issue_binding())
+        self.assertEqual(same["revision"], 2)
+        self.assertEqual(same["bound_at"], binding["bound_at"])
+        with self.assertRaises(MODULE.SessionTitleError):
+            MODULE.set_binding("claude", "s1", self.feature_binding())
+        released = MODULE.release_binding("claude", "s1")
+        self.assertIsNotNone(released["released_at"])
+        self.assertEqual(transcript.read_text(), "keep\n")
+        rebound = MODULE.set_binding("claude", "s1", self.feature_binding())
+        self.assertIsNone(rebound["released_at"])
+        self.assertTrue(rebound["bound_at"])
+
+    def test_worktree_normalizes_main_repo_and_full_branch(self):
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.root)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.name", "t"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "--allow-empty", "-q", "-m", "init"], check=True)
+        worktree = self.root / ".worktrees/issue-003"
+        subprocess.run(["git", "-C", str(self.root), "worktree", "add", "-q", "-b",
+                        "feat/orders-issue-003", str(worktree)], check=True, capture_output=True)
+        binding = MODULE.normalize_binding(
+            worktree, issue="dev/features/交易链路/订单超时/issues/issue-003-callback.md")
+        self.assertEqual(binding["repo_root"], str(self.root.resolve()))
+        self.assertEqual(binding["worktree"], str(worktree.resolve()))
+        self.assertEqual(binding["branch"], "refs/heads/feat/orders-issue-003")
+        self.assertEqual(binding["issue"], "dev/features/交易链路/订单超时/issues/issue-003-callback.md")
 
 
 if __name__ == "__main__":

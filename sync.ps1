@@ -1,12 +1,21 @@
-# 同步 skills/ 到本机各 agent 宿主的 skills 目录（Windows 版，等价 sync.sh，全部平铺分发）。
-# 用法：在仓库根目录执行 powershell -ExecutionPolicy Bypass -File .\sync.ps1
+# v2 目前仅支持 macOS / Linux（POSIX flock 与 dev 软链）。
+# Windows 不使用本脚本分发：配置、锁与清理必须 fail closed，不能伪装成可用。
 $ErrorActionPreference = "Stop"
+if ($env:OS -eq "Windows_NT" -or $PSVersionTable.Platform -eq "Win32NT") {
+  Write-Error "agent-dev v2 is POSIX-only (macOS/Linux); Windows is not supported. Use a POSIX host."
+  exit 2
+}
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Pack = Join-Path $Root "skills"
 
-node --experimental-strip-types (Join-Path $Pack "scripts\gen-skill-docs.ts")
+node --experimental-strip-types (Join-Path $Pack "scripts\gen-skill-docs.ts") --check
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$PythonCache = Get-ChildItem -Path $Pack -Recurse -Force | Where-Object { $_.Name -eq "__pycache__" -or $_.Name -match '\.py[cod]$' } | Select-Object -First 1
+if ($PythonCache) {
+  Write-Error "refuse: Python cache artifacts found under $Pack; remove them before sync"
+  exit 1
+}
 
 $FlatItems = @("ceo-office","pd-plan","issue","prd","pd-review","review","tech-spec","issue-split","implement","ai-review","setup-dev","prototype","handoff","shared")
 
@@ -40,14 +49,20 @@ if (Test-Path "$HOME\.claude") { Install-TitleHooks "claude" "$HOME\.claude\skil
 if (Test-Path "$HOME\.zcode") { Install-TitleHooks "zcode" "$HOME\.zcode\skills" }
 if (Test-Path "$HOME\.codex") { Install-TitleHooks "codex" "$HOME\.codex\skills" }
 
-# DSH 使用原生 bundle 调 sessionTitle.rename；Desktop 运行时只同步文件，退出后重跑注册。
-$DSHPackage = Join-Path $DSHRoot "skills\shared\dsh-session-title"
-if ($env:DSH_TITLE_PACKAGE) { $DSHPackage = $env:DSH_TITLE_PACKAGE }
-if (Test-Path $DSHPackage) {
+# DSH 注册 session-title 与 progress-panel；Desktop 运行时只同步文件，退出后重跑注册。
+$DSHPackages = @(
+  $(if ($env:DSH_TITLE_PACKAGE) { $env:DSH_TITLE_PACKAGE } else { Join-Path $DSHRoot "skills\shared\dsh-session-title" }),
+  $(if ($env:DSH_PROGRESS_PACKAGE) { $env:DSH_PROGRESS_PACKAGE } else { Join-Path $DSHRoot "skills\shared\dsh-progress-panel" })
+)
+foreach ($DSHPackage in $DSHPackages) {
+  if (-not (Test-Path $DSHPackage)) {
+    Write-Host "skip: DSH 插件目录不存在：$DSHPackage"
+    continue
+  }
   $DSHProfile = if ($env:DSH_PROFILE) { $env:DSH_PROFILE } else { "desktop" }
   $DSHDesktopRunning = Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue
   if ($DSHProfile -eq "desktop" -and $DSHDesktopRunning) {
-    Write-Host "skip: DeepSeek Harness Desktop 正在运行；完全退出后执行本脚本以注册 session 标题插件"
+    Write-Host "pending: DeepSeek Harness Desktop 正在运行；完全退出后重跑以注册 $DSHPackage"
   } elseif ($env:DSH_CLI) {
     & $env:DSH_CLI plugin --profile $DSHProfile add $DSHPackage
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""Create and consume immutable v2 ticket contexts for delivery and gates.
+
+Public API:
+    target_branch(config, frontmatter, feature_dir=None) -> str
+        Explicit ticket target > local-human integration branch > main branch.
+    parse_issue(path) -> {"frontmatter": dict, "dod": list}
+        Parse frontmatter and the DoD Markdown section.  Checkbox commands must
+        be backtick-delimited; they become DoD-1, DoD-2, ... .  Empty sections,
+        duplicate commands and malformed checkboxes raise ContextError.
+    create_context(issue_path, repo, output_path=None, *, primary_repo=None) -> dict
+        Freeze complete target/base/source OIDs, source tree, repo-relative
+        paths, scope, architecture IDs, issue/DoD/spec/config hashes and the
+        gate2 digest.  All input/output paths must stay inside the Git worktree.
+        With no output_path, no file is written.
+    load_context(path) -> dict
+        Strict JSON + schema + sequential DoD + digest validation.  Corrupt or
+        tampered contexts are rejected, never repaired by guessing.
+    issue_content_hash(path) -> str
+        Hash canonical immutable requirement content.  status/dispatch/verify-fails
+        and tracker publication fields are excluded; DoD remains separately bound.
+    find_spec(issue_path, repo) -> Path
+        Resolve only the current dated spec named by the issue.
+    context_digest(context) -> str
+        SHA256 of canonical JSON with ``gate2_context_digest`` excluded.
+    select_conformance(context, rate) -> bool
+        Deterministically compare SHA256(gate2 digest + issue ID) / 2**256 with
+        a fractions.Fraction rate in (0, 1].
+
+CLI (for delivery):
+    python3 ticket_context.py create --issue ISSUE --repo REPO [--output OUT]
+    python3 ticket_context.py show CONTEXT
+    python3 ticket_context.py validate CONTEXT
+
+Only Python's standard library and the sibling contract modules are used.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import datetime as _datetime
+import hashlib
+import json
+import re
+import subprocess
+import sys
+from fractions import Fraction
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+# Isolated CLI mode (-I) does not guarantee sibling imports on all supported
+# Python versions; scripts in this directory intentionally form one package-less
+# standard-library contract layer.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import agents_config
+import json_schema
+from state_store import atomic_json_write
+
+
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "ticket-context.schema.json"
+CONTEXT_SCHEMA = "agent-dev.ticket-context/v2"
+_OID = re.compile(r"^[0-9a-f]{40}$")
+
+
+class ContextError(ValueError):
+    """A ticket, Git identity, path, or frozen context is invalid."""
+
+
+def _git(repo: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(["git", "-C", str(repo)] + list(args),
+                                capture_output=True, text=True)
+    except OSError as exc:
+        raise ContextError("cannot execute git: %s" % exc)
+    if result.returncode != 0:
+        raise ContextError("git %s failed: %s" % (" ".join(args), result.stderr.strip()))
+    return result.stdout.strip()
+
+
+def _repo_root(repo: Any) -> Path:
+    path = Path(repo).resolve()
+    if not path.is_dir():
+        raise ContextError("repo is not a directory: %s" % path)
+    root = Path(_git(path, "rev-parse", "--show-toplevel")).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise ContextError("repo path escapes its Git worktree: %s" % path)
+    return root
+
+
+def _inside(root: Path, value: Any, label: str, must_exist: bool = True) -> Tuple[Path, str]:
+    candidate = Path(value)
+    path = (root / candidate) if not candidate.is_absolute() else candidate
+    try:
+        resolved = path.resolve(strict=must_exist)
+    except (OSError, RuntimeError) as exc:
+        raise ContextError("%s cannot be resolved: %s (%s)" % (label, path, exc))
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError:
+        raise ContextError("%s must stay inside repo %s: %s" % (label, root, resolved))
+    if must_exist and not resolved.is_file():
+        raise ContextError("%s is not a file: %s" % (label, resolved))
+    return resolved, relative.as_posix()
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _canonical(value: Any) -> bytes:
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ContextError("context is not canonical JSON: %s" % exc)
+    return text.encode("utf-8")
+
+
+_MUTABLE_ISSUE_FIELDS = {
+    "status", "dispatch", "verify-fails", "tracker-iid", "tracker-url",
+}
+
+
+def immutable_issue_material(issue_path: Any) -> Dict[str, Any]:
+    """Return requirement semantics, excluding only delivery/publication state.
+
+    Scope, dependencies, type, target and every Markdown requirement section stay
+    immutable.  Frontmatter is canonicalized as data so formatting/comments in
+    mutable delivery fields cannot invalidate an otherwise unchanged ticket.
+    """
+    source = Path(issue_path)
+    try:
+        text = source.read_text(encoding="utf-8")
+        frontmatter = agents_config.read_frontmatter(source)
+    except (OSError, UnicodeError, agents_config.ConfigError) as exc:
+        raise ContextError("cannot read immutable issue content %s: %s" % (source, exc))
+    match = re.match(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*(?:\r?\n|$)", text, re.S)
+    if not match:
+        raise ContextError("%s lacks valid frontmatter" % source)
+    immutable = {key: value for key, value in frontmatter.items() if key not in _MUTABLE_ISSUE_FIELDS}
+    return {"schema": "agent-dev.ticket-requirement/v1",
+            "frontmatter": immutable, "body": text[match.end():]}
+
+
+def issue_content_hash(issue_path: Any) -> str:
+    """Hash immutable requirement content, never status/dispatch/verify-fails."""
+    return _sha256_bytes(_canonical(immutable_issue_material(issue_path)))
+
+
+def context_digest(context: Dict[str, Any]) -> str:
+    """Hash all frozen fields except the self-referential digest field."""
+    if not isinstance(context, dict):
+        raise ContextError("context must be an object")
+    material = {key: value for key, value in context.items() if key != "gate2_context_digest"}
+    return _sha256_bytes(_canonical(material))
+
+
+def _valid_branch_name(value: str) -> bool:
+    return (isinstance(value, str) and bool(value) and value == value.strip()
+            and not value.startswith(("-", "/")) and not value.endswith(("/", "."))
+            and ".." not in value and "//" not in value and "@{" not in value
+            and not any(char in value for char in " ~^:?*[\\\x00")
+            and all(part and part != "@" and not part.startswith(".")
+                    and not part.endswith(".lock") for part in value.split("/")))
+
+
+def target_branch(config: Dict[str, Any], frontmatter: Dict[str, Any],
+                  feature_dir: Any = None) -> str:
+    """Resolve the only target-branch rule used by start/rebase/merge/cleanup."""
+    if not isinstance(config, dict) or not isinstance(frontmatter, dict):
+        raise ContextError("config and frontmatter must be mappings")
+    explicit = frontmatter.get("target-branch")
+    if explicit is not None and str(explicit).strip():
+        branch = str(explicit).strip()
+    else:
+        closeout = config.get("feature-closeout") or {}
+        if not isinstance(closeout, dict):
+            raise ContextError("feature-closeout must be a mapping")
+        mode = closeout.get("mode")
+        if mode not in ("server-enforced", "cooperative-ci", "local-human"):
+            raise ContextError("unsupported feature-closeout.mode: %r" % mode)
+        use_integration = mode == "local-human"
+        since = closeout.get("since")
+        if use_integration and since:
+            created = frontmatter.get("created")
+            try:
+                since_date = _datetime.date.fromisoformat(str(since))
+                created_date = _datetime.date.fromisoformat(str(created))
+            except ValueError:
+                raise ContextError("feature-closeout.since and ticket created must be YYYY-MM-DD")
+            if created_date < since_date:
+                use_integration = False
+        if use_integration:
+            pattern = str(closeout.get("integration-branch") or "feat/<feature-slug>")
+            slug = str(frontmatter.get("feature-slug") or "").strip()
+            if not slug and feature_dir is not None:
+                slug = Path(feature_dir).resolve().name
+            if "<feature-slug>" in pattern and not slug:
+                raise ContextError("local-human target requires feature-slug or feature_dir")
+            branch = pattern.replace("<feature-slug>", slug)
+        else:
+            branch = str(config.get("main-branch") or "").strip()
+    if not _valid_branch_name(branch):
+        raise ContextError("invalid target Git branch: %r" % branch)
+    return branch
+
+
+def _dod_section(text: str) -> str:
+    match = re.search(r"^##[ \t]+[^\n]*(?:DoD|验收标准)[^\n]*\n(.*?)(?=^#{1,2}[ \t]+|\Z)",
+                      text, re.S | re.M)
+    if not match:
+        raise ContextError("ticket lacks a level-2 DoD/验收标准 section")
+    return match.group(1)
+
+
+def parse_dod(text: str) -> List[Dict[str, Any]]:
+    """Parse DoD checkbox backtick commands and optional expected-output text."""
+    section = _dod_section(text)
+    checkbox_lines = [line for line in section.splitlines()
+                      if re.match(r"^\s*[-*]\s+\[[ xX]\]", line)]
+    if not checkbox_lines:
+        raise ContextError("DoD section has no checkbox items")
+    result: List[Dict[str, Any]] = []
+    seen: Dict[str, int] = {}
+    for line in checkbox_lines:
+        match = re.match(r"^\s*[-*]\s+\[[ xX]\]\s*(.*)$", line)
+        remainder = match.group(1) if match else ""
+        if remainder.count("`") % 2:
+            raise ContextError("malformed DoD backtick quoting: %s" % line.strip())
+        fields = re.findall(r"`([^`\n]*)`", remainder)
+        if not fields or not fields[0].strip():
+            raise ContextError("DoD checkbox lacks a non-empty backtick command: %s" % line.strip())
+        if len(fields) > 2:
+            raise ContextError("DoD item has too many backtick fields: %s" % line.strip())
+        prefix = remainder.split("`", 1)[0].strip()
+        if prefix:
+            raise ContextError("unexpected text before DoD command: %s" % line.strip())
+        command = fields[0].strip()
+        expected = fields[1].strip() if len(fields) == 2 else None
+        if len(fields) == 2 and not expected:
+            raise ContextError("DoD expected-output field is empty: %s" % line.strip())
+        if command in seen:
+            raise ContextError("duplicate DoD command at DoD-%d and DoD-%d" %
+                               (seen[command], len(result) + 1))
+        seen[command] = len(result) + 1
+        result.append({"id": "DoD-%d" % (len(result) + 1),
+                       "command": command, "expected": expected})
+    # A checkbox-looking line that the strict expression did not understand is
+    # an error, rather than silently disappearing from the verification list.
+    for line in section.splitlines():
+        if re.match(r"^\s*[-*]\s+\[", line) and line not in checkbox_lines:
+            raise ContextError("malformed DoD checkbox: %s" % line.strip())
+    return result
+
+
+def parse_issue(path: Any) -> Dict[str, Any]:
+    """Return the parsed ticket frontmatter and non-empty, unique DoD list."""
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ContextError("cannot read ticket %s: %s" % (source, exc))
+    try:
+        frontmatter = agents_config.read_frontmatter(source)
+    except agents_config.ConfigError as exc:
+        raise ContextError(str(exc))
+    return {"frontmatter": frontmatter, "dod": parse_dod(text)}
+
+
+def _find_spec(frontmatter: Dict[str, Any], text: str, root: Path,
+               feature_dir: Path) -> Path:
+    declared = frontmatter.get("tech-spec") or frontmatter.get("spec")
+    references: List[str] = []
+    if declared:
+        references.append(str(declared))
+    references.extend(re.findall(r"(?:tech-spec|技术方案)\s*(?:文件|路径)?\s*[：:]?\s*`([^`\n]+)`", text))
+    if not references:
+        references.extend(re.findall(r"(?:tech-spec|技术方案)\s*[：:]\s*([^\s，,；;]+\.md)", text))
+    unique = list(dict.fromkeys(item.strip() for item in references if item.strip()))
+    if not unique:
+        raise ContextError("ticket must name its tech-spec in frontmatter or 备注")
+    if len(unique) != 1:
+        raise ContextError("ticket names multiple tech-spec files: %s" % ", ".join(unique))
+    value = unique[0]
+    relative = Path(value)
+    if relative.is_absolute():
+        raise ContextError("tech-spec path must be repository-relative")
+    if value.startswith(("dev/", "docs/")):
+        candidate = root / relative
+    else:
+        candidate = feature_dir / relative
+    resolved, _ = _inside(root, candidate, "tech-spec")
+    return resolved
+
+
+def find_spec(issue_path: Any, repo: Any) -> Path:
+    """Resolve the single current tech-spec named by an issue, never all dated specs."""
+    root = _repo_root(repo)
+    issue, _ = _inside(root, issue_path, "issue")
+    try:
+        text = issue.read_text(encoding="utf-8")
+        frontmatter = agents_config.read_frontmatter(issue)
+    except (OSError, UnicodeError, agents_config.ConfigError) as exc:
+        raise ContextError("cannot resolve issue tech-spec: %s" % exc)
+    return _find_spec(frontmatter, text, root, issue.parent.parent)
+
+
+def _oid(repo: Path, revision: str, tree: bool = False) -> str:
+    suffix = "^{tree}" if tree else "^{commit}"
+    value = _git(repo, "rev-parse", "--verify", revision + suffix)
+    if not _OID.fullmatch(value):
+        raise ContextError("git returned a non-full/unsupported OID for %s: %r" % (revision, value))
+    return value
+
+
+def _scope(frontmatter: Dict[str, Any], key: str) -> List[str]:
+    value = frontmatter.get(key)
+    if isinstance(value, str):
+        value = [value]
+    if value is None and key == "architecture_updates":
+        value = []
+    if value is None and key == "architecture-updates":
+        value = []
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ContextError("ticket %s must be a list of non-empty strings" % key)
+    result = [item.strip() for item in value]
+    if len(set(result)) != len(result):
+        raise ContextError("ticket %s contains duplicates" % key)
+    return result
+
+
+def _validate_context(context: Dict[str, Any]) -> None:
+    errors = json_schema.load_validate(SCHEMA_PATH, context)
+    if errors:
+        raise ContextError("ticket context validation failed:\n  " + "\n  ".join(errors))
+    for key in ("issue_path", "feature_dir", "spec_path", "config_path"):
+        value = context[key]
+        if (Path(value).is_absolute() or ".." in Path(value).parts or "\\" in value
+                or value.startswith("/") or not value or any(not part for part in value.split("/"))):
+            raise ContextError("%s must be a normalized repository-relative path" % key)
+    for pattern in context["declared_scope"]:
+        if (Path(pattern).is_absolute() or ".." in Path(pattern).parts or "\\" in pattern
+                or pattern.startswith("/") or pattern.count("[") != pattern.count("]")):
+            raise ContextError("declared_scope contains an invalid repository glob: %r" % pattern)
+    if not _valid_branch_name(context["target_branch"]):
+        raise ContextError("context target_branch is not a valid Git branch")
+    commands = [item["command"] for item in context["dod"]]
+    if len(set(commands)) != len(commands):
+        raise ContextError("context contains duplicate DoD commands")
+    expected_ids = ["DoD-%d" % (index + 1) for index in range(len(commands))]
+    if [item["id"] for item in context["dod"]] != expected_ids:
+        raise ContextError("context DoD IDs must be sequential DoD-1...DoD-N")
+    if context["hashes"]["dod"] != _sha256_bytes(_canonical(context["dod"])):
+        raise ContextError("context DoD hash does not match parsed DoD list")
+    if context["gate2_context_digest"] != context_digest(context):
+        raise ContextError("gate2 context digest mismatch; frozen context was modified")
+
+
+def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, primary_repo: Any = None) -> Dict[str, Any]:
+    """Freeze a ticket from a worktree while keeping all dev artifacts in the primary checkout.
+
+    ``repo`` supplies source/target Git OIDs. ``primary_repo`` supplies the issue,
+    spec, config and output boundary; it defaults to ``repo`` for ordinary callers.
+    This distinction is required when <worktree>/dev is a symlink to <primary>/dev.
+    """
+    root = _repo_root(repo)
+    primary = _repo_root(primary_repo) if primary_repo is not None else root
+    issue, issue_relative = _inside(primary, issue_path, "issue")
+    try:
+        issue_text = issue.read_text(encoding="utf-8")
+        issue_hash = issue_content_hash(issue)
+    except (OSError, UnicodeError) as exc:
+        raise ContextError("cannot read issue: %s" % exc)
+    parsed = parse_issue(issue)
+    frontmatter = parsed["frontmatter"]
+    issue_id = frontmatter.get("issue-id")
+    if not isinstance(issue_id, str) or not re.fullmatch(r"issue-[0-9]+[a-z]?", issue_id):
+        raise ContextError("ticket frontmatter has invalid/missing issue-id")
+    config, config_relative = _inside(primary, "dev/agents-config.md", "agents-config")
+    try:
+        config_data = agents_config.load(config)
+        config_bytes = config.read_bytes()
+    except (agents_config.ConfigError, OSError) as exc:
+        raise ContextError("invalid agents config: %s" % exc)
+    feature_dir = issue.parent.parent
+    feature_relative = feature_dir.resolve().relative_to(primary).as_posix()
+    spec = _find_spec(frontmatter, issue_text, primary, feature_dir)
+    spec_relative = spec.relative_to(primary).as_posix()
+    target = target_branch(config_data, frontmatter, feature_dir)
+    source_head = _oid(root, "HEAD")
+    target_commit = _oid(root, "refs/heads/" + target)
+    base = _git(root, "merge-base", target_commit, source_head)
+    if not _OID.fullmatch(base):
+        raise ContextError("merge-base did not return a full Git OID")
+    source_tree = _oid(root, source_head, tree=True)
+    scope = _scope(frontmatter, "declared-scope")
+    if not scope:
+        raise ContextError("declared-scope must be non-empty when freezing a ticket")
+    architecture = _scope(frontmatter, "architecture-updates")
+    dod = parsed["dod"]
+    context: Dict[str, Any] = {
+        "schema": CONTEXT_SCHEMA,
+        "issue_id": issue_id,
+        "issue_path": issue_relative,
+        "feature_dir": feature_relative,
+        "spec_path": spec_relative,
+        "config_path": config_relative,
+        "target_branch": target,
+        "target_commit": target_commit,
+        "base": base,
+        "source_head": source_head,
+        "source_tree": source_tree,
+        "declared_scope": scope,
+        "architecture_updates": architecture,
+        "hashes": {
+            "issue": issue_hash,
+            "dod": _sha256_bytes(_canonical(dod)),
+            "spec": _sha256_bytes(spec.read_bytes()),
+            "config": _sha256_bytes(config_bytes),
+        },
+        "dod": dod,
+    }
+    context["gate2_context_digest"] = context_digest(context)
+    _validate_context(context)
+    if output_path is not None:
+        output, _ = _inside(primary, output_path, "context output", must_exist=False)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json_write(output, context)
+    return copy.deepcopy(context)
+
+
+def _reject_duplicate_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContextError("duplicate JSON key: %s" % key)
+        result[key] = value
+    return result
+
+
+def load_context(path: Any) -> Dict[str, Any]:
+    """Load a context without trusting handwritten or partially valid JSON."""
+    source = Path(path)
+    try:
+        context = json.loads(source.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except ContextError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ContextError("cannot load context %s: %s" % (source, exc))
+    if not isinstance(context, dict):
+        raise ContextError("ticket context root must be an object")
+    _validate_context(context)
+    return context
+
+
+def _fraction(rate: Any) -> Fraction:
+    if isinstance(rate, bool):
+        raise ContextError("conformance rate must not be boolean")
+    try:
+        value = rate if isinstance(rate, Fraction) else Fraction(str(rate).strip())
+    except (ValueError, ZeroDivisionError, AttributeError) as exc:
+        raise ContextError("invalid conformance rate %r: %s" % (rate, exc))
+    if not Fraction(0) < value <= Fraction(1):
+        raise ContextError("conformance rate must be > 0 and <= 1")
+    return value
+
+
+def select_conformance(context: Dict[str, Any], rate: Any) -> bool:
+    """Return a stable sampling decision independent of hash randomization/time."""
+    if not isinstance(context, dict) or not isinstance(context.get("issue_id"), str):
+        raise ContextError("sampling requires a context with issue_id")
+    fraction = _fraction(rate)
+    digest = context.get("gate2_context_digest") or context_digest(context)
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ContextError("sampling requires a valid gate2 context digest")
+    if "gate2_context_digest" in context and digest != context_digest(context):
+        raise ContextError("cannot sample from a tampered context digest")
+    material = "%s:%s" % (digest, context["issue_id"])
+    position = Fraction(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"),
+                        1 << 256)
+    return position < fraction
+
+
+def _print(context: Dict[str, Any]) -> None:
+    print(json.dumps(context, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    create = subparsers.add_parser("create")
+    create.add_argument("--issue", required=True)
+    create.add_argument("--repo", required=True)
+    create.add_argument("--output")
+    create.add_argument("--primary-repo", help="主工作区；票 worktree 的 dev/ 软链指向此处时使用")
+    for name in ("show", "validate"):
+        sub = subparsers.add_parser(name)
+        sub.add_argument("context", nargs="?")
+        sub.add_argument("--context", dest="context_option")
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "create":
+            context = create_context(args.issue, args.repo, args.output, primary_repo=args.primary_repo)
+            _print(context)
+        else:
+            path = args.context_option or args.context
+            if not path:
+                raise ContextError("%s requires a context path" % args.command)
+            context = load_context(path)
+            if args.command == "show":
+                _print(context)
+            else:
+                print(json.dumps({"ok": True, "issue_id": context["issue_id"],
+                                  "gate2_context_digest": context["gate2_context_digest"]},
+                                 ensure_ascii=False, sort_keys=True))
+        return 0
+    except (ContextError, agents_config.ConfigError, json_schema.SchemaError, OSError) as exc:
+        print("ERROR: %s" % exc, file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

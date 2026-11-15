@@ -3,16 +3,20 @@ feature-slug: <feature-slug>
 issue-id: issue-001
 title: <一句话标题，动词开头>
 type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5
-status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done / deferred（关闭需求，可重开）
-blocked-by: []          # 例如 [issue-001]；frontier 票此处为空
-target-branch:          # 可空：票的目标分支（基准 / rebase / 合并目标）；空 = 按 agents-config 解析（feature_closeout.py target）
-declared-scope: []      # 声明将触碰的生产代码路径 / glob 清单；实测漂移按 verify-policy 漂移规则处理
-verify-fails: 0         # 主会话收口打回计数（验收复跑失败 / 需求符合性核对未过，见「监督循环」收口）；达 2 票置 needs-human
-dispatch:               # 派发归属，主会话派发时写入（见「监督循环」状态与事件写入契约）；未派发票留空
+status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done / deferred / cancelled
+blocked-by: []          # 例如 [issue-001]；只有 done 会解锁下游
+target-branch:          # 可空：由 delivery start 通过 ticket_context 解析并冻结；local-human 不得指向 main
+declared-scope: []      # 预计触碰的所有代码 / 测试 / 配置 / 架构分片路径；开工后不可自行扩大
+architecture-updates: [] # 本票承接的架构稳定 ID；须与 tech-spec 3.2 逐条对账，无契约变更为空
+verify-fails: 0         # 主会话验收复跑 / 符合性打回计数；达 2 创建 human-decision
+dispatch:               # 派发归属，主会话派发时写入（见 Progress Events 契约）；未派发票留空
   host:                 # 执行宿主
   model:                # 实际执行模型
-  dispatched-at:        # 最近一次派发时间
-  attempts: 0           # 派发次数，打回重派 +1
+  dispatched-at:        # 最近一次新会话派发时间；resume 不更新
+  attempts: 0           # 新会话派发次数；resume 不增，redispatch +1
+  dispatch_id:          # 每次新会话派发的稳定 ID
+  session_id:           # 宿主返回的真实实现 / 评审会话 ID
+  parent_session_id:    # 发起派发的主会话 ID
 tracker-iid:            # tracker: gitlab 时回写 GitLab issue IID
 tracker-url:
 created: YYYY-MM-DD
@@ -29,7 +33,7 @@ created: YYYY-MM-DD
 - [ ] `<验收命令>` → 期望输出 `<关键输出 / 退出码 0>`
 - [ ] `<验收命令>` → 期望输出 `<...>`
 
-（每条必须是可直接执行的命令 + 可判定的期望，禁止「功能正常」「体验符合预期」类表述。契约更新条目同样可判定：tech-spec 3.2 非空时，承接票含一条形如 `git diff <base>...HEAD -- docs/ARCHITECTURE.md | grep <接口名>` → 期望命中接口条目的 DoD。）
+（每条必须是可直接执行的命令 + 可判定的期望，禁止「功能正常」「体验符合预期」类表述。契约更新条目同样可判定：本票 `architecture-updates` 非空时，承接票须含 `python3 ../shared/scripts/architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD` → 退出码 0；稳定 ID、分片、代码证据与生成首页必须一致。）
 
 ## 人工确认项（不阻塞交付）
 

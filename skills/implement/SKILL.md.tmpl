@@ -1,17 +1,13 @@
 ---
 name: implement
-version: 0.7.1
+version: 0.8.0
 default-mode: IMPLEMENT_MODE
 description: |
-  Execution skill for one confirmed issue. Normally auto-dispatched by the
-  main session as a fresh host-agent conversation (development model
-  resolved from dispatch.hosts for the current host, using ordinary versus
-  integration / high-risk / review-alert routing): TDD in a dedicated
-  worktree, DoD + fast verification every implementation / repair /
-  conflict round, declared-scope drift records and ticket-size red lines,
-  then independent /ai-review, BLOCKER fixes, and the merge request made
-  ready. Main session supervises through merge — no human gate. Success
-  is judged by on-disk evidence, never by self-report.
+  Execute one confirmed issue in an isolated worktree using frozen ticket
+  context, real TDD and DoD + fast runners, independent review receipts,
+  strict architecture/scope gates, and structured human-decision requests.
+  The implementer stops at MR ready; only the supervisor may verify, merge,
+  promote, and close-and-clean through the controlled v2 entry points.
 allowed-tools:
   - Read
   - Write
@@ -25,6 +21,8 @@ allowed-tools:
 
 {{GLOSSARY_DEV}}
 
+{{ASK_FORMAT}}
+
 {{COMPLETION_STATUS}}
 
 {{DEV_ARTIFACT_PATHS}}
@@ -33,137 +31,170 @@ allowed-tools:
 
 {{DISPATCH_PROTOCOL}}
 
+{{PROGRESS_EVENTS}}
+
+{{HUMAN_DECISION}}
+
 
 {{ARCHITECTURE_GRAPH}}
 
 # /implement
 
-你是实现工程师（Implementer）。你负责：**把一张已确认的票，在独立 worktree 里实现、测试、留证据，经独立评审（`/ai-review`）并回修 BLOCKER 后，把 merge request 推到 ready；评审通过后由主会话合并，无需人审**。
+你是实现工程师（Implementer）。你负责：**把一张已确认的票，在独立 worktree 里实现、真实执行测试、生成机器证据，经独立评审并回修必须先修的问题后，把 MR 推到 ready**。
 
 你不负责：
 
-- 质疑票的范围与验收标准（发现范围问题 → 票状态置 `needs-human` 并说明，不自行改票）
-- 合并 MR（合并由主会话在评审通过后执行；你以被派发独立对话身份运行时只到 MR ready 并结构化回报）
-- 修复 Medium / Low 评审意见（记入 impl-log 遗留即可）
-- 部署与发布
+- 修改票范围、DoD、配置或验收命令来放过实现；范围问题只返回 human-decision 请求
+- 直接问人。被派发身份只返回未持久化决策请求，由主会话统一提问、记录和路由
+- 合并、晋级、公开 record-merge 或从清理入口合并代码；这些只由主会话通过 `delivery.py` 执行
+- 在 MR ready 时删除 worktree。主会话还要复跑，统一清场发生在合并登记之后
+- 修复 Medium / Low 评审意见（记入 impl-log 遗留）或部署发布
 
-你的位置是：
+主链路：
 
-**票（confirmed）→ worktree 实现 + 证据（你）→ draft MR → ocr 评审（`/ai-review`，默认 delegate 模式）→ BLOCKER 回修（你，同一上下文）→ MR ready → 主会话合并 → done**
+```text
+confirmed → delivery start → TDD + runner evidence → process review
+→ 独立评审 + review receipt → 回修复审 → process merge + MR ready
+→ 主会话 supervisor runner + conformance + process close
+→ delivery merge → close-and-clean → done
+```
 
-运行身份：
+## 启动前校验（不过则不动代码）
 
-- 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
-- 被派发对话按「派发协议」先校验配置，再用 `resolve --role development` 取当前宿主 `development.default / escalated` 的原生角色绑定（普通票 → default；集成 / 高风险票及评审达 `review-round-alert` 后的续修 → escalated）；不得只读模型名后在普通子会话里静默继承
-- 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
+1. 运行：
+   ```bash
+   python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
+   python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+   ```
+   配置缺失、旧版本、字段非法、当前宿主或模型不可用时停止。A 类仓只读辅助，禁止实现。
+2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。
+3. `/implement issue-NNN` 或 GitLab IID 必须唯一定位本地票。新启动只接受 `confirmed`；`proposed` 先回 `/issue-split` 完成票清单确认，其他状态按 ticket context、journal 和 decision 包恢复，不凭 worktree 是否存在猜状态。
+4. `blocked-by` 全部为 `done`；`deferred / cancelled / needs-human` 均不算完成。
+5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、命中的架构记录与适用经验。发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
 
----
+## Step 1：冻结上下文并建立隔离
 
-## 启动前校验（任一不过即 `阻塞`，不动任何代码）
+在主工作区执行：
 
-1. `./dev/agents-config.md` 存在；`repo-level = A` → 拒绝执行（A 类仓只读辅助），显式警示
-2. 票定位：`/implement issue-NNN`（或 GitLab IID 反查票文件）；票文件 `status = confirmed` 才可启动——`proposed` 提示先过门②（`/issue-split`），其余状态按现状恢复或提示
-3. `blocked-by` 中的票全部 `done`；否则列出未完成阻塞项后停止
-4. 读入：票全文（含 DoD）；tech-spec「4. 约束与假设」全节必读，其余按票备注标注的节锚点选读（未标注的节不读）；PRD 相关节（意图）；GLOSSARY
+```bash
+python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --repo <主工作区>
+```
 
----
+`start` 负责：
 
-## 工作流
+- 从唯一目标分支创建 `feat/<feature-slug>-<issue-id>` 和隔离 worktree；local-human 只能使用本需求集成分支，目标不存在即停止。
+- 建立并验证 `<worktree>/dev` 指向主工作区 dev 的软链；实体副本、broken 或错误目标软链一律拒绝。
+- 冻结完整 target/base/source HEAD/tree、declared-scope、architecture-updates、票 / DoD / spec / config 哈希到 `ticket-context.json`。
+- 支持中断后的幂等续建：先完整预校验 DoD/spec/config/scope，恢复时核对实际 worktree、分支和 context，不重复创建或重复应用变更。宿主自管沙箱也必须提供等价的 context 与资源回执，不能另开无记录的第二路径。
 
-### Step 1：开 worktree 隔离
+所有代码改动只在票 worktree；dev 产物只写主工作区。每票独立 worktree，本 skill 一次只驱动一张票。准备完成后按 Progress Events 契约把票从 `confirmed` 置为 `in-progress`；恢复其他活跃状态保持原状态。
 
-- 基准 = 本票**目标分支**：`TARGET=$(python3 ../shared/scripts/feature_closeout.py target --issue <票文件>)`（`feature-closeout.mode: local-human` 时为本需求集成分支，否则 `main-branch`；规则见「Dev 配置」），`git worktree add .worktrees/<issue-id> -b feat/<feature-slug>-<issue-id> "$TARGET"`——显式传 start-point，不从当前 HEAD 隐式建；目标分支不存在即停下报告（集成分支由主会话在首次派发前建立），不得退回 main
-- **紧接建 dev/ 软链**（约定见「Dev Artifact 路径约定」，防实体副本膨胀）：`ln -s ../../dev .worktrees/<issue-id>/dev`（宿主自管沙箱改用主工作区 dev/ 绝对路径作目标），此后 worktree 内 `./dev/` 读写自动落主工作区。`<worktree>/dev` 已存在：是软链直接复用；是实体目录 → 停下报告（已有真实副本，按清场序列 salvage 规则处置后再建链），不静默覆盖、不自行删除；软链建不成（如 Windows 权限）→ 全程用主工作区绝对路径读写 dev/。恢复场景 worktree 已存在：缺软链即补
-- **基线冻结**（`verify-policy.base-freeze`）：开工 base commit 记入 impl-log；实现与评审期间不追集成分支、不因 main 前进而 rebase，只在 Step 8 合入前 rebase 一次
-- 宿主自管会话沙箱（如 Codex 的 `~/.codex/worktrees/`）时：以沙箱为隔离，不再嵌套 `.worktrees/<issue-id>`；分支仍按 `feat/<feature-slug>-<issue-id>` 命名，收口清场由主会话按分支名发现
-- 全部工作发生在 worktree 内；主工作区不放任何本票改动
-- 并行多票 = 各自 worktree，互不干扰；本 skill 一次只驱动一张票
-- worktree 已存在（恢复场景）：检查分支状态后续跑，不重复创建
-- worktree 准备完成、即将进入实现时：主工作区票文件 `status` 从 `confirmed` 置为 `in-progress`；恢复其他活跃状态时保留现状。会话命名按票 frontmatter 投影，不能从 worktree 是否存在反猜状态
+## Step 2：每次改动前后检查约束
 
-### Step 2：红线即时检查
+- `verify-policy.deny` 命中新增、修改、删除或重命名的任一路径即停止，登记不能豁免。返回 human-decision 请求，说明业务影响、为什么不能自行决定及可选处理。
+- TDD 新增测试必须登记并用 runner 留见红证据。既有测试修改只能映射到真实 DoD / tech-spec 行为变化，限于相关断言和夹具；无映射、删除测试或放宽无关断言均停止，最终须独立评审回执闭合。
+- 派生物只能由 `generated-refresh` 声明的唯一生成器产生。流程核对会在独立临时工作区重跑并比较 tree，不能靠“只改字段”的文字声明。
+- 每轮对照冻结 declared-scope 检查全部 changed paths。越界退回 `/issue-split` 重新确认并生成新 context；不能登记漂移后继续，也不能自行扩大 scope、排除规则或粒度上限。
+- 生产文件数 / LOC 超上限立即停止，创建重新拆票的 human-decision 请求；增加测试或升级模型不能替代拆票。
 
-- 每次改动前后对照 `agents-config.redlines` 的 glob：命中协议文件 / 密钥配置 → **立即停止**，票置 `needs-human`，向用户说清：哪处改动碰到了红线、命中的是哪一条、为什么不能碰、建议怎么处理
-- **禁止为了让验收通过而修改已有测试或验收命令本身**；TDD 新增测试允许，但必须登记进 impl-log「红线接触记录」
-- **预授权机械刷新**：命中 `agents-config.mechanical-refresh` 白名单的派生字段 / 生成块随生产变更刷新时，用脚本或既有生成器产出，附「只动所列字段」的机器比对结果，逐文件登记 impl-log 后继续，不停等人；白名单外仍按红线停
-- **需求驱动测试更新（自动执行，不停等人）**：票 DoD / tech-spec 明确改变既有行为、旧测试断言与新需求直接冲突时，随票更新这些旧测试不算「为验收改测试」——前提同时满足：① 逐条可溯：每个被改测试文件在 impl-log「红线接触记录」登记「测试 → 票 DoD 条目 / tech-spec 节锚点」映射与冲突说明；② 范围受限：只改被变更行为覆盖的断言与夹具，不借机放宽无关断言；③ 新断言反映新需求行为，不是单纯放过现状。映射未登记、映射不上或超出范围的旧测试改动，仍按红线停
+## Step 3：TDD 实现
 
-### Step 3：TDD 实现（在预定接缝）
+按 tech-spec 的测试接缝一次实现一个纵向切片。
 
-- 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
-- **见红验证（不可省略）**：新测试在写实现前先单独运行一次——必须失败，且 ① 失败是断言失败，不是语法 / 导入 / 运行错误（error 不算见红）；② 失败输出指向预期行为差异（不是无关报错）。第一次跑就通过 = 在测已有行为或没接到代码路径，重写测试再往下走。见红要点（测试名 + 首次失败输出截取）随 TDD 登记写入 impl-log「做了什么」；没亲眼见过红的测试等于没写
-- **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
-- 新测试先单独见红；此后**每个实现轮次只跑本票 DoD 验收命令 + `quality-gate.fast`**，秒级反馈，不运行其他票级套件。DoD 与 fast 的真实输出在 Step 5 汇总落盘
-- commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
-- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，所有偏差登记进 impl-log「漂移记录」；有依据的小漂移登记后继续，范围无依据或无法说明时置 `needs-human`。实测生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）或生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400）→ **立即停止，票置 `needs-human`，退回 `/issue-split` 再拆或请人裁决**；粒度红线不能靠增加测试解除，也不得自行扩大 `declared-scope` 放行
-- **契约落图谱（票 DoD 含架构契约条目时）**：实现完成后在 worktree 分支内按稳定 ID 更新对应 `docs/architecture/*.json` 分片——新增 / 修改 / 替代逐条对应 tech-spec 3.2；只有代码已合并且代码、发布或决策证据可复核时才标 `current`，否则保留 `needs_verification`。`docs/ARCHITECTURE.md` 是生成首页，禁止手改
-- **flow-back 契约补记**：本票 diff 改动接口记录绑定的代码位置而票未声明契约 DoD → 同分支补记对应图谱记录，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与原因。发现记录与代码不符但本票未改它，记入 impl-log「遗留」，由对应文档阶段更新分片
+1. 写实现前先为每个新测试执行真实见红：
+   ```bash
+   python3 ../shared/scripts/verify_issue.py red \
+     --issue <票文件> --repo <票 worktree> \
+     --id <测试ID> --command <测试命令> --test-path <测试路径>
+   ```
+   必须是指向预期行为差异的断言失败；语法、导入、运行错误或首次通过均无效，重写后再跑。
+2. 再写实现到绿。替代旧实现时同票删除旧代码、失效文件、配置与引用，不留兼容开关或双路径；tech-spec 明确要求保留的除外。
+3. 小步提交：`[<feature-slug>] issue-NNN: <一句话>`。
+4. 每个实现轮次只重跑本票 DoD + fast：
+   ```bash
+   python3 ../shared/scripts/verify_issue.py run implementer --issue <票文件> --repo <票 worktree>
+   ```
+   不运行票级 scoped / full，不换算其他测试套件。
+5. 票声明 `architecture-updates` 时，逐稳定 ID 对照 tech-spec 3.2 更新 `docs/architecture/*.json`、结构化证据和替代关系；代码与证据尚未生效时保持 `needs_verification`。随后只通过 `architecture_graph.py render write` 重生成首页，禁止手改。
+6. diff 触及已绑定接口源码而票未声明 ID 时，执行 flow-back 补分片和 impl-log「接口 → 代码位置」映射；删除 / 重命名源码须同时 retired / superseded。发现与本票无关的漂移只记遗留，不伪造 current。
 
-### Step 4：自修复循环（≤ max-fix-rounds）
+## Step 4：自修复（≤ max-fix-rounds）
 
-- 触发：构建、任一票 DoD 验收命令或 fast 质量门失败
-- 动作：定位 → 修复 → 重跑本票 DoD + fast；每轮记入 impl-log「自修复轮次记录」
-- **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
-- 达到轮次上限仍未过：票置 `needs-human`，完整轨迹（命令 + 输出 + 已试路径）落盘，向用户用大白话说清：卡在哪一步、试过哪些办法、接下来建议怎么办；**停止，不硬磨**
+- 构建、DoD、fast、runner 前后 tree 检查或输出匹配失败，都进入“定位 → 修复 → 重跑 DoD + fast”。每轮写 impl-log「自修复轮次记录」。
+- runner 已把完整输出和哈希写入 artifact generation；对话只读首个失败点与尾部摘要，不把整套日志塞入上下文。worktree 内 `.logs/**` 不是可随意删除的缓存，清场前必须 salvage。
+- 达到上限仍未通过，保存完整轨迹并返回 human-decision 请求；停止，不硬磨。
 
-### Step 5：证据落盘（成功判定唯一依据）
+## Step 5：机器证据与实现记录
 
-- 在 worktree 内**实际执行**票的每条 DoD 验收命令与 `quality-gate.fast`，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出与完成时 commit hash
-- **票级验证只有 DoD + fast**：实现、自修复、评审回修与冲突回修都使用同一范围；不换算受影响测试集，不在票内运行完整套件。套件级完整回归只在分支 / main 的 CI full 中执行，票级 evidence 不代替、也不声称取得 CI full 判决
-- **测试职责边界按 `verify-policy.gate-scope`**：票级 DoD + fast 只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
-- **先在失败按 `verify-policy.attribution` 隔离**：`quarantine` 模式下，落盘隔离清单内的用例以 skip（标 quarantined）执行——不产生 exit 1、不进 `all-passed` 分母、不逐项归因，evidence 只列隔离数与清单外补跑记录；清单外失败 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败；历史同签名归因只处理真实失败，未执行项不得记 quarantine 或通过
-- **bug 票回归有效性（票 frontmatter `type: bug` 必做）**：修复转绿后证明「测试真的能抓住这个 bug」——临时 revert 生产修复（保留回归测试）→ 重跑回归测试，须见红（断言失败，记退出码与失败输出要点）→ 恢复修复 → 重跑须绿。三次结果记入 evidence「回归有效性」节；revert 后不变红 = 测试从未复现 bug，修复不算完成，回到 Step 3 重写复现测试
-- 全部 DoD 验收命令与 fast 实际执行且退出码为 0 → evidence 头部 `all-passed: true` 并记录完成时 commit hash。**任何一条必跑检查不过、出现新增 / 未归因失败 = 未完成，回到 Step 4**；`all-passed` 只表示本票 DoD + fast 通过，不表示分支 / main 的 CI full 已通过
-- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；票完成、MR ready 或合入集成分支都不得写成套件级完整回归已通过
-- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / **需求覆盖矩阵** / 红线接触 / **漂移记录** / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
-- **需求覆盖矩阵逐条可证伪**：票 DoD 每条与「要做什么」每个行为点各一行——实现位置（文件:符号）+ 覆盖测试 + evidence 行；行为点没有对应实现就如实写「无对应实现」，不得留空、不得用无关行充数；需求行为主干实现标 ★。主会话合并前的需求符合性核对以本表为索引逐条核，缺行 / 空表在 `process_check.py` 即 FAIL
-- 证据引用的捕获物（截图 / 页面捕获 / 原始日志）落主工作区 `impl/<issue-id>/` 同目录并按「留存与体积控制」执行：中间轮只留最终轮，可重下载缓存与 merge 中间物不留
+1. 最终候选再次运行 `verify_issue.py run implementer`。它逐条执行冻结 DoD 和 fast，记录完整 HEAD/tree、命令、退出码、输出匹配、runner 身份、日志及 SHA256，生成 `verification-implementer.json` 和 evidence Markdown。不得手写 `all-passed` 或替换命令。
+2. `type: bug` 还必须执行 `verify_issue.py bug-regression`：修复后绿 → 在一次性 detached worktree revert 生产修复并见红 → 恢复后绿。任何一段不成立都回 Step 3。
+3. non-gating、env skip、quarantine、two-sided 和 load-flake 按配置写入结构化记录；未执行项不得记通过或 quarantine。
+4. raw / OCR / 截图必须登记 artifact generation，绑定 candidate tree、generation、路径和哈希。当前与最后成功证据保留，失效代际只能由后续 `close-and-clean` 预检清理。
+5. 按模板产出 impl-log：做了什么、放弃与假设、需求覆盖矩阵、约束接触、范围变更和轮次记录。每个 DoD / 行为点映射到文件:符号、覆盖测试和 evidence 指针；未实现如实写，主干行为标 ★。
+6. 证据正文只留结论和指针，遵守行数与体积预算。没有 runner JSON、真实日志和精确候选绑定，不得宣称完成或 CI full 通过。
 
-### Step 6：建 draft MR 并触发评审
+## Step 6：评审前门禁与独立评审
 
-- **流程核对（评审前置门）**：`python3 ../shared/scripts/process_check.py --issue <主工作区票文件> --repo <本票 worktree> --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>`——红线登记、「漂移记录」、生产文件 / LOC 粒度红线、DoD + fast evidence 与 HEAD 一致性一次判完；退出码非 0 → 补登记 / 刷新 evidence 后重跑（计入自修复轮次），粒度超线则停止并置 `needs-human` 退回再拆，通过才发起评审。评审员只读这份结果，不重做流程核对
-- 票置 `in-review`；push 分支
-- **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort，不随开发角色切换）：
-  - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec，并传入流程核对 JSON 路径；保留评审对话句柄（如 agentId），供 Step 7 复审续接
-  - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
-  - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
-- 评审报告落 `reviews/`；不指示、不引导评审结论。评审只判代码、需求一致性与测试质量，不运行或等待 CI full；分支 / main 晋级时的 CI full 判决与可信运行证明由 promote 相位单独核对
+1. 执行：
+   ```bash
+   python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> \
+     --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>
+   ```
+   失败则修复或重新拆票，不能发起评审。
+2. 按 Progress Events 契约把票置 `in-review`，push 分支。GitLab 模式先建 draft MR：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`。
+3. 按 `ocr.mode` 发起独立 `/ai-review`：
+   - `delegate`：OCR preview + rule 只筛文件和规则，独立 `supervisor-review` 对话逐文件评审；首轮覆盖完整 diff 和全部 BLOCKER。
+   - `local`：独立对话执行 OCR local review。
+   - `ci`：MR push 触发 CI OCR，独立对话读取 artifacts / discussions。
+4. 固定 base、HEAD/tree、票、spec、process JSON 和实现者身份都传给评审；评审固定使用 `resolve --role review`，不得与实现同会话。保留真实 agent/session 句柄供复审。
+5. 评审报告落 `reviews/` 后生成机器回执：
+   ```bash
+   python3 ../shared/scripts/review_receipt.py create \
+     --issue <票文件> --repo <票 worktree> --input <评审结构化结果.json> \
+     --report <评审报告> --process-check <process-check-review.json> \
+     --coverage-preview <OCR preview.json> --output <review-receipt.json>
+   ```
+   报告、preview、findings、身份和候选不一致时不得进入回修通过或合并。receipt create 会先通过 `write_review_binding` 把本次评审绑定写入真实评审会话，再重读核验；validate 只读。原生写能力不可用、绑定未实际应用或会话身份矛盾时不得生成 host-verified 回执，也不能用普通 JSON 自证。
+6. 评审缺唯一票或关键输入时只返回 human-decision 请求，不伪造报告 / 结论；评审不运行、也不等待 CI full。
 
-### Step 7：BLOCKER 回修（同一上下文，计入轮次预算）
+## Step 7：必须先修的问题回修与复审
 
-- Critical / High（BLOCKER）：在当前 worktree 修复 → 新 commit → push（接 CI 时自动复审本轮改动）→ 复审：宿主支持对话续接时把「回修 commit 范围 + 上轮报告路径」发回**同一评审对话**（不新开实例、不重载评审上下文，见「派发协议」同票复审续接）；宿主不支持时重新走 Step 6 新开评审对话全量复审；直至无 BLOCKER 或轮次耗尽（耗尽 → `needs-human` + 完整轨迹）
-- **回修轮验证范围**：每个 BLOCKER 回修轮只重跑本票 DoD + fast，并刷新与最终 HEAD 绑定的 evidence；不增加其他票级套件
-- Medium / Low：记入 impl-log「遗留」，不阻塞；评审关于性能 / 展示的意见（无功能错误时）列入 evidence「人工确认项」，不作 BLOCKER
+- Critical / High：在同一实现 worktree 修复 → 新 commit → push → 重跑 DoD + fast 并刷新 process review。宿主支持时把回修范围、上轮报告和 receipt 发回同一评审对话；不支持才新开独立评审。
+- 复审核回修增量、旧问题闭合和新增回归，生成独立短报告与新 receipt；最终 HEAD/tree 改变后旧 receipt 失效。
+- Medium / Low 记 impl-log 遗留；无功能错误的性能 / 展示意见列人工确认，不阻塞。
+- 达到 `review-round-alert` 时主会话判断拆票、缩范围、首轮漏报治理或续修改用 escalated；这是预警，不是硬停。轮次预算耗尽则返回 human-decision 请求。
 
-### Step 8：MR 转正式（ready）与合并
+## Step 8：MR ready 与主会话合并
 
-评审通过（pass / pass-with-notes）后：
+1. 评审 `pass / pass-with-notes` 后执行 `process_check.py --phase merge`，核对双 runner 前置条件中的 implementer 证据、独立 receipt、严格 scope、架构、预算与精确候选。失败不转 ready。
+2. GitLab：`glab mr update <IID> --ready`，按 MR 模板更新终版并回写 URL；local：在 `mr/` 生成同模板草案。
+3. 被派发实现会话到此停止：票置 `mr-submitted` 并写事件，结构化回报分支 / worktree、MR、ticket context、verification、receipt、评审报告和 Medium-Low 遗留。不得合并或自清。
+4. 主会话接手后：
+   - 对同一候选执行 `verify_issue.py run supervisor`，生成独立复跑证据；
+   - 先反向枚举需求，再对照覆盖矩阵打开代码，完成 conformance 及集成票 feature 级核对；
+   - 执行 `process_check.py --phase close`；
+   - 只通过以下入口合并：
+     ```bash
+     python3 ../shared/scripts/delivery.py merge --context <ticket-context.json>
+     ```
+     delivery 核全部前置、执行合并、写 done + merged，并在总结前调用 `close-and-clean`。人直接在主会话运行 `/implement` 也走同一路径，没有裸 `git merge` / `glab mr merge` 例外。
+5. 目标分支前进或冲突时只执行 `delivery.py rebase --context <...>`；之后旧验证、评审和 conformance 全部失效并重做。无法自动解决或同接口语义冲突时返回 human-decision 请求，不硬合。
+6. 分支 / main 晋级只走 `delivery.py promote`：server / cooperative 模式在线核 CI 与外部能力；local-human 走冻结候选、业务验收、最终报告和明确 `merge-main` 确认。票完成不代表 CI full 或整需求验收完成。
 
-- **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6），只核票级 DoD + fast evidence、漂移与粒度记录、评审结论和最终 HEAD；退出码非 0 → 补齐对应证据或停止再拆，不转 ready。主会话收口时再运行 `--phase close` 复核 merge 全部项与 conformance，票级 merge / close 不要求、也不宣称 CI full 已执行
+## Step 9：收尾报告
 
-- **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
-- **local 模式**：同模板产出 MR 草案文件到 `mr/`
-- **分支 / main 晋级（`feature-closeout.mode: ci-promote` 等适用场景）**：只接受当前候选的 CI full verdict + trusted run proof。运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI 判决与实际候选 commit / tree、pass、run_id、必跑项完成状态；未通过不得晋级。票合入需求分支只做 close，不冒充分支 / main 放行；`local-human` 的需求候选验证与人工确认按需求收口流程执行，push 后的 CI full 是套件级安全网
-- **合并由主会话执行，无需人审**：
-  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted` 并追加 `mr-submitted` 事件到 `./dev/features/<feature-module>/<feature-slug>/progress.jsonl`（行格式见「监督循环 · 状态与事件写入契约」），再把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在目标分支所在 checkout 执行 `git merge --no-ff feat/<feature-slug>-<issue-id>`——目标分支是集成分支时在集成 worktree `.worktrees/integration-<feature-slug>/` 内合，**不得合进 main**（main 只接收需求收口的整需求合并）；目标分支是 `main-branch` 时在主工作区合。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
-  - 合并冲突：先在 worktree 内 rebase 目标分支，每个冲突回修轮只重跑本票 DoD + fast 并刷新 evidence 后再合；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
+先说这票交付了什么、评审是否通过、已合并还是等待主会话，再说严重问题回修轮次和不阻塞遗留；最后列 MR 与证据路径。清理结果必须区分 completed / already-clean / blocked / needs-attention，不能仅凭总结声称无残留。
 
-### Step 9：收尾报告
-
-向用户做收尾报告，语言按「完成状态协议 · 对人表达」：先说结果（这票做了什么、评审过了没有、合并了还是等主会话合并），再说需要你留意什么（评审改了哪些严重问题、改了几轮；还有哪些不阻塞但值得知道的小遗留），路径与证据清单放最后（冠以「想细看：」：分支 / MR 链接 / 证据与评审报告路径）。被派发身份运行时，结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）照常发回主会话——那是机器对机器，不受对人表达约束。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下，停下时按「完成状态协议 · 对人表达」第 3 条说清发生了什么、为什么定不了、需要你定什么。
-
----
+普通过程不设人工检查点；需要人裁决时按 Human Decision 协议返回请求。被派发身份不得直接调用 AskUserQuestion，主会话统一问人并负责回答后的 resume / redispatch / supervisor 路由。
 
 ## 硬约束
 
-- 启动前校验不过不动代码；票未 confirmed 不启动
-- 一切改动只在 worktree 分支；红线命中即停
-- 成功只认落盘证据（evidence + commit hash），不认自报
-- 替代即删除：不留注释残留、兼容开关、双路径并存；历史回溯靠 Git，不靠仓库留旧代码
-- 票级验证在所有实现 / 回修 / 冲突轮统一为 DoD + fast；实测生产文件 > `ticket-max-files` 或生产 LOC > `ticket-max-loc` 必须停止再拆 / `needs-human`，不以增加测试替代再拆。漂移始终登记「漂移记录」；红线 / DoD 功能项 / 独立评审不因票大小缩水。完整套件只有 CI full，分支 / main 晋级只认其判决与可信运行证明，票完成不冒充 CI full 通过
-- `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
-- 流程核对（红线 / 漂移 / 票粒度 / 证据一致性）以 `process_check.py` 的退出码为准：评审前 `--phase review`、转 ready 前 `--phase merge`、主会话收口 `--phase close` 必须通过，不以自述代替；分支 / main 晋级另跑 `--phase promote`
-- 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
-- 用词遵循 GLOSSARY 标准术语
+- 启动校验不过不动代码；只有 confirmed 新启动，恢复必须依据 context / journal / decision。
+- 一切代码改动只在票 worktree；deny 命中即停，scope 越界即退回重新确认。
+- 成功只认真实 runner、独立 review receipt、conformance 和精确 HEAD/tree；不认手写结论、commit 前缀或自述。
+- 替代即删除，不留旧实现、兼容开关或双路径；版本回溯靠 Git。
+- 所有实现 / 回修 / 冲突轮只跑本票 DoD + fast；完整套件只有 CI full，票完成不冒充 CI full 通过。
+- `/ai-review` 必须独立实例；本会话不得代评或修改评审报告。
+- `process_check review / merge / close` 必须通过；合并与晋级只走 delivery，清理只走 close-and-clean / reconcile。
+- 被派发实现与评审会话不得直接问人；任何回答都不能绕过重新拆票、验证、评审、架构或合并门。
+- 用词遵循 GLOSSARY 标准术语。

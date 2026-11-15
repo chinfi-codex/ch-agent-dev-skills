@@ -27,6 +27,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
 ARCH_REL = Path("docs") / "ARCHITECTURE.md"
 GLOSSARY_REL = Path("docs") / "GLOSSARY.md"
 
@@ -239,12 +243,9 @@ def spec_date(spec):
     return m.group(1) if m else None
 
 
-def check_spec2(repo, results, specs, arch_text):
-    arch_sources = ""
-    baseline = None
-    if arch_text is not None:
-        arch_sources = " ".join(r[3] for r in parse_arch_interfaces(arch_text) if len(r) > 3)
-        baseline = arch_baseline(arch_text)
+def check_spec2(repo, results, specs, arch_text, head="HEAD"):
+    baseline = arch_baseline(arch_text) if arch_text is not None else None
+    import architecture_graph
     for spec in specs:
         fm = parse_frontmatter(spec.read_text(encoding="utf-8"))
         if fm.get("status") != "已确认（待拆解）":
@@ -253,22 +254,17 @@ def check_spec2(repo, results, specs, arch_text):
         if not body:
             continue
         rel = spec.relative_to(repo)
-        slug_dir = spec.parent
-        tickets = find_issues(repo, slug_dir.parent.name, slug_dir.name)
-        dispatched = any(
-            "architecture" in t.read_text(encoding="utf-8").lower() for t in tickets
-        )
-        if dispatched:
-            continue
-        if arch_text is not None and spec.name in arch_sources:
-            continue
         date = spec_date(spec)
         if baseline and date and date < baseline:
             info(results, "SPEC-2",
                  f"{rel} 早于建档日（{date} < {baseline}），3.2 接口变更待补录或显式豁免")
             continue
-        fail(results, "SPEC-2",
-             f"{rel} 的 3.2 接口变更非空，但该 feature 下无票声明 ARCHITECTURE 契约更新义务，接口表来源列也未引用该 spec——契约义务未派发或未落地")
+        # v2 never treats an arbitrary ARCHITECTURE word or a source citation as
+        # dispatch evidence.  Every structured stable ID must reconcile through
+        # ticket frontmatter, its shard, action/supersedes and bound evidence.
+        errors = architecture_graph.check_flow_forward(repo, spec, head=head)
+        for error in errors:
+            fail(results, "SPEC-2", f"{rel}: {error}")
 
 
 def iter_locations(cell):
@@ -336,54 +332,82 @@ def check_code(repo, results, arch_rows, arch_interfaces):
                          f"接口「{row[0]}」登记的符号在 {path_part} 中检索不到：{symbol.strip()}（漂移或已改名）")
 
 
-def check_architecture_graph(repo, results):
-    """Validate graph shards; once present, reject legacy tables as write targets."""
+def check_architecture_graph(repo, results, head="HEAD"):
+    """Validate v2 shards, module parity and the generated homepage."""
     graph_dir = repo / "docs" / "architecture"
     if not graph_dir.exists():
-        return
+        return {"records": [], "files": []}
     import architecture_graph
-    _, errors = architecture_graph.check(repo)
+    details = architecture_graph.load_graph_details(repo)
+    graph_records = details["records"]
+    graph_files = details["files"]
+    _, errors = architecture_graph.check(repo, head=head)
     for error in errors:
         fail(results, "GRAPH-1", error)
-    graph_records, _ = architecture_graph.load_graph(repo)
+    arch_path = repo / ARCH_REL
+    arch_text = arch_path.read_text(encoding="utf-8") if arch_path.is_file() else ""
+    old_modules = parse_arch_modules(arch_text) if arch_text else []
+    old_interfaces = parse_arch_interfaces(arch_text) if arch_text else []
+    legacy_facts = bool(old_modules or old_interfaces)
+    if graph_files and not graph_records and legacy_facts:
+        fail(results, "GRAPH-2",
+             "空图谱或空 records 不能掩盖 ARCHITECTURE.md 旧事实；先一次性迁移，再生成首页")
+    elif not graph_files and legacy_facts and graph_dir.is_dir():
+        fail(results, "GRAPH-2",
+             "空 docs/architecture 目录不能掩盖旧表；请运行 migrate-legacy 或移除空目录")
     module_records = [r for r in graph_records if r.get("kind") == "module"]
     glossary_modules = module_set_from_glossary(repo)
-    if module_records and glossary_modules is not None:
+    # With legacy facts and no valid records, the legacy MOD-1/CODE checks below
+    # remain active instead of an empty graph silently replacing them.
+    if (graph_records or not legacy_facts) and graph_files and glossary_modules is not None:
         graph_modules = {r.get("module") for r in module_records if r.get("module")}
         if graph_modules != glossary_modules:
             fail(results, "MOD-1", "图谱模块分片与 GLOSSARY 归档不一致："
                  f"仅 GLOSSARY 有 {sorted(glossary_modules - graph_modules)}，"
                  f"仅图谱有 {sorted(graph_modules - glossary_modules)}")
-    arch_path = repo / ARCH_REL
-    if arch_path.is_file():
-        text = arch_path.read_text(encoding="utf-8")
+    if graph_files and arch_text:
         headings = ("模块现行态", "接口现行态", "跨 feature 架构约束")
         present = [heading for heading in headings
-                   if re.search(r"^##\s+" + re.escape(heading) + r"\s*$", text, re.M)]
+                   if re.search(r"^##\s+" + re.escape(heading) + r"\s*$", arch_text, re.M)]
         if present:
             fail(results, "GRAPH-2",
                  "图谱分片已存在，ARCHITECTURE.md 仍保留旧架构表标题："
                  + "、".join(present) + "；首页只能生成，架构修改必须写入 docs/architecture/*.json")
+    if graph_files:
+        _, homepage_errors = architecture_graph.render_homepage(repo, write=False, head=head)
+        for error in homepage_errors:
+            fail(results, "GRAPH-3", error)
+    return details
 
 
-def run_check(repo):
+def run_check(repo, issue_path=None, base=None, head="HEAD"):
     results = []
     arch_path = repo / ARCH_REL
     arch_text = arch_path.read_text(encoding="utf-8") if arch_path.exists() else None
     if arch_text is None:
         info(results, "INIT", "docs/ARCHITECTURE.md 未创建；无契约需求的项目可跳过，有接口变更的需求应先 --init 建档")
     glossary_modules = module_set_from_glossary(repo)
-    graph_mode = (repo / "docs" / "architecture").is_dir()
-    arch_rows = parse_arch_modules(arch_text) if arch_text is not None and not graph_mode else None
-    arch_interfaces = parse_arch_interfaces(arch_text) if arch_text is not None and not graph_mode else []
+    parsed_modules = parse_arch_modules(arch_text) if arch_text is not None else None
+    parsed_interfaces = parse_arch_interfaces(arch_text) if arch_text is not None else []
     specs = find_tech_specs(repo)
 
+    graph_details = check_architecture_graph(repo, results, head=head)
+    graph_files = bool(graph_details["files"])
+    legacy_facts = bool(parsed_modules or parsed_interfaces)
+    legacy_fallback = legacy_facts and not graph_details["records"]
+    legacy_checks = not graph_files or legacy_fallback
+    arch_rows = parsed_modules if legacy_checks else None
+    arch_interfaces = parsed_interfaces if legacy_checks else []
+
     check_mod1(repo, results, glossary_modules, arch_rows)
-    check_architecture_graph(repo, results)
     check_spec1(repo, results, specs)
-    check_spec2(repo, results, specs, arch_text)
-    if arch_text is not None:
+    check_spec2(repo, results, specs, arch_text, head=head)
+    if arch_text is not None and legacy_checks:
         check_code(repo, results, arch_rows, arch_interfaces)
+    if issue_path is not None and base is not None:
+        import architecture_graph
+        for error in architecture_graph.check_flow_back(repo, issue_path, base, head):
+            fail(results, "FLOW-1", f"{issue_path}: {error}")
     return results
 
 
@@ -424,6 +448,9 @@ def main():
     mode.add_argument("--check", action="store_true", help="运行一致性检查")
     mode.add_argument("--init", action="store_true", help="生成 docs/ARCHITECTURE.md 基线草稿（已存在则拒绝）")
     parser.add_argument("--repo", default=".", help="项目根目录（默认当前目录）")
+    parser.add_argument("--issue", help="flow-back：票文件（须同时给 --base）")
+    parser.add_argument("--base", help="flow-back：冻结基准 commit（须同时给 --issue）")
+    parser.add_argument("--head", default="HEAD", help="候选 HEAD（默认 HEAD）")
     parser.add_argument("--json", dest="json_out", help="检查结果写 JSON 到指定文件")
     args = parser.parse_args()
 
@@ -434,8 +461,11 @@ def main():
 
     if args.init:
         return run_init(repo)
-
-    results = run_check(repo)
+    if bool(args.issue) != bool(args.base):
+        print("错误：flow-back 必须同时指定 --issue 与 --base", file=sys.stderr)
+        return 2
+    issue_path = (Path(args.issue) if Path(args.issue).is_absolute() else repo / args.issue).resolve() if args.issue else None
+    results = run_check(repo, issue_path=issue_path, base=args.base, head=args.head)
     fails = [r for r in results if r["level"] == "FAIL"]
     for r in results:
         print(f"[{r['level']}] {r['id']} {r['message']}")

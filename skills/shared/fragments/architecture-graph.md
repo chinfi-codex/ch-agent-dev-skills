@@ -1,9 +1,20 @@
 ## 架构图谱与经验的消费义务
 
-- 读取现行架构或影响分析时，使用 `python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]`；现有 `docs/ARCHITECTURE.md` 表由同一读取器兼容读取。分片存在后以 `docs/architecture/*.json` 为结构化真源，图谱查询默认排除 `needs_verification`。
-- 所有开发技能按模块/分类/适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
-- `/pd-plan` 在方案中记录受影响模块及其现行架构记录 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
-- `/tech-spec` 标记新增、修改、废弃或版本限定的接口/依赖关系，引用图谱 ID 与命中的项目经验；契约更新说明来源定位和验证入口。
-- `/issue-split` 将图谱记录更新、替代关系、失败场景与验证义务拆到具体票及 DoD，避免只在集成票留空泛责任。
-- `/implement` 按票更新图谱；只有代码或契约已生效且有可复核依据时，才能把记录标为 `current` 并填写验证提交/证据。推断或缺失证据保留 `needs_verification`。
-- `/review` 在契约巡检时运行 `contract_check.py --check`。事实更正需已生效代码/发布证据；职责或语义争议交回原责任环节，不以复盘直接覆盖结论。经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。
+- 架构事实唯一真源是 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。读取现行架构或影响分析使用：
+  ```bash
+  python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]
+  ```
+  默认查询排除 needs_verification / superseded / retired，release_only 仅按匹配版本查询。无分片的旧首页必须先 `migrate-legacy`，不得把旧表与分片合并成双真源。
+- 所有开发技能按模块 / 分类 / 适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
+- `/pd-plan` 记录受影响模块及现行架构 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
+- `/tech-spec` 在 3.2 用固定表逐条声明 `稳定 ID / new|modify|retire / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，同时标记版本适用范围和命中的项目经验。
+- `/issue-split` 把每个 ID 写入承接票 frontmatter `architecture-updates`，同时拆出失败场景和验证义务；不得只在集成票留空泛责任。SPEC-2 按 ID 对账，不再以正文出现 architecture 字样放行。
+- `/implement` 按票更新分片、证据与替代关系。`current` 必须有完整 verified_commit 且为候选 HEAD 祖先，候选上的源码 hash / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则保持 needs_verification。
+- 未声明 ID 的源码 diff 命中接口记录时执行 flow-back，补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。
+- `docs/ARCHITECTURE.md` 只能由以下命令生成；禁止手改：
+  ```bash
+  python3 ../shared/scripts/architecture_graph.py render write --repo <项目根>
+  python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>  # 只读字节比对
+  ```
+- `/process_check` 在 review / merge / close 调用 `architecture_graph.check`、`check_flow_forward/back` 和 render check；不是只在复盘补检。`/review` 另运行 `contract_check.py --check` 做完整契约巡检。事实更正需已生效代码 / 发布证据，职责或语义争议交回原责任环节或 human-decision。
+- 经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。

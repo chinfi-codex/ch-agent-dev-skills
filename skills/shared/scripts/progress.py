@@ -16,6 +16,7 @@
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+# Isolated Python (-I) must still resolve the standard-library sibling layer.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 JOURNAL_NAME = "progress.jsonl"
 STALL_DEFAULT_MIN = 30
 GIT_WORKERS = 8
@@ -111,9 +114,17 @@ def parse_frontmatter(path):
 
 
 def parse_ts(s):
+    if not isinstance(s, str) or not s.strip():
+        return None
+    text = s.strip()
     try:
-        return datetime.strptime(s, "%Y-%m-%d %H:%M").timestamp()
-    except (ValueError, TypeError):
+        return datetime.strptime(text, "%Y-%m-%d %H:%M").timestamp()
+    except ValueError:
+        pass
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00").replace("z", "+00:00"))
+        return value.timestamp()
+    except ValueError:
         return None
 
 
@@ -158,6 +169,32 @@ def last_event(events, issue, *names):
         if ev.get("issue") == issue and ev.get("event") in names:
             return ev
     return None
+
+
+def decision_projection(repo, feature_dir, issue_id, status):
+    """Project the sole active human-decision packet, never a needs-human note."""
+    feature = f"{Path(feature_dir).parent.name}/{Path(feature_dir).name}"
+    if status != "needs-human" and not (Path(feature_dir) / "decisions").is_dir():
+        return {"decision": None, "contract_error": None, "human_note": ""}
+    if status == "needs-human" and not (Path(feature_dir) / "decisions").is_dir():
+        return {"decision": None,
+                "contract_error": "needs-human 缺少活动 human_decision 包；旧事件备注不再充当决定",
+                "human_note": ""}
+    try:
+        import human_decision
+        packet = human_decision.active_for_issue(repo, feature, issue_id)
+        if packet is not None:
+            question = packet.get("question") or {}
+            return {"decision": packet, "contract_error": None,
+                    "human_note": question.get("decision") or ""}
+        if status == "needs-human":
+            return {"decision": None,
+                    "contract_error": "needs-human 缺少活动 human_decision 包；旧事件备注不再充当决定",
+                    "human_note": ""}
+    except Exception as exc:
+        return {"decision": None, "contract_error": "human_decision 活动包契约错误：" + str(exc),
+                "human_note": ""}
+    return {"decision": None, "contract_error": None, "human_note": ""}
 
 
 def dispatch_count(events, issue):
@@ -325,11 +362,12 @@ def load_issues(repo, feature_dir, events, wt_index=None):
             pref = [e for e in ents
                     if feature_dir.parent.name in e["hint"] or feature_dir.name in e["hint"]]
             it["probe"] = probe_issue(repo, feature_dir, it["id"], pref or ents)
+        projection = decision_projection(repo, feature_dir, it["id"], it["status"])
+        it.update(projection)
         if it["status"] == "needs-human":
             ev = last_event(events, it["id"], "needs-human")
             if ev:
                 it["human_ts"] = ev.get("ts")
-                it["human_note"] = ev.get("note", "")
         if it["status"] == "mr-submitted":
             ev = last_event(events, it["id"], "mr-submitted")
             it["mr"] = ev.get("note", "") if ev else ""
@@ -620,8 +658,11 @@ def load_session_bindings(repo):
         except (OSError, json.JSONDecodeError):
             continue
         for sid, v in (data.get("sessions") or {}).items():
-            r = str(v.get("repo", ""))
-            if r != repo and not r.startswith(repo + "/"):
+            if v.get("released_at"):
+                continue
+            r = str(v.get("repo_root") or v.get("repo") or "")
+            worktree = str(v.get("worktree") or "")
+            if r != repo and not r.startswith(repo + "/") and not worktree.startswith(repo + "/"):
                 continue
             issue_path = str(v.get("issue") or "")
             mi = ISSUE_ID_RE.search(Path(issue_path).stem) if issue_path else None
@@ -634,6 +675,9 @@ def load_session_bindings(repo):
                 "paused": bool(v.get("paused")),
                 "feature": feat_short,
                 "issue": mi.group(0).lower() if mi else None,
+                "repo_root": r, "worktree": worktree or None,
+                "branch": v.get("branch"), "revision": v.get("revision", 0),
+                "bound_at": v.get("bound_at"), "last_seen": v.get("last_seen"),
                 "title": v.get("last_title", ""),
             })
     return out
@@ -858,6 +902,11 @@ def fmt_event(ev, now):
     elif name in ("feature-verified", "feature-confirmed"):
         if ev.get("tree"):
             detail.append(f"tree {ev['tree'][:8]}")
+    elif name in ("close-clean", "reconcile"):
+        if ev.get("state"):
+            detail.append(str(ev["state"]))
+        if ev.get("cleanup_operation_id"):
+            detail.append("op " + str(ev["cleanup_operation_id"]))
     if ev.get("note"):
         detail.append(ev["note"])
     age = (now - t) / 60 if t else 0
@@ -983,6 +1032,9 @@ def demo_command(args):
         with open(feat_dir / JOURNAL_NAME, "w", encoding="utf-8") as f:
             for ago, e in ev:
                 e = {"ts": ts_ago(ago, now), **e}
+                if "event_id" not in e:
+                    material = json.dumps(e, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                    e["event_id"] = "demo-" + hashlib.sha256(material).hexdigest()[:24]
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
     # 注册表
@@ -1070,6 +1122,52 @@ def demo_command(args):
     put(repo / "README.md", "pandu 原型演示仓库\n\nchore: main 前进\n")
     sh(["git", "add", "-A"], repo, git_env(20))
     sh(["git", "commit", "-q", "-m", "chore"], repo, git_env(20))
+
+    # needs-human 的演示必须有真实决策包；事件备注只保留历史，不再充当路由真源。
+    import human_decision as hd
+    decision_issue = feat / "issues" / "issue-007.md"
+    decision_report = feat / "reviews" / "issue-007" / "issue-007-review-round-2.md"
+    decision_head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    hd.request(repo, {
+        "schema": hd.SCHEMA,
+        "id": "dec-demo-oauth-retry",
+        "scope": {"repo": ".", "feature": "auth/session-login", "issue": "issue-007"},
+        "source": {"host": "claude-code", "skill": "implement", "role": "development",
+                   "dispatch_id": "dispatch-demo-007", "session_id": "session-demo-007",
+                   "parent_session_id": "session-demo-main"},
+        "basis": {
+            "issue_sha256": hashlib.sha256(decision_issue.read_bytes()).hexdigest(),
+            "head_commit": decision_head,
+            "report_sha256": hashlib.sha256(decision_report.read_bytes()).hexdigest(),
+        },
+        "question": {
+            "context": "第三方登录失败后可能重复创建会话，评审对是否保留自动重试存在分歧。",
+            "decision": "本次要保留重试并增加防重复创建，还是先关闭自动重试？",
+            "why": "这会影响用户登录行为和后续数据核对，不能由实现会话自行决定。",
+            "recommendation": "guard",
+            "options": [
+                {"id": "guard", "label": "增加防重复创建",
+                 "description": "保留自动重试，只修改会话创建逻辑并补充重复请求验收。",
+                 "route": {"action": "continue", "strategy": "resume", "role": "development",
+                           "tier": "default", "next_status": "in-progress",
+                           "prompt": "继续实现防重复创建并复验。", "operation": None}},
+                {"id": "pause", "label": "先关闭自动重试",
+                 "description": "改动较小，但登录失败后需要用户重新操作。",
+                 "route": {"action": "continue", "strategy": "redispatch", "role": "development",
+                           "tier": "default", "next_status": "in-progress",
+                           "prompt": "关闭自动重试并复验登录行为。", "operation": None}},
+                {"id": "defer", "label": "暂缓这张票",
+                 "description": "保留当前分支和依赖关系，确认方向后再继续。",
+                 "route": {"action": "defer", "strategy": "none", "role": None, "tier": None,
+                           "next_status": "deferred", "prompt": None, "operation": None}},
+            ],
+        },
+        "evidence": [{"path": decision_report.relative_to(repo).as_posix(),
+                      "sha256": hashlib.sha256(decision_report.read_bytes()).hexdigest(),
+                      "summary": "第二轮评审对重试策略的分歧。"}],
+        "presentation": {"header": "登录重试"},
+        "expires_at": None,
+    }, main_session=True, unattended=True)
 
     def make_branch(iid, branch, files, ago, dirty_file=None):
         wt = repo / ".worktrees" / iid
@@ -1177,10 +1275,12 @@ def build_tree_payload(repo, stall_min, now=None):
              "feature": (it["feature"].split("/")[-1] if it else None) or (next((s for s in all_slugs if s in name), None))}
         if name.startswith(("backup/", "codex/preserve")):
             r["hint"] = "residue"
+            r["protected"] = True
         elif it and it["status"] == "done":
             r["hint"] = "done_residue"
         elif not mt and r["worktree"]:
             r["hint"] = "integration"
+            r["protected"] = True
         else:
             r["hint"] = "live"
         rows.append(r)
@@ -1271,7 +1371,8 @@ def build_tree_payload(repo, stall_min, now=None):
                     "feature": it["feature"],
                     "status": it["status"], "age_ts": p.get("ts"), "round": (p.get("round") or "")[:56],
                     "verify_fails": it["verify_fails"], "review_rounds": it.get("review_rounds", 0),
-                    "human_note": it.get("human_note", ""),
+                    "human_note": it.get("human_note", ""), "decision": it.get("decision"),
+                    "contract_error": it.get("contract_error"),
                     "branch": ({"name": r["name"], "ahead": r["ahead"], "behind": r["behind"],
                                 "dirty": r["dirty"], "ts": r["ts"]} if r else None), "children": []}
 
@@ -1279,6 +1380,7 @@ def build_tree_payload(repo, stall_min, now=None):
         displayed = {r["name"] for r in fbrs}
         for r in sorted(fbrs, key=lambda r: -r["ts"]):
             nodes_by_name[r["name"]] = {"kind": "branch", "name": r["name"], "iid": r["iid"],
+                                        "resolved_key": r.get("resolved_key"), "protected": bool(r.get("protected")),
                                         "feature": slug, "status": r["status"],
                                         "hint": "集成" if r["hint"] == "integration" else "残留可删",
                                         "ahead": r["ahead"], "behind": r["behind"], "dirty": r["dirty"],
@@ -1308,6 +1410,7 @@ def build_tree_payload(repo, stall_min, now=None):
     for r in sorted(brows, key=lambda r: -r["ts"]):
         if r["feature"] is None:
             fnodes.append({"kind": "branch", "name": r["name"], "iid": r["iid"], "status": r["status"],
+                           "resolved_key": r.get("resolved_key"), "protected": bool(r.get("protected")),
                            "hint": "集成" if r["hint"] == "integration" else "",
                            "ahead": r["ahead"], "behind": r["behind"], "dirty": r["dirty"], "ts": r["ts"],
                            "children": []})
@@ -1470,6 +1573,7 @@ def build_swim_payload(repo, now=None, sessions=None):
                     "branch": branch, "agents": agents,
                     "verify_fails": it.get("verify_fails", 0),
                     "human_note": it.get("human_note", ""),
+                    "decision": it.get("decision"), "contract_error": it.get("contract_error"),
                     "review_rounds": it.get("review_rounds", 0)}
             if it["status"] == "done":
                 try:
@@ -1623,8 +1727,10 @@ def _summary_facts(payload):
                 bits.append(f"复跑打回 {i['verify_fails']} 次")
             if i.get("review_rounds"):
                 bits.append(f"评审第 {i['review_rounds']} 轮")
-            if i.get("human_note"):
-                bits.append("等人备注：" + str(i["human_note"])[:80])
+            if i.get("contract_error"):
+                bits.append("决定包契约错误：" + str(i["contract_error"])[:100])
+            elif i.get("human_note"):
+                bits.append("等人决定：" + str(i["human_note"])[:80])
             lines.append(f"  - {i['id']} {str(i['title'])[:40]}：{'；'.join(bits)}")
     unresolved = [e["ref"] for e in payload["dependencies"]
                   if e["kind"] in ("external", "body") and not e["resolved"]]
@@ -1709,202 +1815,222 @@ def summary_command(args):
     print(json.dumps(out, ensure_ascii=False))
 
 
-# ---------- 收尾清场（预检 → 确认 → 重验 → 执行） ----------
+# ---------- 授权清场与崩溃恢复（永不合并代码） ----------
 
-def cleanup_merge_targets(repo, ticket, main):
-    """授权合并目标：主干 + 特性集成分支 + agents-config 明确定义的 query 工作分支。"""
-    targets = []
-    cfg = Path(repo) / "dev" / "agents-config.md"
-    if cfg.exists():
-        text = cfg.read_text(encoding="utf-8")
-        section = text.split("## 特性集成分支", 1)[-1].split("\n## ", 1)[0]
-        for line in section.splitlines():
-            codes = re.findall(r"`([^`]+)`", line)
-            if len(codes) >= 2 and codes[0] == ticket["feature"]:
-                targets.append(codes[1])
-        if re.search(r"^## query 分支", text, re.M):
-            targets.append("query")
-    targets.append(main)
-    return list(dict.fromkeys(targets))
+def find_ticket(repo, issue, key=None):
+    """Resolve exactly one main-worktree ticket and attach its feature directory."""
+    matches = []
+    for feat in find_features(repo):
+        for item in load_issues(repo, feat, load_events(feat), {}):
+            if item["id"] != issue and item["key"] != issue:
+                continue
+            if key and item["key"] != key:
+                continue
+            value = dict(item)
+            value["feature_dir"] = str(feat)
+            matches.append(value)
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
-def cleanup_plan(repo, branch=None, issue=None):
-    """破坏性操作使用更严格的票归属：feature 名无法消歧时不给执行资格。"""
+def cleanup_plan(repo, branch=None, issue=None, feature_dir=None, intent="close",
+                 operation_id=None, authorize=True):
+    """Build/preview a v2 plan. ``branch`` remains only an internal resolver input."""
     import progress_cleanup as pc
     repo = Path(repo).resolve()
-    main = detect_main_branch(repo)
-    if not main:
-        return {"ok": False, "eligible": False, "error": "未识别主干分支"}
-    branches = collect_branches(repo, main, inspect=False)
-    wt_index = worktree_index(repo, branches)
-    tix_multi = {}
-    for feat in find_features(repo):
-        for it in load_issues(repo, feat, load_events(feat), wt_index):
-            it = dict(it)
-            it["feature_dir"] = str(feat)
-            tix_multi.setdefault(it["id"], []).append(it)
-    issue_ticket = None
-    if issue:
-        exact = [it for items in tix_multi.values() for it in items if it["key"] == issue]
-        by_id = [it for items in tix_multi.values() for it in items if it["id"] == issue]
-        matches = exact or by_id
-        if len(matches) == 1:
-            issue_ticket = matches[0]
-        elif not matches:
-            return {"ok": False, "eligible": False, "error": f"未找到票 {issue}"}
-        else:
-            return {"ok": False, "eligible": False, "error": f"票号不唯一，无法确定清理对象：{issue}"}
-    if not branch:
-        if not issue_ticket:
-            return {"ok": False, "eligible": False, "error": "需要 branch 或 issue 才能预检"}
+    if feature_dir is not None:
+        return pc.make_plan(repo, feature_dir=feature_dir, intent=intent,
+                            operation_id=operation_id, authorize=authorize)
+    ticket = find_ticket(repo, issue) if issue else None
+    if issue and not ticket:
+        return {"ok": False, "eligible": False, "error": f"票号不存在或不唯一：{issue}",
+                "reason": f"票号不存在或不唯一：{issue}"}
+    if not ticket and branch:
         candidates = []
-        for name, b0 in branches.items():
-            m0 = ISSUE_ID_RE.search(name)
-            if not m0 or m0.group(0).lower() != issue_ticket["id"]:
-                continue
-            hint0 = f"{name} {b0.get('worktree') or ''}"
-            if any(part in hint0 for part in issue_ticket["feature"].split("/")):
-                candidates.append(name)
+        for feat in find_features(repo):
+            for item in load_issues(repo, feat, load_events(feat), {}):
+                if item["id"] in branch and any(part in branch for part in item["feature"].split("/")):
+                    value = dict(item)
+                    value["feature_dir"] = str(feat)
+                    candidates.append(value)
         if len(candidates) == 1:
-            branch = candidates[0]
-        elif not candidates:
-            branch = None  # issue-only：无分支也可只清 dev 过程文件
-        else:
-            return {"ok": False, "eligible": False, "error": f"{issue_ticket['id']} 对应多个分支，无法唯一预检"}
-    m = ISSUE_ID_RE.search(branch) if branch else None
-    b = branches.get(branch)
-    hint = f"{branch} {(b or {}).get('worktree') or ''}"
-    cands = tix_multi.get(m.group(0).lower(), []) if m else []
-    matched = [c for c in cands if any(part in hint for part in c["feature"].split("/"))]
-    if issue_ticket:
-        ticket = issue_ticket
-    elif len(matched) == 1:
-        ticket = matched[0]
-    elif not matched and len(cands) == 1:
-        ticket = cands[0]
-    else:
-        ticket = None
-    current = git_run(repo, "symbolic-ref", "--short", "HEAD")
-    current_branch = current.stdout.strip() if current and current.returncode == 0 else None
-    plan = pc.make_plan(
-        repo, branch, ticket, (b or {}).get("worktree"),
-        cleanup_merge_targets(repo, ticket, main) if ticket else [main], current_branch,
-    )
+            ticket = candidates[0]
+    if not ticket:
+        return {"ok": False, "eligible": False, "error": "需要可唯一归属的 issue 或 feature-dir",
+                "reason": "需要可唯一归属的 issue 或 feature-dir"}
+    plan = pc.make_plan(repo, ticket=ticket, intent=intent,
+                        operation_id=operation_id, authorize=False)
     if plan.get("eligible") and plan.get("branch"):
-        # done 不等于可删：在途/待派发票可能仍把该分支当作工作基线（基线冻结）
+        main = detect_main_branch(repo)
+        branches = collect_branches(repo, main, inspect=False) if main else {}
+        tix_multi = {}
+        for feat in find_features(repo):
+            for item in load_issues(repo, feat, load_events(feat), {}):
+                tix_multi.setdefault(item["id"], []).append(item)
         active_children = []
-        for other, ob in branches.items():
-            if other == branch:
+        for other in branches:
+            if other == plan["branch"]:
                 continue
-            om = ISSUE_ID_RE.search(other)
-            if not om:
+            match = ISSUE_ID_RE.search(other)
+            if not match:
                 continue
-            ot = resolve_ticket(tix_multi, om.group(0).lower(), f"{other} {ob.get('worktree') or ''}")
-            if not ot or ot["status"] not in {"in-progress", "in-review", "mr-submitted", "needs-human", "confirmed"}:
+            child = resolve_ticket(tix_multi, match.group(0).lower(), other)
+            if not child or child["status"] not in {"in-progress", "in-review", "mr-submitted", "needs-human", "confirmed"}:
                 continue
-            rc = git_run(repo, "merge-base", "--is-ancestor", branch, other)
-            if rc and rc.returncode == 0:
-                active_children.append(f"{ot['feature']}·{ot['id']}({ot['status']})")
+            result = git_run(repo, "merge-base", "--is-ancestor", plan["branch"], other)
+            if result and result.returncode == 0:
+                active_children.append(f"{child['feature']}·{child['id']}({child['status']})")
         if active_children:
-            active_children = list(dict.fromkeys(active_children))
-            plan.update({
-                "eligible": False, "confirm": None,
-                "reason": "该分支仍被在途/待派发票延展，待这些票收口后再清理：" + "、".join(active_children[:4]),
-                "active_children": active_children,
-            })
+            plan.update(eligible=False, ok=False, confirm=None, operation_id=None,
+                        reason="该分支仍被在途/待派发票延展：" + "、".join(active_children[:4]),
+                        active_children=active_children)
+    if plan.get("eligible") and authorize:
+        pc.authorize_plan(plan, operation_id)
     return plan
 
 
-def close_after_discard(plan, result):
-    """丢弃开发成功后把票状态闭环为 deferred（与关闭需求同一机制，幂等）。
-    合并保留不在此列：合入内容仍待正常验收收口，票状态不动。"""
-    import progress_cleanup as pc
-    feat = Path(plan["_feature_dir"])
-    hit = [it for it in load_issues(Path(plan["_repo"]), feat, load_events(feat), {})
-           if it["id"] == plan["issue"]]
-    if hit and hit[0]["status"] != "done":
-        t = dict(hit[0])
-        t["feature_dir"] = str(feat)
-        closed = pc.close_issue(t, "丢弃开发：worktree/分支已按清理规则移除，需求搁置关闭")
-        result["previous_status"] = closed["previous_status"]
-        result["status"] = closed["status"]
+def _cleanup_error(exc):
+    return {"ok": False, "state": "protected" if getattr(exc, "protected", False) else "needs-attention",
+            "error": str(exc), "code": getattr(exc, "code", "cleanup-failed"),
+            "stale": getattr(exc, "code", None) == "stale",
+            "protected": bool(getattr(exc, "protected", False))}
 
 
-def record_merged_event(plan, result):
-    """合并保留成功后补写 merged 事件（backfill），让事件流如实记录这次合并。
-    票状态按对账契约由监督循环收口（分支已删/提交已进目标 → 补done），插件不擅自置 done。"""
-    feat_dir = Path(plan["_feature_dir"])
-    with open(feat_dir / JOURNAL_NAME, "a", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "event": "merged", "issue": plan["issue"], "host": "dsh",
-            "note": (f"插件合并保留 backfill：{result['merged_into']}@{result['merge_commit']}；"
-                     "验收收口由监督循环按对账契约承接"),
-        }, ensure_ascii=False) + "\n")
-
-
-def cleanup_command(args):
+def close_clean_command(args):
     import progress_cleanup as pc
     try:
-        plan = cleanup_plan(pick_repo(args), args.branch, getattr(args, "issue", None))
+        if args.apply and (not args.operation_id or not args.confirm):
+            raise pc.CleanupError("--apply 必须同时提供 --operation-id 与 --confirm", code="invalid-confirmation")
         if not args.apply:
+            plan = cleanup_plan(pick_repo(args), issue=args.issue, feature_dir=args.feature_dir,
+                                intent=args.intent, operation_id=args.operation_id)
             print(json.dumps(pc.public_plan(plan), ensure_ascii=False))
+            if not plan.get("eligible"):
+                sys.exit(1)
             return
-        if not plan.get("eligible"):
-            print(json.dumps({"ok": False, "error": plan.get("reason") or "该节点不可清理"}, ensure_ascii=False))
-            sys.exit(1)
-        if not args.confirm or args.confirm != plan.get("confirm"):
-            print(json.dumps({"ok": False, "error": "预检后状态已变化或确认凭据不符，请重新预检"}, ensure_ascii=False))
-            sys.exit(1)
-        result = pc.execute_plan(plan, getattr(args, "action", None))
-        if result["worktree_removed"] or result["branch_deleted"] or result["dev_files_removed"]:
-            feat_dir = Path(plan["_feature_dir"])
-            merge_note = (f"；合并保留={result['merged_into']}@{result['merge_commit']}"
-                          if result.get("merge_commit") else "")
-            note = (f"插件清场 {plan.get('branch') or (plan['issue'] + '（仅 dev）')}（{result['action']}）：worktree 移除={result['worktree_removed']}；"
-                    f"本地分支删除={result['branch_deleted']}；dev 过程文件 {result['dev_files_removed']} 个；"
-                    f"salvage={result['salvage_dir'] or '无需'}{merge_note}")
-            with open(feat_dir / JOURNAL_NAME, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "event": "digest", "issue": plan["issue"], "host": "dsh", "note": note,
-                }, ensure_ascii=False) + "\n")
-        if result["action"] == "discard":
-            try:
-                close_after_discard(plan, result)
-            except pc.CleanupError as exc:
-                result["warnings"].append("清理完成，但票状态未改为 deferred：" + str(exc))
-        if result["action"] == "merge" and result.get("merge_commit"):
-            record_merged_event(plan, result)
-        result["confirm"] = plan["confirm"]
+        result = pc.apply_operation(pick_repo(args), args.operation_id, args.confirm)
         print(json.dumps(result, ensure_ascii=False))
-        if not result["ok"]:
+        if not result.get("ok"):
             sys.exit(1)
-    except pc.CleanupError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+    except (pc.CleanupError, OSError, ValueError) as exc:
+        print(json.dumps(_cleanup_error(exc), ensure_ascii=False))
         sys.exit(1)
 
 
-# ---------- 关闭需求（生命周期，不做文件清理） ----------
+def _read_delivery_operations(repo, operation_id=None):
+    """Delegate ticket/rebase/feature discovery to delivery's read-only API."""
+    import delivery
+    return delivery.discover_operations(repo, operation_id)
 
-def close_command(args):
+
+def _read_human_decisions(repo, operation_id=None):
+    import human_decision
+    packets = human_decision.list(repo, active=True)
+    if operation_id:
+        packets = [packet for packet in packets if packet.get("id") == operation_id]
+    contract_errors = []
+    for feature in find_features(repo):
+        for item in load_issues(repo, feature, load_events(feature), {}):
+            if item.get("contract_error"):
+                contract_errors.append({"issue": item["id"], "feature": item["feature"],
+                                        "error": item["contract_error"]})
+    unknown_routes = [{"decision_id": packet.get("id"), "route_id": (packet.get("route") or {}).get("route_id")}
+                      for packet in packets if packet.get("status") == "routing"]
+    return {"kind": "human_decision", "ok": not contract_errors and not unknown_routes,
+            "applied": False, "active": packets, "unknown_routes": unknown_routes,
+            "state": "needs-attention" if unknown_routes or contract_errors else "observed",
+            "contract_errors": contract_errors}
+
+
+def aggregate_reconcile(repo, operation_id=None):
+    """Read-only aggregate; every provider failure is surfaced in its own category."""
+    import progress_cleanup as pc
+    import integration_runtime
+    categories = {}
+    readers = {
+        "cleanup": lambda: pc.reconcile_operations(repo, operation_id, apply=False),
+        "delivery": lambda: _read_delivery_operations(repo, operation_id),
+        "human_decision": lambda: _read_human_decisions(repo, operation_id),
+        "runtime": lambda: integration_runtime.reconcile(repo, apply=False),
+    }
+    for kind, reader in readers.items():
+        try:
+            result = reader()
+            if not isinstance(result, dict):
+                raise ValueError("provider returned a non-object")
+            if kind == "cleanup" and not result.get("operations") and not result.get("error"):
+                result["ok"] = True  # no cleanup journals is a valid empty observation
+            categories[kind] = result
+        except Exception as exc:
+            categories[kind] = {"kind": kind, "ok": False, "applied": False,
+                                "state": "needs-attention", "error": str(exc)}
+    errors = [{"kind": kind, "error": value["error"]}
+              for kind, value in categories.items() if value.get("error")]
+    for kind, value in categories.items():
+        for route in value.get("unknown_routes") or []:
+            errors.append({"kind": kind, "error": "宿主路由结果未知，需要原宿主对账", **route})
+    needs_attention = bool(errors) or any(value.get("ok") is not True for value in categories.values())
+    return {"ok": not needs_attention,
+            "applied": False, "categories": categories, "errors": errors,
+            "state": "needs-attention" if needs_attention else "observed"}
+
+
+def apply_reconcile(repo, args):
+    """Apply only an explicitly selected provider category."""
+    kind = args.kind
+    if not kind:
+        raise ValueError("reconcile --apply 必须显式指定 --kind cleanup|delivery|human_decision|runtime")
+    try:
+        if kind == "cleanup":
+            if not args.operation_id:
+                raise ValueError("cleanup 恢复需要 operation-id")
+            import progress_cleanup as pc
+            return pc.reconcile_operations(repo, args.operation_id, apply=True)
+        if kind == "delivery":
+            candidate_path = getattr(args, "candidate_path", None)
+            context = getattr(args, "context", None)
+            if not candidate_path and not context:
+                raise ValueError("delivery 恢复需要 --context ticket-context.json 或 --candidate-path candidate.json --candidate-repo WORKTREE")
+            if candidate_path and not getattr(args, "candidate_repo", None):
+                raise ValueError("feature delivery 恢复需要 --candidate-repo")
+            import delivery
+            result = delivery.reconcile_operations(
+                repo, getattr(args, "operation_id", None), apply=True,
+                context=context, candidate_path=candidate_path,
+                candidate_repo=getattr(args, "candidate_repo", None),
+                main_repo=repo, strategy=getattr(args, "strategy", None))
+        elif kind == "human_decision":
+            import human_decision
+            result = human_decision.reconcile(repo, args.feature, main_session=True)
+        elif kind == "runtime":
+            import integration_runtime
+            result = integration_runtime.reconcile(repo, args.operation_id, args.candidate, apply=True)
+        else:
+            raise ValueError("未知 reconcile 类别：" + kind)
+        if not isinstance(result, dict):
+            raise ValueError("provider returned a non-object")
+        result.setdefault("kind", kind)
+        result.setdefault("applied", True)
+        result.setdefault("ok", result.get("state") == "completed")
+        return result
+    except Exception as exc:
+        return {"kind": kind, "ok": False, "applied": True,
+                "state": "needs-attention", "error": str(exc)}
+
+
+def reconcile_command(args):
     import progress_cleanup as pc
     try:
-        repo = pick_repo(args)
-        matches = []
-        for feat in find_features(repo):
-            for it in load_issues(repo, feat, load_events(feat), {}):
-                if it["key"] == args.issue or it["id"] == args.issue:
-                    it = dict(it)
-                    it["feature_dir"] = str(feat)
-                    matches.append(it)
-        if len(matches) != 1:
-            print(json.dumps({"ok": False, "error": f"票号不存在或不唯一：{args.issue}"}, ensure_ascii=False))
-            sys.exit(1)
-        result = pc.close_issue(matches[0], args.reason)
+        if args.apply and not args.kind:
+            raise pc.CleanupError("reconcile --apply 必须显式指定 --kind", code="invalid-operation")
+        result = (apply_reconcile(pick_repo(args), args) if args.apply
+                  else aggregate_reconcile(pick_repo(args), args.operation_id))
         print(json.dumps(result, ensure_ascii=False))
-    except pc.CleanupError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        if args.apply and not result.get("ok"):
+            sys.exit(1)
+    except (pc.CleanupError, OSError, ValueError) as exc:
+        print(json.dumps(_cleanup_error(exc), ensure_ascii=False))
         sys.exit(1)
 
 
@@ -1960,25 +2086,35 @@ def main():
     p10.add_argument("--api-key", help="API Key（缺省读环境变量；优先用环境变量传密钥）")
     p10.set_defaults(func=summary_command)
 
-    p7 = sub.add_parser("cleanup", help="已完成票收尾清场：默认预检，--apply 需携带预检 confirm")
+    p7 = sub.add_parser("close-and-clean", help="授权收尾/丢弃清理：默认 preview；apply 需 operation-id + confirm")
     p7.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
-    p7.add_argument("--branch", help="要清理的本地分支（与 --issue 二选一）")
-    p7.add_argument("--issue", help="按票文件 stem 或票号预检对应分支")
-    p7.add_argument("--apply", action="store_true", help="执行清理；缺省只输出预检")
-    p7.add_argument("--confirm", help="预检返回的确认指纹；执行前会重新计算并比对")
-    p7.add_argument("--action", choices=["close", "discard", "merge", "dev-only"],
-                    help="close=已完成收尾；discard=中途搁置丢弃；merge=中途搁置合并保留；dev-only=无分支仅清 dev")
-    p7.set_defaults(func=cleanup_command)
+    target = p7.add_mutually_exclusive_group(required=True)
+    target.add_argument("--issue", help="票文件 stem 或票号")
+    target.add_argument("--feature-dir", help="已 feature-merged 的主工作区需求目录")
+    p7.add_argument("--intent", choices=["close", "discard"], default="close")
+    p7.add_argument("--apply", action="store_true", help="执行；缺省只 preview 并授权 journal")
+    p7.add_argument("--operation-id", help="preview 返回的授权操作 ID")
+    p7.add_argument("--confirm", help="preview 返回的完整状态确认指纹")
+    p7.set_defaults(func=close_clean_command)
 
     p5 = sub.add_parser("demo", help="生成演示工作区")
     p5.add_argument("dir")
     p5.set_defaults(func=demo_command)
 
-    p8 = sub.add_parser("close", help="关闭需求：状态改 deferred + digest，不删除分支/worktree/dev")
+    p8 = sub.add_parser("reconcile", help="默认只读聚合 cleanup/delivery/human_decision/runtime；--apply 需显式 --kind")
     p8.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
-    p8.add_argument("--issue", required=True, help="票文件 stem 或票号")
-    p8.add_argument("--reason", default="中途搁置，用户确认关闭", help="关闭原因（写入 digest）")
-    p8.set_defaults(func=close_command)
+    p8.add_argument("--operation-id", help="cleanup operation / runtime service 或 lease ID")
+    p8.add_argument("--kind", choices=["cleanup", "delivery", "human_decision", "runtime"],
+                    help="恢复类别；只在 --apply 时使用")
+    p8.add_argument("--context", help="delivery 恢复所需 ticket-context.json")
+    p8.add_argument("--feature", help="human_decision 只恢复指定 module/slug")
+    p8.add_argument("--candidate", help="runtime 恢复所需的完整 candidate OID")
+    p8.add_argument("--candidate-path", help="delivery feature 的 candidate.json 路径")
+    p8.add_argument("--candidate-repo", help="delivery feature 的集成 worktree")
+    p8.add_argument("--strategy", choices=["no-ff", "squash"], default="no-ff",
+                    help="delivery feature 的原授权合并策略")
+    p8.add_argument("--apply", action="store_true", help="恢复已授权 journal，不生成新授权")
+    p8.set_defaults(func=reconcile_command)
 
     args = ap.parse_args()
     if not args.cmd:

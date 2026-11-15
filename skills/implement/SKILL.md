@@ -1,17 +1,13 @@
 ---
 name: implement
-version: 0.7.1
+version: 0.8.0
 default-mode: IMPLEMENT_MODE
 description: |
-  Execution skill for one confirmed issue. Normally auto-dispatched by the
-  main session as a fresh host-agent conversation (development model
-  resolved from dispatch.hosts for the current host, using ordinary versus
-  integration / high-risk / review-alert routing): TDD in a dedicated
-  worktree, DoD + fast verification every implementation / repair /
-  conflict round, declared-scope drift records and ticket-size red lines,
-  then independent /ai-review, BLOCKER fixes, and the merge request made
-  ready. Main session supervises through merge — no human gate. Success
-  is judged by on-disk evidence, never by self-report.
+  Execute one confirmed issue in an isolated worktree using frozen ticket
+  context, real TDD and DoD + fast runners, independent review receipts,
+  strict architecture/scope gates, and structured human-decision requests.
+  The implementer stops at MR ready; only the supervisor may verify, merge,
+  promote, and close-and-clean through the controlled v2 entry points.
 allowed-tools:
   - Read
   - Write
@@ -33,6 +29,67 @@ allowed-tools:
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
 - 架构事实唯一写入源是 `docs/architecture/*.json`。票 DoD 声明契约更新时，承接票在 worktree 分支内按稳定 ID 修改接口分片，随代码同一 MR 合入；flow-back 同样补记对应分片并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。`docs/ARCHITECTURE.md` 是确定性生成的只读短首页，所有开发阶段均不得手改。
 
+## 提问格式与对人表达
+
+提问分两种形态：**拷打轮次**（需求澄清，按「拷打规则（Grilling）」，一轮可问多个相互独立的问题）与**阻塞型单点确认**（方向批准、术语冲突、范围裁决、是否进入下一阶段等，一次只问一个）。本节规则同时约束普通文本和宿主原生提问组件的所有可见字段。
+
+先把未决问题归类为三种之一：
+
+- `可假设继续`：对当前判断影响较小——带默认假设继续，并在输出中显式写出假设
+- `必须提问后继续`：影响核心判断、关键前提、模式选择、优先级、规则边界或最终结论，不能绕过——先发问再继续，不用「可以先假设」绕过，也不沉入「待确认项」；使用当前宿主的原生提问能力，不自行脑补答案
+- `仅记录为低优先级风险`：不影响当前判断——暂记为风险或待确认项
+
+开发流程中被派发的实现 / 评审会话不得直接问人：它们只返回结构化决策请求，由主会话按「Human Decision 协议」统一呈现、记录回答和路由。无人值守时不调用提问组件、不等待回答。
+
+### 每次提问的内容
+
+1. **先说人话背景**：用 2–4 句大白话讲清在做什么、进行到哪一步、现在卡在哪里；不堆术语，不贴内部状态和原始日志
+2. **说透决策点**：要用户定的到底是什么，一句话说清楚；涉及改动时讲清改什么、哪些模块或人会受影响、什么行为会变化
+3. **说明为什么必须问**：指出影响哪一个核心判断，不问清会导致什么误判或返工
+4. **给推荐方向**：先给推荐与理由，显式说明仍等用户拍板，不伪装成结论
+5. **给可执行选项**：每个选项说清选后会做什么、主要代价与风险；推荐项排第一，保守替代、暂停或延后按实际情况排列
+6. **单点确认一次只问一个**，不合并多个决策点（拷打轮次不受此限）
+
+### 原生提问组件字段契约
+
+`AskUserQuestion` 及宿主等价组件必须按下列规则生成；开发阻塞型问题从对应 human-decision 决策包确定性投影，不另写第二套话术：
+
+| 字段 | 契约 |
+| --- | --- |
+| `header` | 用户能理解的业务短标题，不超过宿主限制（通常 12 个字符），如「订单重试」「合并冲突」；禁止状态名、内部角色和协议词 |
+| `question` | 一次只问一个决策；依次说清背景、卡点、不能自行决定的原因和需要选择什么；不附路径、字段堆栈、命令或退出码 |
+| `options` | 单决策使用 `multiSelect: false`；2–4 个互斥且可执行的选项，推荐项排第一并在标签末尾写「（推荐）」 |
+| `options[].label` | 直接写采取的动作，如「增加防重复处理（推荐）」；不要只写「方案 A」「re-split」或「 BLOCKER 回修」 |
+| `options[].description` | 说清选后的动作、主要代价、影响面和风险；必要时说明哪些工作暂停、哪些可继续；不贴原始输出 |
+| 自由文本 | 宿主自动提供「其他」时不要重复添加；自由文本含义不明确时继续澄清，不猜测为某个选项 |
+
+原生选项组件中**不再要求用户「回 A 或 B」**，直接选择即可。纯文本降级时才为同一组选项显示稳定编号，并说明回复方式。技术路径、证据与日志放在组件外的「想细看」或决策包证据字段，不塞进主问题。
+
+取消、关闭问题卡、Escape 和工具超时都只表示**尚未回答**，不表示选择推荐项，也不表示取消票；只有用户明确选择「取消 / 暂停这张票」才可执行对应受控路由。
+
+### 示例
+
+```yaml
+header: 合并冲突
+question: 这票和另一票同时修改了订单关闭规则。自动合并会覆盖其中一边，所以我停下了。本次应该以哪套规则为准？
+options:
+  - label: 采用本次已确认规则（推荐）
+    description: 按本票方案合并；另一票需要基于新结果重新核对。
+  - label: 保留另一票规则
+    description: 本票撤回冲突部分，再重新验证剩余功能。
+  - label: 先整理两边差异
+    description: 暂不合并，先列出行为差异，确认后再修改。
+```
+
+### 禁区
+
+- 内部词不说给用户：拷打 / frontier / 门② / BLOCKER / 升档 / needs-human / 状态码 / 字段名堆叠——协议词只做内部判定，对人一律换成日常说法
+- 不用「回显」「输出完成状态」这类机器动作描述对人说话；报告与状态表达按「完成状态协议 · 对人表达」执行
+- 不用模板腔占位符对用户说话（如直接贴 `<feature-module>/<feature-slug>`），换成中文名称与自然句
+- 不用 commit hash、文件清单、测试日志或配置字段代替「发生了什么、为什么需要你定、每个选择有什么影响」
+
+风格：问题短、具体、直击判断核心，不为礼貌加缓冲；关键变量缺失先提问，不输出大段结论；回答仍抽象就继续追问，直到足以支撑判断。
+
 ## 完成状态协议
 
 - `已完成`：产物可进入下一阶段，不存在阻塞性交付缺口
@@ -49,6 +106,8 @@ allowed-tools:
 3. **需要人决策 / 接手时**说四件事：发生了什么、为什么我定不了、需要你定什么、每个选项的代价（改哪些模块 / 影响谁 / 什么风险）；并给推荐与理由
 4. **说改动时**说：改什么、为什么改、影响面（哪些模块 / 哪些人 / 什么行为变化）、怎么验证；不用 commit hash 与文件清单代替说明
 5. **内部术语不进对话**：拷打 / frontier / 门② / BLOCKER / 升档 / 回显 / 落盘 / status / worktree 等协议词只做内部判定，对人换成日常说法（必须先修的问题、需要重新拆票、记录下来、本票专用分支）
+
+开发流程中的 `needs-human` 是**存在活动 human-decision 决策包的工作等待态**，不是完成结论，也不是子会话直接问人的提示。被派发实现 / 评审会话只返回决策请求；主会话统一问人、记录回答并完成路由确认后，才解除等待状态。无人值守只记录并继续其他票。提问组件的标题、问题、选项与说明全部遵守「提问格式与对人表达」字段契约。
 
 对照（坏 → 好）：
 
@@ -71,9 +130,16 @@ allowed-tools:
         issue-001-<短名>.md
       impl/
         issue-001/
+          ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
           impl-log-issue-001.md
-          evidence-issue-001.md
           conformance-issue-001.md
+          raw/<generation>/            # 每次验证独立代际；成功新代际使前代 superseded
+            artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
+            verification-implementer.json 或 verification-supervisor.json
+            evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
+            logs/                     # 原始命令输出与哈希索引
+          review-receipt.json          # 独立评审身份、报告与候选绑定
+          host-probes.json             # 原生评审绑定的写回执；validate 仍须实时重读，单独文件不构成证明
       reviews/
         <feature-summary>-review-issue-001-YYYY-MM-DD.md
       mr/
@@ -87,10 +153,12 @@ allowed-tools:
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹
-        raw/  artifacts/
+        raw/<generation>/
+          artifact-generation-manifest.json
+          logs/  screenshots/
       unattended.md               # 无人值守授权边界（人离场时才产生）
-      decisions.md                # 无人值守越界决策记录
-      progress.md                 # 无人值守逐票进度留痕
+      decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
+        <decision-id>.json
       prototypes/
         <短名>/
           <原型文件（一次性）>
@@ -103,8 +171,8 @@ allowed-tools:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- `unattended.md` / `decisions.md` / `progress.md` 是无人值守模式（人离场自动跑）的授权与留痕，仅离场时产生；语义见「监督循环」
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成（如 Windows 权限）退回用主工作区绝对路径读写，仍不得复制。唯一例外：票 DoD 声明契约更新（或 flow-back 补记）时，`docs/ARCHITECTURE.md`「接口现行态」表在 worktree 分支内就地更新、随代码同一 MR 合入（开口规则见 GLOSSARY dev 段）
+- `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/architecture/*.json` 分片；`docs/ARCHITECTURE.md` 只能由 `architecture_graph.py render write` 确定性重生成并随对应分片提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
 
@@ -112,230 +180,566 @@ allowed-tools:
 
 dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物全量留存。规则：
 
-- **中间轮产物只留最终轮 + 结论**：迭代快照 / 截图 / 页面捕获等，中间轮在下一轮通过后即删，过程结论以文本写进 impl-log / evidence；收口快照按相对路径引用原件，禁止机械复制整目录（如 raw/ 整份拷进 final/）
+- **产物按代际保留**：raw / OCR / 截图必须登记进 `artifact-generation-manifest.json`，绑定 candidate tree、generation、路径和 SHA256。新一轮通过且 evidence / business-results 已切换到新代际后，旧代际才成为 GC 候选；当前代际、最后成功代际及所有被引用证据始终保留。没有 manifest 的存量文件不按 mtime 猜代际
 - **可重下载的缓存不进 dev/**：安装包 / wheelhouse / keyring / 依赖缓存等官网可重下的内容，临时存放用完即删；确需留存只记版本号与获取命令
 - **merge 中间物即合即删**：`*.ours` / `*.theirs` / `*.orig` / merge-* 工作目录在合并提交后删除——git 历史可取回
-- **删除判据（三满足其一）**：① 可重新下载；② 原件仍在（字节级 diff 验证）；③ 字节相同且文档零引用。删前后 `grep -rn` 查悬空引用；截图 / 录屏等二进制证据只留被文档引用的
-- 票 `done` 收口时按本节清一次本票 impl 目录（中间轮 / 缓存 / merge 中间物），保留票文件 / impl-log / 评审报告 / 被引用证据
+- **删除只能走 `close-and-clean` 预检与确认**：可再下载、字节级相同或明确属于已失效代际的内容才可删除；删除前后核对 Markdown / JSON 引用，最终 evidence、评审、确认记录与被引用捕获物不得为了压体积删除
+- 票 `done` 后、总结前由 `close-and-clean` 清理本票 worktree、分支与失效过程产物；`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
 
-## Dev 配置（agents-config）
+## Dev 配置（agents-config v2）
 
-dev 阶段 skill 开始工作前，先读取 `./dev/agents-config.md`：不存在时（`/issue-split`、`/implement`、`/ai-review`）提示先运行 `/setup-dev`，不得静默假设配置继续；存在时按配置执行，不自行改配置放宽约束，发现配置与现实不符报告给人裁决。
+dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/agents-config.md` 读取并严格校验配置：文件不存在时提示先运行 `/setup-dev`；旧 schema、未知字段、旧 scoped/full、旧 redlines / mechanical-refresh / main-drift-ignore 或非法模式组合一律停止。不得自行改配置放宽约束；配置与现实不符时按 human-decision 协议请人裁决。A 类仓禁止 `/implement`，只允许只读辅助。
 
-必要字段（结构见 `shared/templates/agents-config.md`）：
+必要配置与执行纪律：
 
-- `tracker`：`local`（markdown 票文件）或 `gitlab`（glab CLI）
-- `main-branch`：主分支名（worktree 与 merge request 的基准）
-- `repo-level`：A / B / C 仓库等级；A 类仓（飞行软件 / 涉密）禁止进入 `/implement`，只允许只读辅助
-- `quality-gate`：只配置票级 `fast` 命令（秒级，类型 / lint / 单文件测试）。每张票在实现、自修复、评审回修与 merge / close 时都只执行自己的 DoD + `quality-gate.fast`；不得按文件数、LOC、模块影响面或风险名义改跑其他票级套件，也不设置票级 scoped / full 命令
-- `host-budget`：本机重测试算力预算（`total` worker 总数 / `max-runs` 套数 / `queue-timeout` 排队秒数上限），只用于 local-human 需求收口的关联选择集与单项失败归因；fast 不受限。真源是机器级文件 `~/.cache/agent-dev/slots/budget.json`（同机各仓共享一份），agents-config 里只是镜像记录，执行以机器级文件为准；CI full 使用判读机自己的预算
-- `verify-policy`：票粒度、失败归因与测试职责边界。
-  - `ticket-max-files: 10` 与 `ticket-max-loc: 400` 只是拆票粒度上限：拆票时预估超任一上限必须再拆；实现期实测超任一上限必须 re-split，无法自动再拆则置 `needs-human`，不得把它解释成测试范围或模型路由的升级理由
-  - 实测 diff 超出 `declared-scope` 时在 impl-log「漂移记录」逐文件登记；超粒度上限按上述 re-split / needs-human 处理，不超上限且仍属本票范围时登记后继续
-  - `gate-scope`：AI 交付门只保证功能实现度（DoD 行为、契约、回归）；`non-gating` 类（默认性能基准 perf、展示样式 display）只在最终 commit 执行一次并落盘，不阻塞交付、不进 `all-passed` 分母，由人工验收确认；缺外部依赖的用例按分类清单显式 skip 并在 evidence 列出，不算失败也不算通过
-  - `attribution`：先在失败默认按 `quarantine` 隔离。入册须 base 侧同签名稳定失败，且每条带 owner / 去向（修复票 / 永久删除决议）/ 首录日期，无去向不入册；清单内用例以 skip（标 quarantined）执行，不进 `all-passed` 分母，清单外失败按本票引入处理并只对单项补跑 base 侧对照。未执行项不是先在失败，不得入册冒充通过；feature 收口的预算延期只写 feature 级 deferred 证据。`two-sided` 为保守档（每条失败双侧同命令对照）。隔离清单由 CI full 报告刷新，超 `quarantine-max-age-days`（默认 14）的条目在 CI 回归记录与主会话监督输出中呈现
-  - **full 只有 CI 入口**：本机、票 worktree、集成 worktree 与监督循环均不得执行 full。`ci-promote` 的 feature / branch / main 放行必须执行 `process_check.py --phase promote --ci-verdict <...> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI verdict、run proof、实际 HEAD commit 与 tree 同源；分支前进或 tree 改变即重新验证。人工重跑也只能触发同一 CI workflow，不设本机补跑出口
-  - `daily-regression` 如启用，只能由 CI schedule / 手工 dispatch 触发同一个 CI full workflow；记录 CI run / verdict / tree / 合入区间 / 归因与隔离清单变化。漏跑时只能在 CI 补触发，不得创建本机 worktree 或保存可冒充 CI 判决的本地引用。pandu 不启用 nightly，push 不自动部署
-- `feature-closeout`：需求收口方式。`mode: ci-promote`（默认，缺此节同）以 feature / branch / main 的同 tree CI verdict + run proof 放行；`mode: local-human` 时全部票合入每需求独立集成分支（`integration-branch`，默认 `feat/<feature-slug>`）后，本机冻结候选与 `acceptance-plan.yaml` 计划哈希 → Agent 自动证据（`scoped_select.py` 关联选择集，indirect 预算 `verify-budget-seconds`；另按计划执行 command / browser-agent 功能 AC）→ 生成正式功能验收报告 → 按报告完成人工实测 / 复核 / 豁免 → 人显式确认 → 合 main → 按 `prod` 发布并冒烟，main push 后 CI full 作安全网而非合 main 前置。`selection-map` 是可选的 dir-map 映射表路径，缺省 / `null` 使用 `dev/scoped-map.yaml`；显式配置时给集成选择器追加 `--map <路径>`。feature 级 scoped 报告与 deferred 证据保留。`verify-instance` 有则部署到测试实例，`null` 则在集成 worktree 用开发启动器；功能验收计划的 `executor`（command / browser-agent / human）与 `oracle`（auto / auto+human-review / human）分离，合并前必须有脚本生成且未过期的 `acceptance-report.md`。main 冻结后只在 `main-drift-ignore` 路径前进时候选仍有效。门禁由 `shared/scripts/feature_closeout.py` 判定，流程见「监督循环 · 需求收口」。**票的目标分支**（worktree 基准、rebase 目标、合并目标、process_check 的 diff base、账实对账与清场的「已合并」判定）一律用 `feature_closeout.py target --issue <票文件>` 解析：票 frontmatter `target-branch` 显式指定 > local-human 下代入 `integration-branch` > `main-branch`；`since`（YYYY-MM-DD）之前创建的存量票保持 `main-branch` 默认。local-human 下票只合进集成分支，main 只接收需求收口的整需求合并；目标分支不存在即停，不退回 main
-- `max-fix-rounds`：自修复轮次上限，默认 99；`review-round-alert`（默认 3）：同票评审达此轮数时主会话介入判断拆票 / 缩范围 / 升级模型（预警，不是硬停）
-- `conformance`：需求符合性核对（主模型校验）——主会话在合并前核对「要的有没有、偏没偏」，与 ai-review 正交（两者都使用当前宿主 `supervisor-review`；评审判代码质量，需求语义符合性由主会话或另一独立监督评审会话核对）。方法：先独立枚举需求点（不看 impl-log 覆盖矩阵），再对照矩阵打开代码逐条核语义；结论落盘 `impl/<issue-id>/conformance-<issue-id>.md`，`process_check.py --phase close` 把关。`mode: always`（默认）每票必核；`sampled` 时所有非集成票都按 `sample-rate` 抽查，未抽中写 `verdict: skipped`，集成票一律必核；`checker: main-session`（默认亲核）或 `dispatched`（派发独立监督评审对话，上下文紧张时用）。缺此节按默认执行，即默认启用
-- `base-freeze`：票开工时固定 base，实现与评审期间不追集成分支，只在合入前 rebase 一次；冲突解决后重跑受影响 DoD + fast
-- `mechanical-refresh`：预授权机械刷新白名单（路径 glob + 字段 / 生成块）；diff 可机器证明只动所列字段时直接刷新并登记，不停等人；白名单外的既有测试 / 夹具改动仍按红线处理——唯一例外「需求驱动更新」：票 DoD / tech-spec 明确改变的行为，其冲突旧测试随票更新并逐条登记映射（见 /implement Step 2），不按红线停
-- `artifact-budget`：impl-log / evidence 正文行数与 impl 目录体积上限；正文只留结论与指针，过程放 raw，中间轮原始产物只留最终轮
-- `redlines`：红线文件 glob 清单（协议文件、密钥配置、验收判定文件等），命中即停，不得绕过
-- `dispatch`：执行与模型配置。`schema-version: 1` + `executor: subagent`；`hosts.<claude-code|codex|zcode|dsh>` 按宿主分条。每条必须有：`supervisor-review.model / effort`（主会话监督、符合性核对与独立 `/ai-review` 共用角色模型，但评审另开独立会话）；`development.default / escalated.model / effort`（独立 `/implement`：普通票用 default，集成票 / 高风险票及评审预警后的回修用 escalated，绝不按测试范围路由）。开工前运行 `python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`；用 `resolve` 取当前宿主原生参数，缺当前宿主、旧 `dispatch.model`、字段缺失或模型 / effort 不在实时目录即停，不跨宿主套用、不静默继承。原生角色文件由 `render` 从本配置生成，不手工另建第二份模型真源。`parallel-max`：frontier 中 declared-scope 互不相交的票可并行派发的上限
-- `ocr.mode`：评审模式。默认 `delegate`——ocr 只做文件筛选与规则解析（不调 LLM），评审由宿主 agent 内新开的独立对话执行；`local` / `ci` 为可选增强，需配置 LLM 端点
-
+- `tracker / main-branch / repo-level`：本地或 GitLab 票、主分支与仓库等级。票的唯一目标分支由 `ticket_context.target_branch` 在 `delivery start` 时冻结：显式 target-branch > local-human 集成分支 > main-branch；目标不存在即停，不回退 main。
+- `quality-gate.fast`：票级唯一快速质量门。每个实现、回修、冲突和主会话复跑轮只执行本票 DoD + fast，统一由 `verify_issue.py` 实际运行并生成结构化证据；不得按文件数、LOC、影响面或风险改跑其他票级套件，也不设置票级 scoped / full。
+- `host-budget`：只用于 local-human 需求级关联选择集与单项失败归因；fast 不受槽位限制。机器级 `~/.cache/agent-dev/slots/budget.json` 是共享预算真源，本文件只是镜像；CI full 使用判读机自己的预算。
+- `verify-policy.ticket-max-files / ticket-max-loc`：拆票粒度上限，默认 10 个生产文件 / 400 LOC。预估超限必须再拆，实测超限必须 re-split 或创建 human-decision；不得用它选择测试范围或模型档位。
+- `verify-policy.scope: strict`：开工后 declared-scope 冻结。所有 changed paths（不只生产文件）都参与 scope / 红线 / 架构对账；越界必须退回重新确认票并生成新 context，登记漂移不再放行。生产集合只用于文件数与 LOC 统计。
+- `verify-policy.deny`：绝对禁止路径；新增、修改、删除、重命名任一命中即 FAIL，登记不能豁免。
+- `verify-policy.test-change`：TDD 新增测试必须有 runner 的断言见红记录；既有测试修改必须逐条映射真实 DoD / tech-spec 锚点、说明冲突与范围，并由独立评审回执闭合。删除测试默认拒绝，无映射或放宽无关断言均失败。
+- `verify-policy.generated-refresh`：每条派生物有稳定 ID、输出 glob 和唯一生成命令。流程核对在独立临时工作区执行生成器并比较 tree；不能只登记“机械刷新”或额外改动其他字段。
+- `gate-scope`：功能类 DoD / fast 才进入交付通过分母；perf / display 在最终候选执行一次并列人工确认，不因噪声反复重跑。缺已声明外部依赖的用例显式 env skip，不算通过也不算失败。
+- `attribution`：`quarantine` 入册必须有 base 同签名稳定失败、owner、去向和首录日期；清单内显式 skip，清单外失败只对单项做 base 对照。`two-sided` 每条失败双侧同命令。未执行项不得记 quarantine 或通过；超期隔离项必须报告。
+- **full 只有 CI 入口**：本机、票 worktree、集成 worktree与监督循环均不得执行 full。daily regression 只能由同一 CI workflow 的 schedule / dispatch 触发；CI 不可用时保持未验证，不降级本机补跑。
+- `feature-closeout.mode`：
+  - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
+  - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
+  - `local-human`：每需求独立集成分支；全部票合入后 freeze 候选与验收计划，执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main。push / Prod 始终另行授权。
+- `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
+- `conformance`：主会话或独立监督会话先反向枚举需求，再打开代码逐条核对。`always` 每票必核；`sampled` 由 gate2 context digest + issue ID 确定性抽样，不能自写 skipped；集成票始终必核。空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。
+- `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
+- `artifact-budget / retention`：限制 impl-log / evidence 行数及 impl / integration 体积；raw / OCR / 截图按 generation manifest 管理。当前、最后成功和被引用证据始终保留，失效代际与 salvage 只能经 `close-and-clean` 预检确认后清理。
+- `integration-runtime`：显式配置开发服务与 verify-instance 的启动、就绪、停止和租约；运行记录绑定 candidate。停止服务、释放租约失败时不得清集成 worktree。
+- `dispatch`：`supervisor-review` 用于主会话监督、符合性与独立评审；`development.default / escalated` 分别用于普通票和集成 / 高风险 / 评审预警后的续修。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
+- `enforcement`：声明评审信任级别与宿主 / 分支 / SHA 能力要求。宿主不能证明独立评审身份时不得冒充 host-verified；非 server-enforced 不得宣称具有服务端分支保护。
+- `ocr.mode`：默认 `delegate`，OCR 只筛文件与规则，由独立宿主对话评审；`local / ci` 为可选增强，必须配置对应端点和 CI。
 
 ## 测试位置
 
-- **票级循环内验证在本机**：TDD 见红 / 变绿、每条 DoD、fast、单项失败归因、独立评审复测与主会话验收复跑都在本票 worktree 执行；merge / close 仍只核 DoD + fast。fast 不经整机槽位包装，也不新增把票级测试提交到其他机器执行的通道
-- **local-human 需求级验证在本机**：需求收口的 `scoped_select.py` 关联选择集与其单项失败归因在集成 worktree 经 `shared/scripts/test_slots.py run` 包装执行，预算与 feature 级 deferred 证据按 `feature-closeout` 配置处理；`acceptance-plan.yaml` 声明的 command / browser-agent 功能 AC 也在同一候选测试环境执行并落标准证据。它们不是票级交付门，也不得扩大为 full；宿主无浏览器能力时对应 AC 记 unverified，不伪造通过
-- **远端只承接 CI full**：已登记 feature / branch / main 的 push，以及同一 CI workflow 的定时 / 手工触发，是完整套件的唯一入口。CI 在判读机独立 checkout 对应提交并自行调用判读机预算封装；本机、票内、监督循环都不向其提交命令、也不补跑 full。CI 不可用时保持未验证，不降级本机补跑
+- **票级验证在本票 worktree**：TDD 见红 / 变绿、每条 DoD、fast、单项失败归因、独立评审复测与主会话复跑。merge / close 仍只核 DoD + fast；fast 不经整机槽位包装。
+- **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
+- **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。
 
 ## 派发协议（标准角色配置）
 
-dev 阶段的「派发」只依赖一个宿主无关原语：**宿主 agent 自动新开一个独立对话执行派发提示词**。模型不再靠提示词口头指定，而是由同一份 `agents-config` 校验、解析并绑定到宿主原生角色。
+dev 阶段的「派发」只依赖一个宿主无关原语：**主会话通过宿主 agent 新开独立对话执行自包含提示词**。模型、角色、会话句柄、候选和路由回执必须来自同一份 agents-config 与宿主真实返回，不靠提示词口头指定。
 
 ### 配置校验与角色解析
 
-- 主会话开始监督、实现会话启动、发起评审前都先跑：`python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json`（目录由 `/setup-dev` 从宿主实时能力生成，结构 `{host: {model: [effort...]}}`）。旧 `dispatch.model`、缺字段、当前宿主无条目、模型或 effort 不可用 → 停下修正配置，不跨宿主套用、不自动降级。
-- **主会话监督**：取 `dispatch.hosts.<当前宿主>.supervisor-review`，用 `resolve --role supervisor` 核对当前会话的实际 model / effort。不符即停下请人按配置新开或切换主会话；配置文件不会 retroactively 切换已经存在的会话，不得把「写进配置」冒充「当前已生效」。
-- **开发实现**：普通票取 `development.default`，集成票 / 高风险票及评审达 `review-round-alert` 轮后的续修取 `development.escalated`；用 `resolve --role development` 得到原生参数。不得按 light / scoped / full 或任何测试范围路由模型。
-- **独立评审与派发的符合性核对**：固定取 `supervisor-review`，用 `resolve --role review`；不随开发角色切换，但必须另开独立对话，写查分离不变。
-- 原生角色文件只从配置生成：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <宿主配置根>`。渲染器拒绝覆盖已有不同文件；确需更新时先核对差异并备份，再由 `/setup-dev` 明确重生，不手改第二份模型真源。DSH 的角色路由合并进目标 profile，不覆盖其他 profile。
+主会话开始监督、实现会话启动、发起评审前都先执行：
 
-### 派发原语
+```bash
+python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
+python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+```
 
-- 派发 = 主会话通过宿主 agent 的「新开独立对话」能力，启动一个新对话执行 `/implement issue-NNN`（或 `/ai-review`）；新对话不继承、也不应依赖主会话上下文。
-- 派发提示词必须自包含：票文件路径、tech-spec 路径、`./dev/agents-config.md` 路径、`feature-module` 与 `feature-slug`——被派发方全靠落盘文件工作。
-- 派发前置写入：启动实现对话前，主会话按「监督循环 · 状态与事件写入契约」在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts）并追加 `dispatch` 事件——归属在派发瞬间落盘，不靠事后补登；这里记录的是经 `resolve` 确定并随原生角色绑定的模型。
+- **主会话监督**：取当前宿主 `supervisor-review`，用 `resolve --role supervisor` 核对实际 model / effort。配置写入不会 retroactively 切换现有会话，不符即停。
+- **开发实现**：普通票取 `development.default`；集成 / 高风险及评审预警后的续修取 `development.escalated`，用 `resolve --role development`。不得按测试范围路由。
+- **独立评审与派发的符合性核对**：固定 `supervisor-review`，用 `resolve --role review`；必须另开独立对话，写查分离不可降级。
+- 原生角色只从配置生成。`render --check` 只读检查缺失或过期；确需更新由 `/setup-dev` 明确重生，不手改第二份模型真源，也不静默覆盖项目配置。
+- 旧 dispatch.model、缺字段、当前宿主无条目、模型 / effort 不在实时目录或角色过期即停，不跨宿主套用、不自动降级。
+
+### 派发原语与结构化回报
+
+- 派发 = 主会话启动独立对话执行 `/implement issue-NNN` 或 `/ai-review`；新对话不继承、也不依赖主会话上下文。
+- 提示词必须包含：票、tech-spec、agents-config、feature-module / slug、ticket context（开工后）、execution context（有人 / 无人值守）、dispatch_id、parent_session_id，以及必要的 worktree / 分支和报告路径。
+- 真实派发前，主会话按 Progress Events 在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts / dispatch_id / session_id / parent_session_id）并追加 `dispatch` 事件。session ID 尚未分配时可暂空，宿主返回后立即补齐。
+- 成功回报包含分支、worktree、MR、ticket context、verification、review receipt、报告和遗留；它只是线索，不是验收证据。
+- 需要人裁决时，实现与评审子会话只返回未持久化 human-decision envelope，不直接问人、不写 returned / mr-submitted。主会话统一持久化、提问和路由。
+- resume 沿用 dispatch/session，attempts 不增；redispatch 新开独立对话，主会话更新 dispatch 块、attempts +1 并写新 dispatch 事件。路由没有真实 ack 前票保持 needs-human，结果不明不得重派。
 
 ### 宿主适配
 
-| 宿主 | 主会话监督 | 独立对话与原生角色参数 | worktree 归属 |
-|---|---|---|---|
-| Claude Code | 项目 settings 的 `model` / `effortLevel` | `Task`；`subagent_type = supervisor-review / development / development-escalated`，角色 frontmatter 绑定 `model` / `effort`；`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` 或 `CLAUDE_CODE_EFFORT_LEVEL` 覆盖配置时即停 | 同主会话文件系统：实现对话在主工作区建 `.worktrees/<issue-id>`，主会话按清场序列删 |
-| ZCode | 当前会话须核对为 `supervisor-review.model` / `thoughtLevel` | `Agent`；`subagent_type` 同上，角色 frontmatter 绑定 `model` / `thoughtLevel` | 同 Claude Code |
-| Codex | 项目 config 的 `model` / `model_reasoning_effort` | 原生多代理工具；`agent_type` 同上，角色 TOML 绑定 `model` / `model_reasoning_effort` | 自建沙箱 `~/.codex/worktrees/<hash>/`，路径不可预知且不保证回收：实现对话退出前按分支名自清并把路径写进结构化回报；主会话按清场序列以 branch 匹配兜底 |
-| DSH | profile `agent-default-model` 的 `provider` / `model` / `reasoningEffort` | `subagent`；每次调用显式传 `provider` / `model` / `reasoning_effort`，只取 `allowedModels` 中由 `resolve` 选出的路由 | 以实际机制为准；派发环境与主工作区不同文件系统时，实现对话退出前按分支名自清，主会话 `git worktree prune` 校验 |
+| 宿主 | 主会话监督 | 独立对话与原生角色参数 | worktree / 能力边界 |
+| --- | --- | --- | --- |
+| Claude Code | 项目 settings 的 `model` / `effortLevel` | `Task`；`subagent_type = supervisor-review / development / development-escalated`；环境变量覆盖模型 / effort 时即停 | 同机注册 worktree；session / worktree 活性未知时保留 |
+| ZCode | 当前会话须核对 `supervisor-review.model` / `thoughtLevel` | `Agent`；角色 frontmatter 绑定 model / thoughtLevel；复审和回答后可按 agentId 用 `SendMessage` 续接 | 同 Claude Code |
+| Codex | 项目 config 的 `model` / `model_reasoning_effort` | 原生多代理；`agent_type` 同上，角色 TOML 绑定模型 / effort | 自管沙箱必须由 adapter 回报路径和可达性；异文件系统不可达时保留唯一分支并报 external-pending |
+| DSH | profile `agent-default-model` 的 provider / model / reasoningEffort | `subagent` 显式传 provider / model / reasoning_effort，只取 resolve 选出的 allowedModels | 以真实 adapter 能力为准；主会话 `git worktree prune` 不能冒充异文件系统清理 |
 
-- 未登记的宿主没有可套用配置：先扩展 schema、实时目录与原生 adapter，再进入开发；不得拿其他宿主模型名凑合。
-- frontmatter `allowed-tools` 里的 `Task` 是 Claude Code 命名；其他宿主按上表映射为自身派发工具（如 ZCode 的 `Agent`），协议语义不变。
-- 兜底：宿主完全没有独立对话能力时，主会话产出自包含派发提示词与 `resolve` 结果，请人在对应模型的新对话启动；无法确认实际模型时不得开工，也不得在主会话同一上下文里「顺便自己实现」充数。
-- 写查分离不可降级：**评审（`/ai-review`）必须在与实现不同的独立对话 / 独立环境执行**；宿主连评审独立对话都无法提供时，停下找人，绝不自评。
-- 同票复审续接：宿主支持子对话续接（如 ZCode `SendMessage` 按 agentId 续接已完成对话）时，BLOCKER 回修后的复审发回**同一评审对话**（喂回修 commit 范围 + 上轮报告路径），不每轮新开实例、不重载评审上下文；写查分离不变式不受影响（评审实例始终独立于实现），跨票仍一律新开；宿主不支持续接时退回现状：每轮新开独立对话全量复审。续接只延续会话，不得改变已绑定的 `supervisor-review` 模型 / effort。
+- 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
+- frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
+- 宿主完全没有独立对话能力时，主会话只能产出自包含提示词与 resolve 结果，请人在对应模型的新对话启动；无法确认实际模型不得开工，也不得在主会话顺便实现。评审没有独立环境时同样停止，绝不自评。
+- 同票复审优先续接原评审对话，输入为回修 commit 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨票一律新开。
+- 宿主能力由 `host_adapters.py` 区分 available / unavailable / unknown。配置里写了能力不等于实际可用；评审定稿先 `write_review_binding` 通过宿主原生接口附着本次 issue / round / head / tree / report 绑定，再 `verify_review_session` 实时重读。`host-probes.json` 只保存写回执供对账，单独文件或 capability bool 不构成证明。浏览器不可用时 AC 记 unverified 或转人工，session 活性 unknown 时禁止删除其 worktree。
 
-### worktree 清场序列（收口与对账共用）
+### 清场触发与统一入口
 
-按分支名发现，不按路径猜——宿主自管沙箱（如 Codex）会让真实路径偏离约定：
+清场只在**合并与关账事实已确认之后、收尾总结之前**发生；MR ready、子会话退出、Stop hook 或面板轮询都不触发删除。
 
-1. `git worktree list --porcelain` 找 branch = `feat/<feature-slug>-<issue-id>` 的注册条目
-2. **salvage 前置（任何会话删 worktree 前必做，巡检外会话同样适用）**：`git -C <path> status --porcelain --ignored` 连 ignored 一起摸——ignored 目录（dev/、reports/、.logs/ 等）是本地真源，随 worktree 删除即永久丢失，git 历史救不回。**先辨软链**：`<path>/dev` 是指向主工作区的软链（约定形态）时，其内容本就在主工作区，**不得跟随软链打包**（否则把主 dev/ 整树复制进 .salvage，二次膨胀），软链本身随 worktree 删除即可；实体目录才按下述判定。不可再生且未收录进主工作区的内容（票文档 / 证据捕获 / 测试产物）→ 先打包到主工作区 `./dev/.salvage/<issue-id>-<日期>/` 并附 `_manifest.json`（来源路径 / 内容清单 / 判定理由）；可再生的（依赖目录 / 构建产物 / 下载缓存）不留
-3. `git worktree remove <path>`；未跟踪产物拒删时 `--force`（salvage 完成后剩余产物可弃）
-4. `git worktree prune` 清悬空注册
-5. 分支删除只能在 worktree 清空之后：gitlab 模式由 `glab mr merge --delete-source-branch` 带删远端源分支；local 模式核对已并入本票目标分支（`feature_closeout.py target`；local-human 下为集成分支）后 `git branch -D feat/<feature-slug>-<issue-id>`（有远端同名再 `git push origin --delete`）
-6. `rmdir .worktrees 2>/dev/null || true` 清空父目录
+```bash
+# 默认只预检，返回 operation_id 与 confirm
+python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <issue-id>
+
+# 只有预检内容与真实授权一致才执行
+python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <issue-id> \
+  --apply --operation-id <预检ID> --confirm <完整指纹>
+
+# 每轮监督先只读对账；只恢复已有授权 journal 或已证明 merged 的残留
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区>
+
+# 恢复必须显式分类，不能用 cleanup 恢复其他类型事务
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind cleanup --operation-id <ID> --apply
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind delivery --context <ticket-context.json> --apply
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind delivery --candidate-path <candidate.json> --candidate-repo <集成worktree> --apply
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind human_decision [--feature <module/slug>] --apply
+python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind runtime --operation-id <service/lease ID> --candidate <完整OID> --apply
+```
+
+- 清理器**永不合并代码**，没有 action=merge 或可任意切换的 dev-only。中途搁置只能显式 `--intent discard` 重新预检，先 salvage 再关闭为 deferred，不解锁依赖。
+- 目标分支只取 ticket context，不能回退 query / main。worktree、detached、locked、prunable、branchless、remote-only、本地 / 远端 ref、dev、session、实例和服务都由同一份计划覆盖。
+- confirm 绑定票 / config、refs、完整 ignored 状态、软链、session / runtime 和 dev GC 项；apply 锁内重验，强制删除前再扫描。活跃会话、日志增长、错误软链或外部能力未知都停止。
+- `.logs/**`、未收录证据与报告默认 salvage；dev 软链只有解析后等于主工作区 dev 才不跟随打包。依赖和构建缓存可按计划删除，但最终证据、最后成功代际和被引用捕获物不得删除。
+- journal 逐步记录 expected / observed；崩溃后 `reconcile` 按真实状态幂等恢复。部分完成、prune 失败、远端 OID 变化或剩余路径非空都必须报告，不能显示“清理完成”。
+- local-human 的 integration worktree / 分支、开发服务与实例租约在 `feature-merged` 后走 feature 级 close-and-clean；先停服务 / 释放租约，再 salvage 和清 Git 资源。
+
+## 票状态、派发字段与进度事件统一契约
+
+机器真源分为三处：票 frontmatter 表示当前交付状态，`dev/features/<feature-module>/<feature-slug>/progress.jsonl` 表示追加事实流，`decisions/<decision-id>.json` 表示人工作决策及其回答 / 路由。三者必须能对账；面板、下钻或新会话接力不得另造第四份状态。
+
+### 1. 票状态
+
+| 状态 | 含义 | 是否视为下游依赖已完成 |
+| --- | --- | --- |
+| `proposed` | 票清单尚未确认 | 否 |
+| `confirmed` | 可进入派发候选，仍需核对 `blocked-by` | 否 |
+| `in-progress` | 实现或回修进行中 | 否 |
+| `in-review` | 独立评审进行中 | 否 |
+| `mr-submitted` | 等待主会话收口 | 否 |
+| `needs-human` | 有同票活动 human-decision 包，等待人回答或路由收尾 | 否 |
+| `done` | 已按交付流程合并并关账 | **是，唯一会解锁 `blocked-by` 的状态** |
+| `deferred` | 明确延期，可另行重开 | 否 |
+| `cancelled` | 明确取消，不代表需求已交付 | 否 |
+
+历史展示层可以把 `deferred / cancelled` 归入“已关闭”泳道，但不能把它们计入 `done` 集合。Human Decision 的 `defer / cancel` 只产生上述关闭状态，不删除依赖边，不允许 `next_status=done`。
+
+### 2. `dispatch` 块
+
+主会话在真实派发前写入并维护：
+
+```yaml
+dispatch:
+  host: zcode
+  model: <由 agents-config 解析并绑定的实际模型>
+  dispatched-at: 'YYYY-MM-DD HH:MM'
+  attempts: 1
+  dispatch_id: dispatch-<本次派发的稳定 ID>
+  session_id: <宿主会话 ID；新会话尚未分配时可暂空>
+  parent_session_id: <发起派发的主会话 ID>
+```
+
+- `attempts` 计算**新会话派发次数**，不计算原会话续接。首次派发为 1；打回后新开独立会话、`redispatch` 为 +1；`resume` 续接同一 `session_id` 不变。
+- `dispatch_id` 标识一次新派发，用于和 route / 事件 / 宿主回执对账。`resume` 沿用旧 `dispatch_id` 和 `session_id`；`redispatch` 使用新 `dispatch_id`，新 `session_id` 由宿主返回后补齐。
+- `parent_session_id` 表示谁发起本次派发，不用旧子会话冒充新子会话的父会话。
+- `model` 不能从 decision prompt 猜测，仍由 agents-config 校验、角色解析与宿主原生绑定决定。
+- `route_begin` 只给出 `attempts_before / attempts_after` 和 ID 计划；集成层实际派发时才改 `dispatch` 块并写 `dispatch` 事件。路由重放不得重复增加。
+
+### 3. 事件信封与幂等
+
+每行至少包含：
+
+```json
+{
+  "ts": "YYYY-MM-DD HH:MM",
+  "event": "human-decision",
+  "issue": "issue-001",
+  "event_id": "human-decision:dec-example:resolved:route-...",
+  "decision_id": "dec-example",
+  "state": "resolved",
+  "route_id": "route-..."
+}
+```
+
+- `ts` 使用本地 `%Y-%m-%d %H:%M` 或带时区 RFC3339；所有 replay / hosts / 对账读取器必须同时正确解析，不能把 RFC3339 当作 epoch 0。包内时间戳统一为带时区的 RFC3339。
+- 所有新事件通过 `append_event_once(path, event, event_id)` 写入。同一 ID、完全相同内容重放返回已写；同一 ID 内容不同即冲突，不能覆盖历史。
+- `event_id` 由写者根据稳定事实构造。例如每次呈现使用其 `presented_at` 派生，每次路由使用 `route_id`，所以取消后再次提问和明确失败后的重试不会互相覆盖，也不会因重放重复追加。
+- 旧事件流若缺少 `event_id` 或含坏行，严格存储会拒绝继续追加。集成层迁移 / 回填时必须先按明确规则补稳定 ID；Human Decision 和对账不得猜测 ID、重写业务含义或跳过损坏后伪装成功。
+
+### 4. 固定事件词表（原 11 个 + 1 个）
+
+不得另造同义事件词：
+
+| 范围 | 事件 | 必须表达的事实 |
+| --- | --- | --- |
+| 票 | `dispatch` | 新会话派发；附 `host / model / attempts`，并带 `dispatch_id / session_id / parent_session_id`（已分配时） |
+| 票 | `returned` | 实现 / 评审子会话结构化回报到达；回报本身不是验收证据 |
+| 票 | `verify-fail` | 验收复跑或符合性核对打回；附 `n` 和短摘要 |
+| 票 | `mr-submitted` | MR 或本地草案已提交；附 IID / URL 或路径 |
+| 票 | `needs-human` | 票进入人工决策；附原因和 `decision_id` |
+| 票 | `merged` | 合并已发生并关账；附 `host`、合并 `commit`、精确 `branch` / `target` 与 `source_head`，供清理回退复核 |
+| 票 | `circuit-break` | 无人值守熔断及原因 |
+| 票 / 需求 | `digest` | 阶段摘要、无人值守心跳或关闭说明；不冒充具体状态迁移 |
+| 需求，`issue: feature` | `feature-verified` | local-human 自动阶段完成且报告已生成；未验证项仍明确保留 |
+| 需求，`issue: feature` | `feature-confirmed` | 人已完成合并前确认 |
+| 需求，`issue: feature` | `feature-merged` | 需求已合入 main；附 commit |
+| 票 | `human-decision` | 决策包迁移；必须附 `decision_id / state / route_id`，无路由时 `route_id: null` |
+
+`human-decision.state` 与包状态一致：`pending / waiting / answered / routing / resolved / expired / cancelled / superseded`。`routing` 和 `resolved` 事件附当前 `route_id`；明确失败回到 `answered` 的事件也附失败路由 ID，以区别于首次回答。`resolved` 事件附 `next_status / strategy / attempts`，可作为“ack 后允许并执行票状态迁移”的对应事件。
+
+### 5. 谁改状态，谁写事件
+
+| 动作 | 票 / dispatch 写入者 | 同事务序列中的事件 |
+| --- | --- | --- |
+| 首次派发、打回后新开会话、decision `redispatch` | 主会话 / 宿主集成层写 `dispatch` 块，`attempts + 1`（首次从 0 到 1） | `dispatch` |
+| decision `resume` | 主会话续接原会话，不增加 attempts，不伪造新会话字段 | 不写新的 `dispatch`；只写 `human-decision: routing` |
+| 子会话回报 | 主会话接收，不直接据此改验收结论 | `returned` |
+| 验收复跑 / 符合性打回 | 主会话更新 `verify-fails` 和票状态 | `verify-fail` |
+| MR 提交 | 主会话写 MR 信息和票状态 | `mr-submitted` |
+| 新建 human decision | 主会话先写 pending 包，再把票置 `needs-human` | `needs-human` + `human-decision: pending` |
+| 呈现 / 未回答中断 / 回答 / 开始路由 / 到期 | 主会话只迁移决策包；票保持 `needs-human` | 对应 `human-decision` 状态 |
+| 路由明确失败 | 主会话把包退回 `answered`，票继续 `needs-human` | `human-decision: answered`（带失败 route_id） |
+| 收到真实 ack | 主会话先持久化 resolved 包，再把票改为计划 `next_status` | `human-decision: resolved`；若实际发生新派发，另有 `dispatch` |
+| 明确延期 / 取消 | 主会话按受控计划写 `deferred / cancelled` | `human-decision: resolved` 或显式 `cancelled`；不得写 `merged` |
+| 合并关账 | 主会话执行合并后把票置 `done` | `merged` |
+| 对账补写 | 主会话只根据已经持久化的事实修包 / 票 | 用原稳定 `event_id` 补缺失事件，不创造新事实 |
+
+事件不是“谁最后看见谁补一句”的自由日志。写票状态的职责方必须同时写对应事件；崩溃后对账可以按同一稳定 ID 补齐，但不能用摘要事件替代必须存在的状态事件。
+
+### 6. Human Decision 对账口径
+
+- 活动包包括 `pending / waiting / answered / routing / expired`，都应有同票 `needs-human`。`expired` 只是停止接受旧回答，不等于票已解锁。
+- `resolved` 包必须含真实 ack；只有它能支持把孤立 `needs-human` 修复为计划的 `next_status`。
+- `routing` 没有 ack 时结果未知：保留包和票，向宿主对账，不得重派、增加 attempts 或补 `dispatch`。
+- `superseded` 必须由新包的显式 `supersedes` 链接支持；旧答案不迁移。
+- `deferred / cancelled / superseded / resolved` 都不是活动包；若票仍为 `needs-human` 且没有另一活动包，对账只能依据真实 ack / 取消记录修复，否则报告冲突。
+- 同一票出现多个无关联活动包、孤立 `needs-human`、损坏事件流或无法解释的包路径时，停止自动推进并报告，不猜一个“看起来合理”的状态。
+
+## Human Decision v1（主会话唯一写者）
+
+本契约处理“必须由一个具体的人选择后才能继续”的单点决策。它不复述监督循环；票的 frontier、验收、合并和清场仍按原流程执行。
+
+### 1. 唯一真源与角色边界
+
+决策包唯一路径：
+
+```text
+dev/features/<feature-module>/<feature-slug>/decisions/<decision-id>.json
+```
+
+包的 `schema` 固定为 `ch-agent.human-decision/v1`，结构与跨字段约束由 `shared/references/human-decision.schema.json` 和 `shared/scripts/human_decision.py` 共同校验。`scope.feature` 是 `<feature-module>/<feature-slug>`，`scope.issue` 是稳定票号；`scope.repo` 只能是 `.` 或仓库标签，不能代替 API 的仓库根参数，也不能存绝对路径。
+
+| 角色 | 能做什么 | 不能做什么 |
+| --- | --- | --- |
+| 实现 / 评审子会话 | 构造请求，调用 `validate_request(envelope)`，把未持久化 envelope 结构化返回主会话 | 写决策包、改票、写事件、调用提问组件、记录回答、开始 / 确认路由 |
+| 主会话 | 校验并 `request`，统一 `present` / `answer`，生成受控路由，接收宿主回执，查询与对账 | 代替人选择、猜测模糊自由文本、伪造宿主回执、直接置票 `done` |
+| 宿主集成层 | 执行真实的原生提问、会话续接 / 新会话派发、已登记 supervisor operation，提供真实回执 | 把 decision prompt 当 shell 执行、让子会话自行问人、在结果不明时重派 |
+
+所有 Python 写操作都必须显式传 `main_session=True`；缺少该标志即失败，不能只凭 `source.role` 自称主会话。`validate_request` 不写任何文件。CLI 对应标志为 `--main-session`。
+
+无人值守时，主会话可以 `request(..., unattended=True)` 留下包、票和事件，但不得调用原生提问、等待回答或选择推荐项；`present(..., unattended=True)` 也原样返回 `pending`。循环是否继续其他票由监督契约决定，本模块不复制那部分逻辑。
+
+### 2. 请求包与不可变依据
+
+请求包含：
+
+- `id`：小写稳定 ID，只允许字母数字和连字符；路径由模块构造，调用方不能提供文件路径。
+- `scope`：`repo / feature / issue`。
+- `source`：`host / skill / role / dispatch_id / session_id`，可带 `parent_session_id`；它们只用于续接和关联，不出现在对人的问题里。
+- `basis`：`issue_sha256 / head_commit / report_sha256`。回答和开始路由必须传入主会话刚核对的 `current_basis`，三项必须完全一致。变化时旧答案不能套用，必须 `supersede` 创建新包；新包不复制旧答案或路由。
+- `question`：`context / decision / why / recommendation / options`。`recommendation` 是一个选项 ID，不是自动答案。
+- `evidence`：最多 12 条 `{path, sha256, summary}`。路径必须是仓内相对 POSIX 路径；创建时核对文件摘要。原始日志、内容快照和秘密不进入包。
+- `presentation.header`：不超过 12 个字符的业务短标题。
+- `expires_at`、`supersedes` 与完整时间戳。
+
+每题 2–4 个互斥选项。选项有稳定 `id`、动作型 `label`、说明代价与风险的 `description`，以及受控 `route`：
+
+| `action` | 允许的计划 | 允许的结果票状态 |
+| --- | --- | --- |
+| `continue` | `strategy=resume/redispatch`，受控 `role=development/review`、`tier=default/escalated`，以及自包含 `prompt` | `confirmed / in-progress / in-review / mr-submitted` |
+| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence` |
+| `defer` | 无 prompt、无会话计划 | `deferred` |
+| `cancel` | 无 prompt、无会话计划 | `cancelled` |
+
+任何位置都禁止 shell / command / args / env 等执行字段、任意未登记 operation、`next_status=done`、路径逃逸、秘密和大型日志。请求整体不得超过 128 KiB。模块只生成计划，永远不执行 prompt 或 operation。
+
+### 3. 状态机与票状态不变式
+
+```text
+pending → waiting → answered → routing → resolved
+    ↑        │
+    └────────┘  问题卡取消 / Escape / 工具超时（未回答）
+
+pending / waiting / answered --显式且到期 expire--> expired
+pending / waiting / answered / expired --显式 cancel--> cancelled
+活动包（routing 除外）--supersede--> superseded + 新 pending
+```
+
+- 活动状态 = `pending / waiting / answered / routing / expired`。`expired` 不再接受回答，但仍是活动包，继续要求原票保持 `needs-human`，直到显式取消或用新包替代。
+- 同一票最多一个活动包。`request` 重放相同不可变内容返回原包；相同 ID 改 basis 或其他请求内容即冲突。新 ID 遇到同票活动包也会被拒绝，除非它明确 `supersedes` 旧包。
+- `needs-human` 必须能定位到同票活动包。`request` 先写包，再把票置为 `needs-human` 并补事件。对账发现孤立 `needs-human` 时只报告，不猜之前状态，也不伪造一个包。
+- 回答只接受 `waiting`，必须同时记录 `option_id` 和用户原文 `text`。原生组件的标签映射由主会话确定；模糊自由文本应继续澄清，不能猜成选项。
+- 只有持久化宿主 ack 后才能进入 `resolved`，随后才允许把票从 `needs-human` 改为计划的 `next_status`。本模块在 `route_ack` 中按此顺序写入；集成层不得提前改票。
+- `defer / cancelled` 都不是 `done`，不得删除或改写任何 `blocked-by`，也不得让下游按完成解锁。Human Decision 永远没有直接 `done` 路由。
+
+### 4. 提问投影与未回答语义
+
+`to_question_component(packet)` 返回宿主 `AskUserQuestion` 形状：
+
+```json
+{
+  "questions": [{
+    "header": "订单重试",
+    "question": "……2–4 句……",
+    "multiSelect": false,
+    "options": [
+      {"label": "增加防重复处理（推荐）", "description": "……"},
+      {"label": "暂缓这张票", "description": "……"}
+    ]
+  }]
+}
+```
+
+投影恰好一个问题；推荐项始终第一，标签由模块追加 `（推荐）`。可见字段只有 `header / question / multiSelect / options`，选项只有 `label / description`。不得暴露 decision ID、route ID、会话、内部角色、状态词、哈希、路径或原始日志，也不要求用户“回 A / B”。宿主自动提供的“其他”不重复添加。
+
+只有纯文本降级使用 `to_text_fallback(packet)`：它为同一组选项显示 `1. 2. ...` 并提示“请回复选项编号，或直接说明你的选择”。编号不是持久化选项 ID；记录回答时仍保存稳定 option ID 与原文。
+
+`cancel_presentation` 和 `timeout_presentation` 只把 `waiting` 退回 `pending`，保留“未回答”事实；它们不选择推荐、不取消票、不写 `expired`。迟到的取消 / 超时不能覆盖已存在的回答或路由。只有显式 `expire` 且已到 `expires_at` 才能写 `expired`。`cancel` 是另一项明确的管理操作，表示人要取消本票，绝不能由问题卡关闭动作触发。
+
+### 5. 路由、计数与回执
+
+`route_begin` 需要与回答时相同的 basis，生成并持久化唯一 `route_id` 和计划：
+
+- `resume`：沿用原 `dispatch_id / session_id`，`attempts_after = attempts_before`，供主会话续接同一子会话；不新增一次派发。
+- `redispatch`：生成新 `dispatch_id`，`session_id=null` 等宿主分配，`attempts_after = attempts_before + 1`，供主会话新开独立子会话。重放 `route_begin` 返回原 route，不再次计数。
+- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。
+- `defer / cancel`：返回受控关闭计划，不增加派发次数。
+
+集成层在实际新派发前，按计划更新票的 `dispatch` 块并追加 `dispatch` 事件；模型 / effort 仍由 agents-config 和宿主原生角色解析，本模块不猜模型。续接不新增 `dispatch` 事件，重派新增。无论哪种路由，ack 前票都保持 `needs-human`。
+
+`route_ack(route_id, ack)` 只接受当前路由的真实宿主回执，先保存 ack 和 `resolved`，再改票及补事件。相同路由重放不能换一份不同回执。
+
+只有宿主明确报告“未执行或已安全失败”时，才能 `route_fail(..., outcome_known=True)`：包回到 `answered`，保留原回答和失败事实，票继续 `needs-human`。之后人可以维持选择并生成新 route，也可以因 basis 变化重开新包。结果不明不得调用 `route_fail`，不得新建 route 或重派。
+
+### 6. 恢复与分步写入对账
+
+新会话接管或发现 `routing` 时，先运行 `reconcile`，再向宿主核对原 `route_id / dispatch_id / session_id`。模块恢复路由时只返回原计划，不会生成第二次派发。
+
+写入顺序保证可修复性：
+
+- 创建：新包 → 旧包替代关系（如有）→ 票 → 幂等事件。
+- 回答 / 呈现 / 路由：包 → 幂等事件。
+- ack：包含真实 ack 的 resolved 包 → 票 → 幂等事件。
+- 替代采用“新包先写”：崩溃可能短暂留下两个有明确 `supersedes` 链接的包，对账可以完成旧包替代；不能反过来让票失去活动包。
+
+`reconcile` 可以：
+
+- 根据活动包补回票 `needs-human` 和缺失事件；
+- 根据新包的显式 `supersedes` 链接完成旧包替代；
+- 根据已持久化的真实 ack 补写计划中的票状态和 resolved 事件；
+- 根据显式取消记录补写取消结果；
+- 报告同票多个无关联活动包、孤立 `needs-human`、损坏包和未知路由。
+
+它不能把 `routing` 猜成成功或失败，不能伪造用户回答 / 宿主 ack，不能复活旧 basis，不能替孤立 `needs-human` 选择先前状态。`routing` 且没有 ack 的包会列入 `unknown_routes`，保持不动。
+
+### 7. API 与 CLI 入口
+
+Python：
+
+```text
+validate_request                       request / supersede
+present / cancel_presentation / timeout_presentation
+answer                                 route_begin / route_ack / route_fail
+expire / cancel                        show / list
+active_for_issue / active_for_feature reconcile
+to_question_component / to_text_fallback
+```
+
+CLI 子命令与上面同名，路由函数使用连字符：
+
+```bash
+python3 human_decision.py validate-request --request envelope.json --repo REPO
+python3 human_decision.py request --main-session --repo REPO --request envelope.json [--unattended]
+python3 human_decision.py present --main-session --repo REPO --feature M/S --id DECISION [--channel text]
+python3 human_decision.py answer --main-session --repo REPO --feature M/S --id DECISION --option-id OPTION --text '用户原话' --current-basis basis.json
+python3 human_decision.py route-begin --main-session --repo REPO --feature M/S --id DECISION --current-basis basis.json
+python3 human_decision.py route-ack --main-session --repo REPO --feature M/S --id DECISION --route-id ROUTE [--ack ack.json]
+python3 human_decision.py route-fail --main-session --repo REPO --feature M/S --id DECISION --route-id ROUTE --reason '宿主明确未执行' --outcome-known
+python3 human_decision.py reconcile --main-session --repo REPO [--feature M/S]
+```
+
+另有 `expire / cancel / supersede / show / list / active / cancel-presentation / timeout-presentation`。`--request -` 可从 stdin 读取 envelope；`--current-basis` 和 `--ack` 接收 JSON 文件。
 
 
 ## 架构图谱与经验的消费义务
 
-- 读取现行架构或影响分析时，使用 `python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]`；现有 `docs/ARCHITECTURE.md` 表由同一读取器兼容读取。分片存在后以 `docs/architecture/*.json` 为结构化真源，图谱查询默认排除 `needs_verification`。
-- 所有开发技能按模块/分类/适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
-- `/pd-plan` 在方案中记录受影响模块及其现行架构记录 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
-- `/tech-spec` 标记新增、修改、废弃或版本限定的接口/依赖关系，引用图谱 ID 与命中的项目经验；契约更新说明来源定位和验证入口。
-- `/issue-split` 将图谱记录更新、替代关系、失败场景与验证义务拆到具体票及 DoD，避免只在集成票留空泛责任。
-- `/implement` 按票更新图谱；只有代码或契约已生效且有可复核依据时，才能把记录标为 `current` 并填写验证提交/证据。推断或缺失证据保留 `needs_verification`。
-- `/review` 在契约巡检时运行 `contract_check.py --check`。事实更正需已生效代码/发布证据；职责或语义争议交回原责任环节，不以复盘直接覆盖结论。经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。
+- 架构事实唯一真源是 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。读取现行架构或影响分析使用：
+  ```bash
+  python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]
+  ```
+  默认查询排除 needs_verification / superseded / retired，release_only 仅按匹配版本查询。无分片的旧首页必须先 `migrate-legacy`，不得把旧表与分片合并成双真源。
+- 所有开发技能按模块 / 分类 / 适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
+- `/pd-plan` 记录受影响模块及现行架构 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
+- `/tech-spec` 在 3.2 用固定表逐条声明 `稳定 ID / new|modify|retire / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，同时标记版本适用范围和命中的项目经验。
+- `/issue-split` 把每个 ID 写入承接票 frontmatter `architecture-updates`，同时拆出失败场景和验证义务；不得只在集成票留空泛责任。SPEC-2 按 ID 对账，不再以正文出现 architecture 字样放行。
+- `/implement` 按票更新分片、证据与替代关系。`current` 必须有完整 verified_commit 且为候选 HEAD 祖先，候选上的源码 hash / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则保持 needs_verification。
+- 未声明 ID 的源码 diff 命中接口记录时执行 flow-back，补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。
+- `docs/ARCHITECTURE.md` 只能由以下命令生成；禁止手改：
+  ```bash
+  python3 ../shared/scripts/architecture_graph.py render write --repo <项目根>
+  python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>  # 只读字节比对
+  ```
+- `/process_check` 在 review / merge / close 调用 `architecture_graph.check`、`check_flow_forward/back` 和 render check；不是只在复盘补检。`/review` 另运行 `contract_check.py --check` 做完整契约巡检。事实更正需已生效代码 / 发布证据，职责或语义争议交回原责任环节或 human-decision。
+- 经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。
 
 # /implement
 
-你是实现工程师（Implementer）。你负责：**把一张已确认的票，在独立 worktree 里实现、测试、留证据，经独立评审（`/ai-review`）并回修 BLOCKER 后，把 merge request 推到 ready；评审通过后由主会话合并，无需人审**。
+你是实现工程师（Implementer）。你负责：**把一张已确认的票，在独立 worktree 里实现、真实执行测试、生成机器证据，经独立评审并回修必须先修的问题后，把 MR 推到 ready**。
 
 你不负责：
 
-- 质疑票的范围与验收标准（发现范围问题 → 票状态置 `needs-human` 并说明，不自行改票）
-- 合并 MR（合并由主会话在评审通过后执行；你以被派发独立对话身份运行时只到 MR ready 并结构化回报）
-- 修复 Medium / Low 评审意见（记入 impl-log 遗留即可）
-- 部署与发布
+- 修改票范围、DoD、配置或验收命令来放过实现；范围问题只返回 human-decision 请求
+- 直接问人。被派发身份只返回未持久化决策请求，由主会话统一提问、记录和路由
+- 合并、晋级、公开 record-merge 或从清理入口合并代码；这些只由主会话通过 `delivery.py` 执行
+- 在 MR ready 时删除 worktree。主会话还要复跑，统一清场发生在合并登记之后
+- 修复 Medium / Low 评审意见（记入 impl-log 遗留）或部署发布
 
-你的位置是：
+主链路：
 
-**票（confirmed）→ worktree 实现 + 证据（你）→ draft MR → ocr 评审（`/ai-review`，默认 delegate 模式）→ BLOCKER 回修（你，同一上下文）→ MR ready → 主会话合并 → done**
+```text
+confirmed → delivery start → TDD + runner evidence → process review
+→ 独立评审 + review receipt → 回修复审 → process merge + MR ready
+→ 主会话 supervisor runner + conformance + process close
+→ delivery merge → close-and-clean → done
+```
 
-运行身份：
+## 启动前校验（不过则不动代码）
 
-- 标准形态：issue 生成后，由主会话按「派发协议」**自动新开一个独立对话**派发执行；你不继承、也不应依赖派发方的会话上下文
-- 被派发对话按「派发协议」先校验配置，再用 `resolve --role development` 取当前宿主 `development.default / escalated` 的原生角色绑定（普通票 → default；集成 / 高风险票及评审达 `review-round-alert` 后的续修 → escalated）；不得只读模型名后在普通子会话里静默继承
-- 人直接在主会话运行 `/implement` 时，本会话即主会话，评审通过后直接执行合并（见 Step 8）
+1. 运行：
+   ```bash
+   python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
+   python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+   ```
+   配置缺失、旧版本、字段非法、当前宿主或模型不可用时停止。A 类仓只读辅助，禁止实现。
+2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。
+3. `/implement issue-NNN` 或 GitLab IID 必须唯一定位本地票。新启动只接受 `confirmed`；`proposed` 先回 `/issue-split` 完成票清单确认，其他状态按 ticket context、journal 和 decision 包恢复，不凭 worktree 是否存在猜状态。
+4. `blocked-by` 全部为 `done`；`deferred / cancelled / needs-human` 均不算完成。
+5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、命中的架构记录与适用经验。发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
 
----
+## Step 1：冻结上下文并建立隔离
 
-## 启动前校验（任一不过即 `阻塞`，不动任何代码）
+在主工作区执行：
 
-1. `./dev/agents-config.md` 存在；`repo-level = A` → 拒绝执行（A 类仓只读辅助），显式警示
-2. 票定位：`/implement issue-NNN`（或 GitLab IID 反查票文件）；票文件 `status = confirmed` 才可启动——`proposed` 提示先过门②（`/issue-split`），其余状态按现状恢复或提示
-3. `blocked-by` 中的票全部 `done`；否则列出未完成阻塞项后停止
-4. 读入：票全文（含 DoD）；tech-spec「4. 约束与假设」全节必读，其余按票备注标注的节锚点选读（未标注的节不读）；PRD 相关节（意图）；GLOSSARY
+```bash
+python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --repo <主工作区>
+```
 
----
+`start` 负责：
 
-## 工作流
+- 从唯一目标分支创建 `feat/<feature-slug>-<issue-id>` 和隔离 worktree；local-human 只能使用本需求集成分支，目标不存在即停止。
+- 建立并验证 `<worktree>/dev` 指向主工作区 dev 的软链；实体副本、broken 或错误目标软链一律拒绝。
+- 冻结完整 target/base/source HEAD/tree、declared-scope、architecture-updates、票 / DoD / spec / config 哈希到 `ticket-context.json`。
+- 支持中断后的幂等续建：先完整预校验 DoD/spec/config/scope，恢复时核对实际 worktree、分支和 context，不重复创建或重复应用变更。宿主自管沙箱也必须提供等价的 context 与资源回执，不能另开无记录的第二路径。
 
-### Step 1：开 worktree 隔离
+所有代码改动只在票 worktree；dev 产物只写主工作区。每票独立 worktree，本 skill 一次只驱动一张票。准备完成后按 Progress Events 契约把票从 `confirmed` 置为 `in-progress`；恢复其他活跃状态保持原状态。
 
-- 基准 = 本票**目标分支**：`TARGET=$(python3 ../shared/scripts/feature_closeout.py target --issue <票文件>)`（`feature-closeout.mode: local-human` 时为本需求集成分支，否则 `main-branch`；规则见「Dev 配置」），`git worktree add .worktrees/<issue-id> -b feat/<feature-slug>-<issue-id> "$TARGET"`——显式传 start-point，不从当前 HEAD 隐式建；目标分支不存在即停下报告（集成分支由主会话在首次派发前建立），不得退回 main
-- **紧接建 dev/ 软链**（约定见「Dev Artifact 路径约定」，防实体副本膨胀）：`ln -s ../../dev .worktrees/<issue-id>/dev`（宿主自管沙箱改用主工作区 dev/ 绝对路径作目标），此后 worktree 内 `./dev/` 读写自动落主工作区。`<worktree>/dev` 已存在：是软链直接复用；是实体目录 → 停下报告（已有真实副本，按清场序列 salvage 规则处置后再建链），不静默覆盖、不自行删除；软链建不成（如 Windows 权限）→ 全程用主工作区绝对路径读写 dev/。恢复场景 worktree 已存在：缺软链即补
-- **基线冻结**（`verify-policy.base-freeze`）：开工 base commit 记入 impl-log；实现与评审期间不追集成分支、不因 main 前进而 rebase，只在 Step 8 合入前 rebase 一次
-- 宿主自管会话沙箱（如 Codex 的 `~/.codex/worktrees/`）时：以沙箱为隔离，不再嵌套 `.worktrees/<issue-id>`；分支仍按 `feat/<feature-slug>-<issue-id>` 命名，收口清场由主会话按分支名发现
-- 全部工作发生在 worktree 内；主工作区不放任何本票改动
-- 并行多票 = 各自 worktree，互不干扰；本 skill 一次只驱动一张票
-- worktree 已存在（恢复场景）：检查分支状态后续跑，不重复创建
-- worktree 准备完成、即将进入实现时：主工作区票文件 `status` 从 `confirmed` 置为 `in-progress`；恢复其他活跃状态时保留现状。会话命名按票 frontmatter 投影，不能从 worktree 是否存在反猜状态
+## Step 2：每次改动前后检查约束
 
-### Step 2：红线即时检查
+- `verify-policy.deny` 命中新增、修改、删除或重命名的任一路径即停止，登记不能豁免。返回 human-decision 请求，说明业务影响、为什么不能自行决定及可选处理。
+- TDD 新增测试必须登记并用 runner 留见红证据。既有测试修改只能映射到真实 DoD / tech-spec 行为变化，限于相关断言和夹具；无映射、删除测试或放宽无关断言均停止，最终须独立评审回执闭合。
+- 派生物只能由 `generated-refresh` 声明的唯一生成器产生。流程核对会在独立临时工作区重跑并比较 tree，不能靠“只改字段”的文字声明。
+- 每轮对照冻结 declared-scope 检查全部 changed paths。越界退回 `/issue-split` 重新确认并生成新 context；不能登记漂移后继续，也不能自行扩大 scope、排除规则或粒度上限。
+- 生产文件数 / LOC 超上限立即停止，创建重新拆票的 human-decision 请求；增加测试或升级模型不能替代拆票。
 
-- 每次改动前后对照 `agents-config.redlines` 的 glob：命中协议文件 / 密钥配置 → **立即停止**，票置 `needs-human`，向用户说清：哪处改动碰到了红线、命中的是哪一条、为什么不能碰、建议怎么处理
-- **禁止为了让验收通过而修改已有测试或验收命令本身**；TDD 新增测试允许，但必须登记进 impl-log「红线接触记录」
-- **预授权机械刷新**：命中 `agents-config.mechanical-refresh` 白名单的派生字段 / 生成块随生产变更刷新时，用脚本或既有生成器产出，附「只动所列字段」的机器比对结果，逐文件登记 impl-log 后继续，不停等人；白名单外仍按红线停
-- **需求驱动测试更新（自动执行，不停等人）**：票 DoD / tech-spec 明确改变既有行为、旧测试断言与新需求直接冲突时，随票更新这些旧测试不算「为验收改测试」——前提同时满足：① 逐条可溯：每个被改测试文件在 impl-log「红线接触记录」登记「测试 → 票 DoD 条目 / tech-spec 节锚点」映射与冲突说明；② 范围受限：只改被变更行为覆盖的断言与夹具，不借机放宽无关断言；③ 新断言反映新需求行为，不是单纯放过现状。映射未登记、映射不上或超出范围的旧测试改动，仍按红线停
+## Step 3：TDD 实现
 
-### Step 3：TDD 实现（在预定接缝）
+按 tech-spec 的测试接缝一次实现一个纵向切片。
 
-- 按 tech-spec 测试策略的接缝**先写失败测试**，再实现到绿；一次一个纵向切片
-- **见红验证（不可省略）**：新测试在写实现前先单独运行一次——必须失败，且 ① 失败是断言失败，不是语法 / 导入 / 运行错误（error 不算见红）；② 失败输出指向预期行为差异（不是无关报错）。第一次跑就通过 = 在测已有行为或没接到代码路径，重写测试再往下走。见红要点（测试名 + 首次失败输出截取）随 TDD 登记写入 impl-log「做了什么」；没亲眼见过红的测试等于没写
-- **替代即删除**：新实现落地时，被替代的旧实现（代码、文件、配置、失效引用）同票清理，不留注释残留、兼容开关或双路径并存——版本回溯由 Git 承担；tech-spec 约束栏要求保留的除外
-- 新测试先单独见红；此后**每个实现轮次只跑本票 DoD 验收命令 + `quality-gate.fast`**，秒级反馈，不运行其他票级套件。DoD 与 fast 的真实输出在 Step 5 汇总落盘
-- commit 小步提交，消息格式：`[<feature-slug>] issue-NNN: <一句话>`（便于评审从 commit 定位 spec）
-- **每轮顺手做漂移检查**（秒级）：`git diff --name-only <merge-base>..HEAD` 对比票的 `declared-scope`，所有偏差登记进 impl-log「漂移记录」；有依据的小漂移登记后继续，范围无依据或无法说明时置 `needs-human`。实测生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）或生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400）→ **立即停止，票置 `needs-human`，退回 `/issue-split` 再拆或请人裁决**；粒度红线不能靠增加测试解除，也不得自行扩大 `declared-scope` 放行
-- **契约落图谱（票 DoD 含架构契约条目时）**：实现完成后在 worktree 分支内按稳定 ID 更新对应 `docs/architecture/*.json` 分片——新增 / 修改 / 替代逐条对应 tech-spec 3.2；只有代码已合并且代码、发布或决策证据可复核时才标 `current`，否则保留 `needs_verification`。`docs/ARCHITECTURE.md` 是生成首页，禁止手改
-- **flow-back 契约补记**：本票 diff 改动接口记录绑定的代码位置而票未声明契约 DoD → 同分支补记对应图谱记录，并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射与原因。发现记录与代码不符但本票未改它，记入 impl-log「遗留」，由对应文档阶段更新分片
+1. 写实现前先为每个新测试执行真实见红：
+   ```bash
+   python3 ../shared/scripts/verify_issue.py red \
+     --issue <票文件> --repo <票 worktree> \
+     --id <测试ID> --command <测试命令> --test-path <测试路径>
+   ```
+   必须是指向预期行为差异的断言失败；语法、导入、运行错误或首次通过均无效，重写后再跑。
+2. 再写实现到绿。替代旧实现时同票删除旧代码、失效文件、配置与引用，不留兼容开关或双路径；tech-spec 明确要求保留的除外。
+3. 小步提交：`[<feature-slug>] issue-NNN: <一句话>`。
+4. 每个实现轮次只重跑本票 DoD + fast：
+   ```bash
+   python3 ../shared/scripts/verify_issue.py run implementer --issue <票文件> --repo <票 worktree>
+   ```
+   不运行票级 scoped / full，不换算其他测试套件。
+5. 票声明 `architecture-updates` 时，逐稳定 ID 对照 tech-spec 3.2 更新 `docs/architecture/*.json`、结构化证据和替代关系；代码与证据尚未生效时保持 `needs_verification`。随后只通过 `architecture_graph.py render write` 重生成首页，禁止手改。
+6. diff 触及已绑定接口源码而票未声明 ID 时，执行 flow-back 补分片和 impl-log「接口 → 代码位置」映射；删除 / 重命名源码须同时 retired / superseded。发现与本票无关的漂移只记遗留，不伪造 current。
 
-### Step 4：自修复循环（≤ max-fix-rounds）
+## Step 4：自修复（≤ max-fix-rounds）
 
-- 触发：构建、任一票 DoD 验收命令或 fast 质量门失败
-- 动作：定位 → 修复 → 重跑本票 DoD + fast；每轮记入 impl-log「自修复轮次记录」
-- **失败输出不落对话**：重跑时完整输出重定向到 worktree 内未跟踪文件（如 `.logs/last-gate.log`，不提交、不进 MR），上下文只截取首个失败点与尾部摘要；定位需要更多时再按需读该文件
-- 达到轮次上限仍未过：票置 `needs-human`，完整轨迹（命令 + 输出 + 已试路径）落盘，向用户用大白话说清：卡在哪一步、试过哪些办法、接下来建议怎么办；**停止，不硬磨**
+- 构建、DoD、fast、runner 前后 tree 检查或输出匹配失败，都进入“定位 → 修复 → 重跑 DoD + fast”。每轮写 impl-log「自修复轮次记录」。
+- runner 已把完整输出和哈希写入 artifact generation；对话只读首个失败点与尾部摘要，不把整套日志塞入上下文。worktree 内 `.logs/**` 不是可随意删除的缓存，清场前必须 salvage。
+- 达到上限仍未通过，保存完整轨迹并返回 human-decision 请求；停止，不硬磨。
 
-### Step 5：证据落盘（成功判定唯一依据）
+## Step 5：机器证据与实现记录
 
-- 在 worktree 内**实际执行**票的每条 DoD 验收命令与 `quality-gate.fast`，按模板 `shared/templates/evidence.md`（相对本 SKILL.md 为 `../shared/templates/evidence.md`）逐条记录命令、退出码、关键输出与完成时 commit hash
-- **票级验证只有 DoD + fast**：实现、自修复、评审回修与冲突回修都使用同一范围；不换算受影响测试集，不在票内运行完整套件。套件级完整回归只在分支 / main 的 CI full 中执行，票级 evidence 不代替、也不声称取得 CI full 判决
-- **测试职责边界按 `verify-policy.gate-scope`**：票级 DoD + fast 只对功能类用例判红；`non-gating` 类（性能 / 展示）在最终 commit 执行一次、原始输出落盘，列入 evidence「人工确认项」，不进 `all-passed` 分母、不为噪声反复重跑、不为压阈值扩大改动范围；DoD 中带性能阈值或样式断言的条目同样按此处理并在 evidence 标注。分类清单声明了外部依赖的用例在依赖缺失时 skip，evidence 列 skip 清单
-- **先在失败按 `verify-policy.attribution` 隔离**：`quarantine` 模式下，落盘隔离清单内的用例以 skip（标 quarantined）执行——不产生 exit 1、不进 `all-passed` 分母、不逐项归因，evidence 只列隔离数与清单外补跑记录；清单外失败 = 疑似本票引入，只对这几个单项补跑 base 侧对照，不整套重跑。`two-sided` 模式每条失败 branch / base 同命令对照。任何模式下都不得把本票引入的失败记成先在失败；历史同签名归因只处理真实失败，未执行项不得记 quarantine 或通过
-- **bug 票回归有效性（票 frontmatter `type: bug` 必做）**：修复转绿后证明「测试真的能抓住这个 bug」——临时 revert 生产修复（保留回归测试）→ 重跑回归测试，须见红（断言失败，记退出码与失败输出要点）→ 恢复修复 → 重跑须绿。三次结果记入 evidence「回归有效性」节；revert 后不变红 = 测试从未复现 bug，修复不算完成，回到 Step 3 重写复现测试
-- 全部 DoD 验收命令与 fast 实际执行且退出码为 0 → evidence 头部 `all-passed: true` 并记录完成时 commit hash。**任何一条必跑检查不过、出现新增 / 未归因失败 = 未完成，回到 Step 4**；`all-passed` 只表示本票 DoD + fast 通过，不表示分支 / main 的 CI full 已通过
-- 不信自报：没有 evidence 文件与真实输出，不得宣称完成；票完成、MR ready 或合入集成分支都不得写成套件级完整回归已通过
-- 产出 impl-log（模板 `shared/templates/impl-log.md`，相对路径 `../shared/templates/impl-log.md`）：做了什么 / 放弃了什么 / 假设了什么 / **需求覆盖矩阵** / 红线接触 / **漂移记录** / 轮次记录；遵守 `artifact-budget`：正文只写结论、表格与 raw 指针，不写过程叙事
-- **需求覆盖矩阵逐条可证伪**：票 DoD 每条与「要做什么」每个行为点各一行——实现位置（文件:符号）+ 覆盖测试 + evidence 行；行为点没有对应实现就如实写「无对应实现」，不得留空、不得用无关行充数；需求行为主干实现标 ★。主会话合并前的需求符合性核对以本表为索引逐条核，缺行 / 空表在 `process_check.py` 即 FAIL
-- 证据引用的捕获物（截图 / 页面捕获 / 原始日志）落主工作区 `impl/<issue-id>/` 同目录并按「留存与体积控制」执行：中间轮只留最终轮，可重下载缓存与 merge 中间物不留
+1. 最终候选再次运行 `verify_issue.py run implementer`。它逐条执行冻结 DoD 和 fast，记录完整 HEAD/tree、命令、退出码、输出匹配、runner 身份、日志及 SHA256，生成 `verification-implementer.json` 和 evidence Markdown。不得手写 `all-passed` 或替换命令。
+2. `type: bug` 还必须执行 `verify_issue.py bug-regression`：修复后绿 → 在一次性 detached worktree revert 生产修复并见红 → 恢复后绿。任何一段不成立都回 Step 3。
+3. non-gating、env skip、quarantine、two-sided 和 load-flake 按配置写入结构化记录；未执行项不得记通过或 quarantine。
+4. raw / OCR / 截图必须登记 artifact generation，绑定 candidate tree、generation、路径和哈希。当前与最后成功证据保留，失效代际只能由后续 `close-and-clean` 预检清理。
+5. 按模板产出 impl-log：做了什么、放弃与假设、需求覆盖矩阵、约束接触、范围变更和轮次记录。每个 DoD / 行为点映射到文件:符号、覆盖测试和 evidence 指针；未实现如实写，主干行为标 ★。
+6. 证据正文只留结论和指针，遵守行数与体积预算。没有 runner JSON、真实日志和精确候选绑定，不得宣称完成或 CI full 通过。
 
-### Step 6：建 draft MR 并触发评审
+## Step 6：评审前门禁与独立评审
 
-- **流程核对（评审前置门）**：`python3 ../shared/scripts/process_check.py --issue <主工作区票文件> --repo <本票 worktree> --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>`——红线登记、「漂移记录」、生产文件 / LOC 粒度红线、DoD + fast evidence 与 HEAD 一致性一次判完；退出码非 0 → 补登记 / 刷新 evidence 后重跑（计入自修复轮次），粒度超线则停止并置 `needs-human` 退回再拆，通过才发起评审。评审员只读这份结果，不重做流程核对
-- 票置 `in-review`；push 分支
-- **gitlab 模式先建 draft MR**：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`，正文按 MR 模板填初版
-- 评审触发按 `agents-config.ocr.mode`（无论哪种模式，评审都必须由独立实例执行——写查分离；评审固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort，不随开发角色切换）：
-  - `delegate`（默认）：按「派发协议」的宿主适配机制**新开独立对话**（新实例）运行 `/ai-review`——ocr 只做文件筛选与规则解析，评审由新开的独立对话执行；固定点 = `main...HEAD` 的 merge-base，spec = 本票文件 + tech-spec，并传入流程核对 JSON 路径；保留评审对话句柄（如 agentId），供 Step 7 复审续接
-  - `local`：同样以**新开独立对话**（新实例）运行 `/ai-review`（local 模式），同上固定点与 spec
-  - `ci`（需 `gitlab-ci: enabled`）：MR push 自动触发 open-code-review 评审，findings 以内联评论回贴 MR（review job 仅在 `merge_requests` 事件运行，故 MR 必须先存在）；等 review job 结束后，以**独立对话**运行 `/ai-review`（ci 模式）解析结果、产出报告
-- 评审报告落 `reviews/`；不指示、不引导评审结论。评审只判代码、需求一致性与测试质量，不运行或等待 CI full；分支 / main 晋级时的 CI full 判决与可信运行证明由 promote 相位单独核对
+1. 执行：
+   ```bash
+   python3 ../shared/scripts/process_check.py --issue <票文件> --repo <票 worktree> \
+     --phase review --json <主工作区 impl/<issue-id>/process-check-review.json>
+   ```
+   失败则修复或重新拆票，不能发起评审。
+2. 按 Progress Events 契约把票置 `in-review`，push 分支。GitLab 模式先建 draft MR：`glab mr create --draft`，标题 `[<feature-slug>] issue-NNN: <标题>`。
+3. 按 `ocr.mode` 发起独立 `/ai-review`：
+   - `delegate`：OCR preview + rule 只筛文件和规则，独立 `supervisor-review` 对话逐文件评审；首轮覆盖完整 diff 和全部 BLOCKER。
+   - `local`：独立对话执行 OCR local review。
+   - `ci`：MR push 触发 CI OCR，独立对话读取 artifacts / discussions。
+4. 固定 base、HEAD/tree、票、spec、process JSON 和实现者身份都传给评审；评审固定使用 `resolve --role review`，不得与实现同会话。保留真实 agent/session 句柄供复审。
+5. 评审报告落 `reviews/` 后生成机器回执：
+   ```bash
+   python3 ../shared/scripts/review_receipt.py create \
+     --issue <票文件> --repo <票 worktree> --input <评审结构化结果.json> \
+     --report <评审报告> --process-check <process-check-review.json> \
+     --coverage-preview <OCR preview.json> --output <review-receipt.json>
+   ```
+   报告、preview、findings、身份和候选不一致时不得进入回修通过或合并。receipt create 会先通过 `write_review_binding` 把本次评审绑定写入真实评审会话，再重读核验；validate 只读。原生写能力不可用、绑定未实际应用或会话身份矛盾时不得生成 host-verified 回执，也不能用普通 JSON 自证。
+6. 评审缺唯一票或关键输入时只返回 human-decision 请求，不伪造报告 / 结论；评审不运行、也不等待 CI full。
 
-### Step 7：BLOCKER 回修（同一上下文，计入轮次预算）
+## Step 7：必须先修的问题回修与复审
 
-- Critical / High（BLOCKER）：在当前 worktree 修复 → 新 commit → push（接 CI 时自动复审本轮改动）→ 复审：宿主支持对话续接时把「回修 commit 范围 + 上轮报告路径」发回**同一评审对话**（不新开实例、不重载评审上下文，见「派发协议」同票复审续接）；宿主不支持时重新走 Step 6 新开评审对话全量复审；直至无 BLOCKER 或轮次耗尽（耗尽 → `needs-human` + 完整轨迹）
-- **回修轮验证范围**：每个 BLOCKER 回修轮只重跑本票 DoD + fast，并刷新与最终 HEAD 绑定的 evidence；不增加其他票级套件
-- Medium / Low：记入 impl-log「遗留」，不阻塞；评审关于性能 / 展示的意见（无功能错误时）列入 evidence「人工确认项」，不作 BLOCKER
+- Critical / High：在同一实现 worktree 修复 → 新 commit → push → 重跑 DoD + fast 并刷新 process review。宿主支持时把回修范围、上轮报告和 receipt 发回同一评审对话；不支持才新开独立评审。
+- 复审核回修增量、旧问题闭合和新增回归，生成独立短报告与新 receipt；最终 HEAD/tree 改变后旧 receipt 失效。
+- Medium / Low 记 impl-log 遗留；无功能错误的性能 / 展示意见列人工确认，不阻塞。
+- 达到 `review-round-alert` 时主会话判断拆票、缩范围、首轮漏报治理或续修改用 escalated；这是预警，不是硬停。轮次预算耗尽则返回 human-decision 请求。
 
-### Step 8：MR 转正式（ready）与合并
+## Step 8：MR ready 与主会话合并
 
-评审通过（pass / pass-with-notes）后：
+1. 评审 `pass / pass-with-notes` 后执行 `process_check.py --phase merge`，核对双 runner 前置条件中的 implementer 证据、独立 receipt、严格 scope、架构、预算与精确候选。失败不转 ready。
+2. GitLab：`glab mr update <IID> --ready`，按 MR 模板更新终版并回写 URL；local：在 `mr/` 生成同模板草案。
+3. 被派发实现会话到此停止：票置 `mr-submitted` 并写事件，结构化回报分支 / worktree、MR、ticket context、verification、receipt、评审报告和 Medium-Low 遗留。不得合并或自清。
+4. 主会话接手后：
+   - 对同一候选执行 `verify_issue.py run supervisor`，生成独立复跑证据；
+   - 先反向枚举需求，再对照覆盖矩阵打开代码，完成 conformance 及集成票 feature 级核对；
+   - 执行 `process_check.py --phase close`；
+   - 只通过以下入口合并：
+     ```bash
+     python3 ../shared/scripts/delivery.py merge --context <ticket-context.json>
+     ```
+     delivery 核全部前置、执行合并、写 done + merged，并在总结前调用 `close-and-clean`。人直接在主会话运行 `/implement` 也走同一路径，没有裸 `git merge` / `glab mr merge` 例外。
+5. 目标分支前进或冲突时只执行 `delivery.py rebase --context <...>`；之后旧验证、评审和 conformance 全部失效并重做。无法自动解决或同接口语义冲突时返回 human-decision 请求，不硬合。
+6. 分支 / main 晋级只走 `delivery.py promote`：server / cooperative 模式在线核 CI 与外部能力；local-human 走冻结候选、业务验收、最终报告和明确 `merge-main` 确认。票完成不代表 CI full 或整需求验收完成。
 
-- **合并前流程核对**：MR 转 ready 前跑 `process_check.py --phase merge --json <impl/<issue-id>/process-check-merge.json>`（参数同 Step 6），只核票级 DoD + fast evidence、漂移与粒度记录、评审结论和最终 HEAD；退出码非 0 → 补齐对应证据或停止再拆，不转 ready。主会话收口时再运行 `--phase close` 复核 merge 全部项与 conformance，票级 merge / close 不要求、也不宣称 CI full 已执行
+## Step 9：收尾报告
 
-- **gitlab 模式**：draft MR 已存在 → `glab mr update <IID> --ready`；正文按模板 `shared/templates/mr-description.md`（相对本 SKILL.md 为 `../shared/templates/mr-description.md`）更新终版（变更摘要 / 证据摘要 / 评审结论与回修记录 / diff 统计；内联评审评论见 MR discussions）；URL 回写票文件
-- **local 模式**：同模板产出 MR 草案文件到 `mr/`
-- **分支 / main 晋级（`feature-closeout.mode: ci-promote` 等适用场景）**：只接受当前候选的 CI full verdict + trusted run proof。运行 `process_check.py --phase promote --ci-verdict <branch-ci-verdict.json> --ci-run-proof <trusted-gitea-run-proof.json>`，核对 CI 判决与实际候选 commit / tree、pass、run_id、必跑项完成状态；未通过不得晋级。票合入需求分支只做 close，不冒充分支 / main 放行；`local-human` 的需求候选验证与人工确认按需求收口流程执行，push 后的 CI full 是套件级安全网
-- **合并由主会话执行，无需人审**：
-  - 你是被派发的**独立对话**（子代理）→ 不合并；票置 `mr-submitted` 并追加 `mr-submitted` 事件到 `./dev/features/<feature-module>/<feature-slug>/progress.jsonl`（行格式见「监督循环 · 状态与事件写入契约」），再把「分支名 / worktree 路径 / MR IID（或草案路径）/ 证据与评审报告路径 / 遗留 Medium-Low 清单」结构化回报主会话
-  - 本会话即**主会话**（人直接调用 `/implement`）→ 直接合并：gitlab 模式 `glab mr merge <IID> --delete-source-branch`；local 模式在目标分支所在 checkout 执行 `git merge --no-ff feat/<feature-slug>-<issue-id>`——目标分支是集成分支时在集成 worktree `.worktrees/integration-<feature-slug>/` 内合，**不得合进 main**（main 只接收需求收口的整需求合并）；目标分支是 `main-branch` 时在主工作区合。合并成功后票置 `done`，按「派发协议」的 worktree 清场序列（含 salvage 前置）收尾
-  - 合并冲突：先在 worktree 内 rebase 目标分支，每个冲突回修轮只重跑本票 DoD + fast 并刷新 evidence 后再合；仍无法自动解决 → 票置 `needs-human`，停下向用户说清：冲突在哪几个文件、双方各改了什么、为什么自动解不了、可选做法（按哪边为主 / 人工介入），不硬合。`docs/ARCHITECTURE.md` 冲突**不做文本级自动合并**：同接口被两票改 = 语义冲突，一律 `needs-human` 由用户对照两票上游 tech-spec 裁决现行态
+先说这票交付了什么、评审是否通过、已合并还是等待主会话，再说严重问题回修轮次和不阻塞遗留；最后列 MR 与证据路径。清理结果必须区分 completed / already-clean / blocked / needs-attention，不能仅凭总结声称无残留。
 
-### Step 9：收尾报告
-
-向用户做收尾报告，语言按「完成状态协议 · 对人表达」：先说结果（这票做了什么、评审过了没有、合并了还是等主会话合并），再说需要你留意什么（评审改了哪些严重问题、改了几轮；还有哪些不阻塞但值得知道的小遗留），路径与证据清单放最后（冠以「想细看：」：分支 / MR 链接 / 证据与评审报告路径）。被派发身份运行时，结构化回报（分支名 / worktree 路径 / MR IID 或草案路径 / 证据与评审报告路径 / 遗留 Medium-Low）照常发回主会话——那是机器对机器，不受对人表达约束。**过程不设人工检查点**：只有 `needs-human`、`阻塞` 或无法自行裁决的问题才停下，停下时按「完成状态协议 · 对人表达」第 3 条说清发生了什么、为什么定不了、需要你定什么。
-
----
+普通过程不设人工检查点；需要人裁决时按 Human Decision 协议返回请求。被派发身份不得直接调用 AskUserQuestion，主会话统一问人并负责回答后的 resume / redispatch / supervisor 路由。
 
 ## 硬约束
 
-- 启动前校验不过不动代码；票未 confirmed 不启动
-- 一切改动只在 worktree 分支；红线命中即停
-- 成功只认落盘证据（evidence + commit hash），不认自报
-- 替代即删除：不留注释残留、兼容开关、双路径并存；历史回溯靠 Git，不靠仓库留旧代码
-- 票级验证在所有实现 / 回修 / 冲突轮统一为 DoD + fast；实测生产文件 > `ticket-max-files` 或生产 LOC > `ticket-max-loc` 必须停止再拆 / `needs-human`，不以增加测试替代再拆。漂移始终登记「漂移记录」；红线 / DoD 功能项 / 独立评审不因票大小缩水。完整套件只有 CI full，分支 / main 晋级只认其判决与可信运行证明，票完成不冒充 CI full 通过
-- `/ai-review` 必须独立实例执行，本会话不得代评、不得修改评审报告
-- 流程核对（红线 / 漂移 / 票粒度 / 证据一致性）以 `process_check.py` 的退出码为准：评审前 `--phase review`、转 ready 前 `--phase merge`、主会话收口 `--phase close` 必须通过，不以自述代替；分支 / main 晋级另跑 `--phase promote`
-- 合并只在评审通过、证据齐全后由主会话执行；被派发的独立对话只到 MR ready；验证（P4）与发布（P5）不在本 skill 范围
-- 用词遵循 GLOSSARY 标准术语
+- 启动校验不过不动代码；只有 confirmed 新启动，恢复必须依据 context / journal / decision。
+- 一切代码改动只在票 worktree；deny 命中即停，scope 越界即退回重新确认。
+- 成功只认真实 runner、独立 review receipt、conformance 和精确 HEAD/tree；不认手写结论、commit 前缀或自述。
+- 替代即删除，不留旧实现、兼容开关或双路径；版本回溯靠 Git。
+- 所有实现 / 回修 / 冲突轮只跑本票 DoD + fast；完整套件只有 CI full，票完成不冒充 CI full 通过。
+- `/ai-review` 必须独立实例；本会话不得代评或修改评审报告。
+- `process_check review / merge / close` 必须通过；合并与晋级只走 delivery，清理只走 close-and-clean / reconcile。
+- 被派发实现与评审会话不得直接问人；任何回答都不能绕过重新拆票、验证、评审、架构或合并门。
+- 用词遵循 GLOSSARY 标准术语。

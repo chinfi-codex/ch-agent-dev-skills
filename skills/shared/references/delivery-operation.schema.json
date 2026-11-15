@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.delivery-operation/v2",
+  "title": "Recoverable exact delivery transaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operation_id", "revision", "state", "current_step", "steps"],
+  "properties": {
+    "schema": {"const": "agent-dev.operation-journal/v1"},
+    "operation_id": {"type": "string", "pattern": "^(ticket|feature)-[a-f0-9]{64}$"},
+    "revision": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["running", "completed", "failed"]},
+    "current_step": {"type": ["string", "null"], "enum": ["authorize", "merge", "verify", "record", "cleanup", null]},
+    "error": {"type": "string", "minLength": 1},
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {"enum": ["authorize", "merge", "verify", "record", "cleanup"]},
+          "status": {"enum": ["pending", "running", "done", "failed"]},
+          "expected": {
+            "type": "object",
+            "properties": {
+              "context_digest": {"type": "string", "format": "sha256"},
+              "candidate_sha256": {"type": "string", "format": "sha256"},
+              "target_before": {"type": "string", "format": "git-sha"},
+              "main_before": {"type": "string", "format": "git-sha"},
+              "source_head": {"type": "string", "format": "git-sha"},
+              "source_tree": {"type": "string", "format": "git-sha"},
+              "candidate": {"type": "string", "format": "git-sha"},
+              "candidate_tree": {"type": "string", "format": "git-sha"},
+              "merge_commit": {"type": "string", "format": "git-sha"},
+              "strategy": {"enum": ["no-ff", "squash"]},
+              "issue_id": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
+              "operation_id": {"type": "string"}
+            },
+            "additionalProperties": true
+          },
+          "observed": {"type": ["object", "null"]}
+        }
+      }
+    }
+  }
+}

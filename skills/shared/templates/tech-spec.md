@@ -26,9 +26,13 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 ### 3.1 模块拆解
 ### 3.2 接口变更（新增 / 修改 / 废弃）
 
-<!-- 本节非空 ⇒ /issue-split 会把「更新 ARCHITECTURE.md 接口表」生成承接票的契约 DoD（可自动判定：git diff 命中接口条目）。
-     tech-spec 定稿时不直接回写接口表——接口在代码合并后才成为现行态，由承接票在 worktree 分支内落现行态。
-     本节写的废弃项若取代旧 tech-spec 的接口，frontmatter supersedes 填被整体取代的旧 spec 文件名；部分取代在下方逐条写清废弃对象。 -->
+<!-- 每个变更点必须有稳定 ID，并由 /issue-split 逐 ID 写入承接票 frontmatter `architecture-updates`。
+     架构事实只写 `docs/architecture/*.json` 分片；代码与证据生效后由承接票更新分片并重新生成只读首页。
+     动作固定为 new / modify / retire；无变更时保留下方表头，不写占位记录。
+     本节写的废弃项若取代旧 tech-spec 的接口，frontmatter supersedes 填被整体取代的旧 spec 文件名；部分取代在对应行填写被替代的稳定 ID。 -->
+
+| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |
+| --- | --- | --- | --- | --- | --- | --- |
 
 ### 3.3 数据与存储
 ### 3.4 关键流程（主路径 + 失败路径）

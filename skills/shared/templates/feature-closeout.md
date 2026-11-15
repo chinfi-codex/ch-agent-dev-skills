@@ -8,6 +8,7 @@
 # 需求收口自动证据：<feature-slug>
 
 ```yaml
+candidate: <candidate.json 的 candidate 完整 commit>
 candidate_tree: <candidate.json 的 candidate_tree>
 all-passed: true            # 仅指实际执行的关联自动检查；不代表每条业务 AC 已验证
 ran:
@@ -18,7 +19,8 @@ ran:
   deferred: 0               # 预算截断 / 闭包不可枚举，由 main push CI full 兜底
 deferred:
   - <测试或数据路径>：<原因>
-scoped-report: integration/raw/scoped.json
+scoped-report: integration/raw/<generation>/scoped.json
+generation: <artifact-generation-manifest.json 中的当前代际>
 full-deferred: ci           # 本机证据不代表完整套件通过
 ```
 
@@ -31,18 +33,19 @@ full-deferred: ci           # 本机证据不代表完整套件通过
 ```json
 {
   "schema": "agent-dev.feature-business-results/v2",
+  "candidate": "<candidate.json 的 candidate 完整 commit>",
   "candidate_tree": "<tree>",
   "plan_sha256": "<candidate.json acceptance_plan.sha256>",
-  "environment": {"name": "integration-test", "url": "http://127.0.0.1:8000"},
+  "environment": {"name": "integration-test", "url": "http://127.0.0.1:8000", "lease_id": "<实例租约或null>", "service_id": "<开发服务或null>", "generation": "<当前代际>"},
   "items": [
     {
       "id": "AC-1", "oracle": "auto", "executor": "command", "status": "pass",
-      "execution": {"executor": "command", "command": "python3 tools/tests/ac1.py", "exit": 0},
+      "execution": {"executor": "command", "command": "python3 tools/tests/ac1.py", "exit": 0, "started": true, "generator": "verify_issue", "candidate": "<candidate 完整 commit>", "candidate_tree": "<tree>"},
       "assertions": [
         {"type": "output", "expected": "三态计数一致", "actual": "三态计数一致", "status": "pass"}
       ],
       "artifacts": [
-        {"type": "log", "path": "integration/artifacts/ac1.json", "sha256": "<hex>"}
+        {"type": "raw", "path": "integration/raw/<generation>/ac1.json", "sha256": "<hex>", "candidate": "<candidate 完整 commit>", "candidate_tree": "<tree>", "generation": "<当前代际>"}
       ]
     },
     {
@@ -50,14 +53,15 @@ full-deferred: ci           # 本机证据不代表完整套件通过
       "execution": {
         "executor": "browser-agent", "url": "http://127.0.0.1:8000/reports",
         "actions": ["打开报告", "框选图表", "恢复原图"],
-        "console_errors": [], "page_errors": []
+        "console_errors": [], "page_errors": [],
+        "candidate": "<candidate 完整 commit>", "candidate_tree": "<tree>"
       },
       "assertions": [
         {"type": "dom", "expected": "图例存在且原图恢复", "actual": "图例存在且原图恢复", "status": "pass"},
         {"type": "network", "expected": "保存请求 200", "actual": "保存请求 200", "status": "pass"}
       ],
       "artifacts": [
-        {"type": "screenshot", "path": "integration/artifacts/ac2.png", "sha256": "<hex>"}
+        {"type": "screenshot", "path": "integration/raw/<generation>/ac2.png", "sha256": "<hex>", "candidate": "<candidate 完整 commit>", "candidate_tree": "<tree>", "generation": "<当前代际>"}
       ],
       "human": {"status": "confirmed", "by": "<人>", "at": "<时间>", "note": "版式可读"}
     },
@@ -80,7 +84,7 @@ full-deferred: ci           # 本机证据不代表完整套件通过
 - `executor`：`command | browser-agent | human`，表示谁执行；`oracle`：`auto | auto+human-review | human`，表示谁最终判断。两者默认必须等于冻结计划。
 - 自动部分 `status`：`pass | fail | unverified`。`pass` 必须有 `execution` 和至少一条带 `expected / actual / status=pass` 的实际断言；`unverified` 必须有 `reason`，不得计入通过。
 - `command` 通过必须有实际命令与 `exit: 0`；`browser-agent` 通过必须有实际 URL、actions、空的 console/page error 列表，以及至少一个有效截图产物。截图不能代替行为断言。
-- `artifacts.path` 相对需求目录，不得指向目录外；文件必须存在且 SHA256 匹配。浏览器截图只是必需辅助证据，不是充分通过条件。
+- `artifacts.path` 相对需求目录，不得指向目录外；文件必须存在且 SHA256 匹配，并登记进当前 `artifact-generation-manifest.json` 的 candidate tree / generation。旧代际截图即使 path/hash 正确也不能挂到新候选。浏览器截图只是必需辅助证据，不是充分通过条件。
 - `human.status`：`pending | confirmed | waived | fail`；`confirmed / waived` 必须带 `by`，`waived` 必须带 `note`。自动未验证且未调整分类时只能豁免，不能写 `confirmed` 冒充自动通过。
 - 已在关联选择集中执行的业务测试直接采集产物，不为出证据重复执行。完整回归、功能验收与发布风险在报告中分栏，不相互替代。
 
@@ -117,16 +121,28 @@ full-deferred: ci           # 本机证据不代表完整套件通过
 # 需求收口人工确认：<feature-slug>
 
 ```yaml
+candidate: <candidate.json 的 candidate 完整 commit>
 candidate_tree: <tree>
+main_head: <candidate.json 冻结时的 main 完整 commit>
 confirmed-by: <人>
 confirmed-at: YYYY-MM-DD HH:MM
 quote: "<人在对话里的原话>"
-conditions: []        # 附条件确认时逐条列出，落地后再合并
-scope: [merge-main, deploy-prod]   # 本次确认覆盖的动作；push 不在默认范围
+conditions: []        # 合 main 前必须为空；有附条件就先完成并重新确认
+scope: merge-main     # 标量且只能是 merge-main；deploy-prod / push 必须另行明确授权
+report_sha256: <最终 acceptance-report.md 的 SHA256>
+business_results_sha256: <最终 business-results.json 的 SHA256>
 ```
 ````
 
-沉默、超时、「看着行」之类非确认语不算确认；确认后候选 tree 变化须重新确认。
+沉默、超时、「看着行」之类非确认语不算确认；确认后候选 tree、main HEAD 或计划哈希变化须重新确认。合 main 与内部 record 只由 `delivery.py promote` 在同一授权进程完成，不提供公开 record-merge 或任意 --commit 入口。
+
+## 7. 集成运行资源与清场
+
+- 实例租约与开发服务记录保存在 integration runtime  registry，绑定 repo / feature / round、candidate、worktree、lease/service ID 和日志代际；business-results.environment 必须引用同一 ID。
+- `feature-merged` 后使用 feature 级 `close-and-clean`：先确认候选后无新提交、无共享需求，停止开发服务并释放租约，再 salvage、删除 integration worktree / 精确 upstream、清理失效代际。
+- 停止或释放失败、候选不匹配、外部能力未知时保留资源并报告 needs-attention；不得用 `git worktree prune` 冒充集成清场完成。
+- 最终 candidate、验收报告、确认、最终 scoped 结果与被引用截图保留；失效代际和 salvage 只能经独立预检确认后清理。
+
 
 ## 5. verify-log.md（候选变更与回修轨迹）
 
@@ -135,4 +151,4 @@ scope: [merge-main, deploy-prod]   # 本次确认覆盖的动作；push 不在�
 
 ## 6. conformance-feature.md
 
-复用 `shared/templates/conformance.md`，`issue: feature`：对 tech-spec 全节枚举需求点，对照各票覆盖矩阵并集，抓票间接缝缺口。另核 PRD 的 AC 编号全部进入 `acceptance-plan.yaml`，且每条 AC 都有执行方式、最终判定和实际结果，不能用票级 DoD 的并集代替需求级功能验收。
+复用 `shared/templates/conformance.md`，`issue: feature`，并在 YAML 头补充 `candidate: <完整 commit>`、`candidate_tree: <tree>`、`verdict: conform`：对 tech-spec 全节枚举需求点，对照各票覆盖矩阵并集，抓票间接缝缺口。另核 PRD 的 AC 编号全部进入 `acceptance-plan.yaml`，且每条 AC 都有执行方式、最终判定和实际结果，不能用票级 DoD 的并集代替需求级功能验收。

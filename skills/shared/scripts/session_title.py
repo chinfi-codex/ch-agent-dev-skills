@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from state_store import FileLock, atomic_json_write as _shared_atomic_json_write
 
 try:
     from process_check import parse_yaml_subset
@@ -26,7 +27,7 @@ except ImportError:  # 允许作为包外的独立脚本由测试加载
     parse_yaml_subset = None
 
 HOSTS = ("claude", "codex", "zcode", "deepseek")
-STATE_VERSION = 1
+STATE_VERSION = 2
 ISSUE_TITLES = {
     "proposed": "待确认",
     "confirmed": "待执行",
@@ -69,19 +70,7 @@ def field(event, snake, camel=None):
 
 
 def atomic_json_write(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _shared_atomic_json_write(path, data)
 
 
 def read_json(path, default=None):
@@ -120,7 +109,48 @@ def load_state(host):
 
 
 def save_state(host, state):
+    """Compatibility writer for internal call sites; mutations use state_lock below."""
     atomic_json_write(state_path(host), state)
+
+
+def state_lock(host):
+    return FileLock(str(state_path(host)) + ".lock")
+
+
+def _timestamp():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _git(path, *args):
+    return subprocess.run(["git", "-C", str(path), *args], capture_output=True,
+                          text=True, encoding="utf-8", errors="surrogateescape", timeout=10)
+
+
+def canonical_worktree(path):
+    """Return (main repo root, actual worktree, full branch) without guessing."""
+    path = Path(path).expanduser().resolve()
+    top = _git(path, "rev-parse", "--show-toplevel")
+    if top.returncode:
+        return path, path, None
+    worktree = Path(top.stdout.strip()).resolve()
+    common = _git(worktree, "rev-parse", "--git-common-dir")
+    main = worktree
+    listed = _git(worktree, "worktree", "list", "--porcelain")
+    if listed.returncode == 0:
+        first = next((line[len("worktree "):] for line in listed.stdout.splitlines()
+                      if line.startswith("worktree ")), None)
+        if first:
+            main = Path(first).resolve()
+    elif common.returncode == 0:
+        git_dir = Path(common.stdout.strip())
+        if not git_dir.is_absolute():
+            git_dir = worktree / git_dir
+        if git_dir.resolve().name == ".git":
+            main = git_dir.resolve().parent
+    branch = _git(worktree, "symbolic-ref", "--quiet", "HEAD")
+    full_branch = branch.stdout.strip() if branch.returncode == 0 else None
+    return main, worktree, full_branch
 
 
 def clean_relative(path):
@@ -131,8 +161,19 @@ def binding_key(host, session_id):
     return host + ":" + session_id
 
 
-def normalize_binding(repo, target=None, feature=None, issue=None, role=None):
-    repo = Path(repo).expanduser().resolve()
+def normalize_binding(repo, target=None, feature=None, issue=None, role=None, worktree=None, branch=None):
+    repo, detected_worktree, detected_branch = canonical_worktree(repo)
+    if worktree is not None:
+        main, actual_worktree, actual_branch = canonical_worktree(worktree)
+        if main != repo:
+            raise SessionTitleError("worktree 不属于指定主仓")
+        detected_worktree, detected_branch = actual_worktree, actual_branch
+    if branch is not None:
+        if branch != detected_branch and detected_branch is not None:
+            raise SessionTitleError("full branch 与实际 worktree 不一致")
+        detected_branch = branch
+    if detected_branch is not None and not detected_branch.startswith("refs/heads/"):
+        raise SessionTitleError("branch 必须是 refs/heads/ 完整名称")
     if target:
         target_path = Path(target).expanduser()
         if not target_path.is_absolute():
@@ -166,6 +207,9 @@ def normalize_binding(repo, target=None, feature=None, issue=None, role=None):
         raise SessionTitleError("feature 绑定必须是 docs/features/<module>/<slug>")
     result = {
         "repo": str(repo),
+        "repo_root": str(repo),
+        "worktree": str(detected_worktree),
+        "branch": detected_branch,
         "feature": clean_relative(feature_path.relative_to(repo)),
     }
     if issue:
@@ -178,14 +222,55 @@ def normalize_binding(repo, target=None, feature=None, issue=None, role=None):
 
 
 def set_binding(host, session_id, binding):
-    state = load_state(host)
-    key = binding_key(host, session_id)
-    old = state["sessions"].get(key, {})
-    preserved = {k: old[k] for k in ("last_title", "paused", "title_source") if k in old}
-    preserved.update(binding)
-    state["sessions"][key] = preserved
-    save_state(host, state)
-    return preserved
+    """Locked read-modify-write; an active session never silently changes ticket."""
+    with state_lock(host):
+        state = load_state(host)
+        key = binding_key(host, session_id)
+        old = state["sessions"].get(key, {})
+        if old and not old.get("released_at"):
+            for field_name in ("repo_root", "feature", "issue"):
+                old_value = old.get(field_name)
+                new_value = binding.get(field_name)
+                if field_name == "repo_root":
+                    old_value = old_value or old.get("repo")
+                if old_value is not None and new_value != old_value:
+                    raise SessionTitleError("会话已绑定其他仓库/需求/票，拒绝静默换绑；请先 release")
+            old_branch = old.get("branch")
+            if old_branch and binding.get("branch") and old_branch != binding["branch"]:
+                raise SessionTitleError("会话 full branch 已变化，拒绝静默换绑；请先 release")
+        preserved = {k: old[k] for k in ("last_title", "paused", "title_source") if k in old}
+        preserved.update(binding)
+        same_subject = bool(old) and all((old.get(k) or (old.get("repo") if k == "repo_root" else None)) == binding.get(k)
+                                         for k in ("repo_root", "feature", "issue"))
+        preserved["bound_at"] = old.get("bound_at") if same_subject and not old.get("released_at") else _timestamp()
+        preserved["last_seen"] = _timestamp()
+        preserved["revision"] = int(old.get("revision") or 0) + 1
+        preserved["released_at"] = None
+        state["sessions"][key] = preserved
+        save_state(host, state)
+        return preserved
+
+
+def update_binding(host, session_id, mutate):
+    with state_lock(host):
+        state = load_state(host)
+        key = binding_key(host, session_id)
+        binding = state["sessions"].get(key)
+        if not binding:
+            raise SessionTitleError("找不到 session 绑定")
+        mutate(binding)
+        binding["last_seen"] = _timestamp()
+        binding["revision"] = int(binding.get("revision") or 0) + 1
+        save_state(host, state)
+        return binding
+
+
+def release_binding(host, session_id):
+    """Unbind without deleting or renaming any transcript/state history."""
+    def release(binding):
+        if not binding.get("released_at"):
+            binding["released_at"] = _timestamp()
+    return update_binding(host, session_id, release)
 
 
 def parse_frontmatter(path):
@@ -682,6 +767,8 @@ def refresh(host, event, force=False):
     state = load_state(host)
     key = binding_key(host, str(session_id))
     binding = state["sessions"].get(key)
+    if binding and binding.get("released_at"):
+        binding = None
     if not binding:
         try:
             binding = infer_binding(event, Path(cwd).resolve())
@@ -695,19 +782,26 @@ def refresh(host, event, force=False):
             return {"status": "skipped", "reason": "unbound"}
     if binding.get("paused") and not force:
         return {"status": "paused"}
-    # worktree 内仍读写主工作区 dev/docs 产物，不能仅凭 cwd 拒绝已绑定会话。
-    live_cwd = Path(cwd).resolve()
-    bound_repo = Path(binding["repo"]).resolve()
-    if live_cwd != bound_repo:
-        try:
-            live_cwd.relative_to(bound_repo)
-        except ValueError:
-            inferred = infer_binding(event, live_cwd)
-            if not inferred:
-                return {"status": "skipped", "reason": "repo-mismatch"}
-            binding = set_binding(host, str(session_id), inferred)
-            state = load_state(host)
-            binding = state["sessions"][key]
+    # A worktree belongs to the normalized main repo; moving between tickets is
+    # a conflict, not an implicit rebind. Same-ticket worktree moves update the
+    # actual worktree/full branch under the state lock.
+    live_main, live_cwd, live_branch = canonical_worktree(cwd)
+    bound_repo = Path(binding.get("repo_root") or binding["repo"]).resolve()
+    bound_worktree = Path(binding.get("worktree") or binding["repo"]).resolve()
+    if live_cwd != bound_worktree:
+        inferred = infer_binding(event, live_cwd)
+        if not inferred:
+            return {"status": "skipped", "reason": "repo-mismatch"}
+        if (inferred.get("feature"), inferred.get("issue")) != (binding.get("feature"), binding.get("issue")):
+            return {"status": "skipped", "reason": "binding-conflict"}
+        if live_main != bound_repo:
+            return {"status": "skipped", "reason": "repo-mismatch"}
+        inferred["worktree"] = str(live_cwd)
+        inferred["branch"] = live_branch
+        binding = set_binding(host, str(session_id), binding | inferred)
+    if binding.get("branch") and live_branch != binding.get("branch"):
+        return {"status": "skipped", "reason": "binding-conflict"}
+    binding = update_binding(host, str(session_id), lambda _current: None)
     try:
         title = compute_title(binding)
         # 即使业务标题未变化，也必须先检查用户是否已手工改名。
@@ -715,13 +809,13 @@ def refresh(host, event, force=False):
     except (OSError, ValueError, subprocess.SubprocessError, SessionTitleError) as exc:
         return {"status": "error", "reason": str(exc)}
     if outcome == "paused":
-        binding["paused"] = True
-        save_state(host, state)
+        update_binding(host, str(session_id), lambda current: current.update(paused=True))
         return {"status": "paused", "reason": "manual-title"}
     if outcome in ("native", "written"):
-        binding["last_title"] = written_title
-        binding.pop("paused", None)
-        save_state(host, state)
+        def accepted(current):
+            current["last_title"] = written_title
+            current.pop("paused", None)
+        update_binding(host, str(session_id), accepted)
     return {"status": outcome, "title": title}
 
 
@@ -729,14 +823,10 @@ def acknowledge(host, session_id, accepted_title):
     accepted_title = str(accepted_title or "").strip()
     if not accepted_title:
         raise SessionTitleError("accepted title 不能为空")
-    state = load_state(host)
-    key = binding_key(host, session_id)
-    binding = state["sessions"].get(key)
-    if not binding:
-        raise SessionTitleError("找不到待确认的 session 绑定")
-    binding["last_title"] = accepted_title
-    binding.pop("paused", None)
-    save_state(host, state)
+    def accept(binding):
+        binding["last_title"] = accepted_title
+        binding.pop("paused", None)
+    update_binding(host, session_id, accept)
     return {"status": "written", "title": accepted_title}
 
 
@@ -794,6 +884,9 @@ def main(argv=None):
     ack.add_argument("--host", choices=HOSTS, required=True)
     ack.add_argument("--session-id", required=True)
     ack.add_argument("--title", required=True)
+    release = sub.add_parser("release", help="解绑会话但保留 transcript 与绑定历史")
+    release.add_argument("--host", choices=HOSTS, required=True)
+    release.add_argument("--session-id", required=True)
     hook = sub.add_parser("hook", help="从 stdin 读取宿主 Hook 事件")
     hook.add_argument("--host", choices=HOSTS, required=True)
     hook.add_argument("--force", action="store_true")
@@ -810,6 +903,9 @@ def main(argv=None):
             return 0
         if args.command == "ack":
             print(json.dumps(acknowledge(args.host, args.session_id, args.title), ensure_ascii=False))
+            return 0
+        if args.command == "release":
+            print(json.dumps(release_binding(args.host, args.session_id), ensure_ascii=False))
             return 0
         event = read_event()
         result = refresh(args.host, event, args.force)

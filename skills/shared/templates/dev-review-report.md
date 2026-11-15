@@ -4,9 +4,13 @@
 |---|---|
 | feature-slug | `<feature-slug>` |
 | issue | `<issue-id>` |
-| 固定点 | `<fixed-point>`（merge-base `main...HEAD` 的 commit hash） |
+| 固定 base | `<ticket-context.base>` |
+| 评审 HEAD / tree | `<完整 commit>` / `<完整 tree>` |
+| diff / process-check 哈希 | `<SHA256>` / `<process-check-review.json SHA256>` |
 | 评审引擎 | open-code-review（ocr），模式 `ci` / `local` / `delegate` |
 | 引擎调用 | `<实际命令 或 CI job 链接>` |
+| 实现者 / 评审者 | `<host:session/agent>` / `<host:session/agent>`（必须不同） |
+| 信任级别 | `host-verified` / `operator-attested`；回执 `review-receipt.json` |
 | 结论 | `pass` / `pass-with-notes` / `blocked` |
 
 ## 覆盖统计
@@ -29,7 +33,10 @@ coverage_rate: N%
 ## 流程核对与语义复核
 
 - 流程核对结果：`<process-check JSON 路径>` → `PASS` / `FAIL`（只引用，不重做；FAIL 行原样列入 BLOCKER）
-- 语义复核（逐条针对核对结果中的 `REVIEW` 项，及测试映射 / 票粒度 / 清理复核）：结论与依据；无则写「无」
+- 语义复核（测试更新映射、生成器 tree、严格 scope、票粒度、旧实现清理、架构逐 ID / flow-back）：结论与依据；无则写「无」
+- 评审只判代码、需求一致性与测试质量，不运行或等待 CI full；候选 HEAD/tree、报告和回执必须同源
+
+找不到唯一票或关键输入时，不伪造代码评审结论或报告路径：返回 human-decision 请求，由主会话统一问人。
 
 ## BLOCKER 清单（回修依据）
 
@@ -48,4 +55,4 @@ coverage_rate: N%
 | 轮 | 回修 commit | 复审结论 | 残留 BLOCKER |
 |---|---|---|---|
 
-同日同票的复审轮次原地追加本节，并把头部「结论」更新为最新一轮；复审聚焦回修增量，但仍按原固定点全量复核后下结论。
+每轮生成独立短报告 `...-review-<issue-id>-rN-YYYY-MM-DD.md`，原报告头部更新为最新结论并链接各轮。复审聚焦回修增量、上轮 BLOCKER 闭合和新增回归；回执同时记录 round 与前轮回执哈希，最终 HEAD/tree 变化后旧回执失效。

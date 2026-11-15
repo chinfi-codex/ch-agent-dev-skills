@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -78,7 +80,10 @@ x
 """
 
 SPEC_WITH_32 = SPEC_EMPTY_32.replace(
-    "<!-- 契约更新由承接票随分支执行 -->", "新增 `load_config_v2(path)` 替代旧加载入口")
+    "<!-- 契约更新由承接票随分支执行 -->",
+    "| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |\n"
+    "| --- | --- | --- | --- | --- | --- | --- |\n"
+    "| a1.load_config | modify | load_config | 判读配置 | src/config/loader.py:load_config | — | tests/config.txt |")
 
 ISSUE_NO_CONTRACT = """---
 issue-id: issue-001
@@ -101,7 +106,7 @@ ISSUE_WITH_CONTRACT = ISSUE_NO_CONTRACT.replace(
 
 def run(*args, cwd=None):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-I", str(SCRIPT), *args],
         cwd=cwd, capture_output=True, text=True,
     )
 
@@ -127,6 +132,59 @@ def make_repo(root, glossary=GLOSSARY, arch=None, specs=(), issues=(), code_file
 
 SPEC_REL = "dev/features/判读配置/文档驱动模板配置/文档驱动模板配置-tech-spec-2026-10-01.md"
 ISSUE_REL = "dev/features/判读配置/文档驱动模板配置/issues/issue-001-x.md"
+
+
+def make_v2_flow_repo(root):
+    issue = ISSUE_NO_CONTRACT.replace(
+        "status: confirmed", "status: confirmed\narchitecture-updates: [a1.load_config]")
+    root = make_repo(
+        root, glossary=None, specs=[(SPEC_REL, SPEC_WITH_32)],
+        issues=[(ISSUE_REL, issue)],
+        code_files=[
+            ("src/config/loader.py", "def load_config(path):\n    return {}\n"),
+            ("tests/config.txt", "config contract passed\n"),
+        ],
+    )
+    sh(root, "git", "init", "-q")
+    sh(root, "git", "config", "user.name", "T")
+    sh(root, "git", "config", "user.email", "t@e.invalid")
+    sh(root, "git", "add", ".")
+    sh(root, "git", "commit", "-qm", "verified source and evidence")
+    commit = sh(root, "git", "rev-parse", "HEAD")
+    tree = sh(root, "git", "rev-parse", "HEAD^{tree}")
+    evidence = []
+    for kind, rel in (("code", "src/config/loader.py"), ("test", "tests/config.txt"), ("spec", SPEC_REL)):
+        evidence.append({
+            "type": kind, "path": rel,
+            "sha256": hashlib.sha256((root / rel).read_bytes()).hexdigest(),
+            "commit": commit, "tree": tree,
+        })
+    record = {
+        "id": "a1.load_config", "module": "判读配置", "kind": "interface",
+        "name": "load_config", "responsibility": "load configuration",
+        "status": "current", "version": "v1", "applies_to": ["v1"],
+        "source": {
+            "path": "src/config/loader.py", "symbol": "load_config",
+            "sha256": hashlib.sha256((root / "src/config/loader.py").read_bytes()).hexdigest(),
+        },
+        "verification": "tests/config.txt", "evidence": evidence,
+        "last_verified": "2026-11-14", "last_verified_version": "v1",
+        "verified_commit": commit, "relations": [], "supersedes": [],
+    }
+    graph_dir = root / "docs/architecture"
+    graph_dir.mkdir()
+    (graph_dir / "config.json").write_text(json.dumps({
+        "schema": "pandu.architecture-graph/v2", "records": [record],
+    }, ensure_ascii=False), encoding="utf-8")
+    rendered = subprocess.run([
+        sys.executable, "-I", str(SCRIPT.parent / "architecture_graph.py"),
+        "render", "write", "--repo", str(root),
+    ], capture_output=True, text=True)
+    if rendered.returncode:
+        raise AssertionError(rendered.stdout + rendered.stderr)
+    sh(root, "git", "add", ".")
+    sh(root, "git", "commit", "-qm", "base architecture graph")
+    return sh(root, "git", "rev-parse", "HEAD")
 
 
 class InitTest(unittest.TestCase):
@@ -171,10 +229,24 @@ class CheckTest(unittest.TestCase):
             graph_dir = root / "docs" / "architecture"
             graph_dir.mkdir()
             (graph_dir / "records.json").write_text(
-                '{"schema":"pandu.architecture-graph/v1","records":[]}', encoding="utf-8")
+                '{"schema":"pandu.architecture-graph/v2","records":[]}', encoding="utf-8")
             r = run("--check", "--repo", str(root))
             self.assertEqual(r.returncode, 1)
             self.assertIn("GRAPH-2", r.stdout)
+
+    def test_empty_graph_does_not_hide_legacy_code_facts(self):
+        for empty_records in (False, True):
+            with self.subTest(empty_records=empty_records), tempfile.TemporaryDirectory() as td:
+                root = make_repo(Path(td), arch=ARCH_OK)
+                graph_dir = root / "docs/architecture"
+                graph_dir.mkdir()
+                if empty_records:
+                    (graph_dir / "records.json").write_text(
+                        '{"schema":"pandu.architecture-graph/v2","records":[]}', encoding="utf-8")
+                r = run("--check", "--repo", str(root))
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("GRAPH-2", r.stdout)
+                self.assertIn("CODE-1", r.stdout)
 
     def test_consistent_project_passes(self):
         with tempfile.TemporaryDirectory() as td:
@@ -238,21 +310,56 @@ class CheckTest(unittest.TestCase):
             self.assertEqual(r.returncode, 1)
             self.assertIn("SPEC-2", r.stdout)
 
-    def test_spec2_pass_when_ticket_declares_contract_dod(self):
+    def test_spec2_architecture_prose_does_not_bypass_per_id_reconciliation(self):
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(Path(td), specs=[(SPEC_REL, SPEC_WITH_32)],
                              issues=[(ISSUE_REL, ISSUE_WITH_CONTRACT)])
             r = run("--check", "--repo", str(root))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("SPEC-2", r.stdout)
+            self.assertIn("architecture-updates", r.stdout)
+
+    def test_spec2_v2_valid_flow_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_v2_flow_repo(root)
+            r = run("--check", "--repo", str(root))
             self.assertEqual(r.returncode, 0, r.stdout)
 
-    def test_spec2_pass_when_arch_sources_cite_spec(self):
+    def test_contract_check_wires_flow_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = make_v2_flow_repo(root)
+            (root / "src/config/loader.py").write_text(
+                "def load_config(path):\n    return {'changed': True}\n", encoding="utf-8")
+            sh(root, "git", "add", "src/config/loader.py")
+            sh(root, "git", "commit", "-qm", "change source without graph")
+            r = run("--check", "--repo", str(root), "--issue", ISSUE_REL,
+                    "--base", base, "--head", "HEAD")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("FLOW-1", r.stdout)
+            self.assertIn("without updating its graph shard", r.stdout)
+
+    def test_contract_check_homepage_is_byte_checked(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_v2_flow_repo(root)
+            with (root / "docs/ARCHITECTURE.md").open("a", encoding="utf-8") as handle:
+                handle.write("manual edit\n")
+            r = run("--check", "--repo", str(root))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("GRAPH-3", r.stdout)
+
+    def test_spec2_arch_source_citation_does_not_bypass_ids(self):
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(Path(td), arch=ARCH_OK, specs=[(SPEC_REL, SPEC_WITH_32)],
                              issues=[(ISSUE_REL, ISSUE_NO_CONTRACT)],
                              code_files=[("src/config/loader.py", "load_config")])
             (root / "src/ingest").mkdir(parents=True)
             r = run("--check", "--repo", str(root))
-            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("SPEC-2", r.stdout)
+            self.assertIn("architecture-updates", r.stdout)
 
     def test_spec2_skips_empty_32(self):
         with tempfile.TemporaryDirectory() as td:
