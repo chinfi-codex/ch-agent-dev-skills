@@ -35,6 +35,7 @@ class FlowTest(unittest.TestCase):
         (self.root / "docs/architecture").mkdir(parents=True)
         (self.root / "tests").mkdir()
         (self.root / "src.py").write_text("def run():\n    return 'v1'\n", encoding="utf-8")
+        (self.root / "aux.py").write_text("def assist():\n    return 'v1'\n", encoding="utf-8")
         (self.root / "tests/test_entry.txt").write_text("entry passed\n", encoding="utf-8")
         self.spec = self.feature / "demo-tech-spec-2026-11-14.md"
         self.issue = self.issues / "issue-001-entry.md"
@@ -90,7 +91,7 @@ class FlowTest(unittest.TestCase):
     def git_bytes(self, ref, path):
         return subprocess.check_output(["git", "-C", str(self.root), "show", "%s:%s" % (ref, path)])
 
-    def row_at(self, ref, ident="a1.entry", name="entry"):
+    def row_at(self, ref, ident="a1.entry", name="entry", include_aux=False):
         commit = self.git("rev-parse", ref + "^{commit}")
         tree = self.git("rev-parse", ref + "^{tree}")
         evidence = []
@@ -103,7 +104,7 @@ class FlowTest(unittest.TestCase):
                 "sha256": hashlib.sha256(self.git_bytes(commit, path)).hexdigest(),
                 "commit": commit, "tree": tree,
             })
-        return {
+        row = {
             "id": ident, "module": "A1", "kind": "interface", "name": name,
             "responsibility": "entry contract", "status": "current", "version": "v1",
             "applies_to": ["v1"],
@@ -116,6 +117,12 @@ class FlowTest(unittest.TestCase):
             "last_verified": "2026-11-14", "last_verified_version": "v1",
             "verified_commit": commit, "relations": [], "supersedes": [],
         }
+        if include_aux:
+            row["sources"] = [{
+                "path": "aux.py", "symbol": "assist",
+                "sha256": hashlib.sha256(self.git_bytes(commit, "aux.py")).hexdigest(),
+            }]
+        return row
 
     def put(self, records):
         (self.root / "docs/architecture/a.json").write_text(json.dumps({
@@ -250,6 +257,21 @@ class FlowTest(unittest.TestCase):
         errors = graph.check_flow_back(self.root, self.issue, self.base, self.head)
         self.assertTrue(any("without updating its graph shard" in error for error in errors), errors)
         self.assertTrue(any("verification information was not refreshed" in error for error in errors), errors)
+
+    def test_flow_back_auxiliary_source_hit_requires_and_allows_refresh(self):
+        self.put([self.row_at("HEAD", include_aux=True)])
+        self.base = self.commit("bind auxiliary source")
+        (self.root / "aux.py").write_text("def assist():\n    return 'v2'\n", encoding="utf-8")
+        self.head = self.commit("auxiliary source without graph")
+        errors = graph.check_flow_back(self.root, self.issue, self.base, self.head)
+        self.assertTrue(any("a1.entry" in error and "without updating its graph shard" in error
+                            for error in errors), errors)
+        self.assertTrue(any("a1.entry" in error and "verification information was not refreshed" in error
+                            for error in errors), errors)
+
+        self.put([self.row_at(self.head, include_aux=True)])
+        self.head = self.commit("refresh auxiliary source verification")
+        self.assertEqual([], graph.check_flow_back(self.root, self.issue, self.base, self.head))
 
     def test_flow_back_deleted_source_requires_retired_or_superseded(self):
         (self.root / "src.py").unlink()

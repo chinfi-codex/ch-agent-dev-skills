@@ -322,6 +322,46 @@ def compare_record_ids(base_records, head_records):
     return errors
 
 
+def _record_sources(record):
+    """Return the primary binding followed by each well-formed auxiliary binding."""
+    bindings = []
+    source = record.get("source")
+    if isinstance(source, dict):
+        bindings.append(("source", source))
+    sources = record.get("sources")
+    if isinstance(sources, list):
+        for index, auxiliary in enumerate(sources):
+            if isinstance(auxiliary, dict):
+                bindings.append(("sources[%d]" % index, auxiliary))
+    return bindings
+
+
+def _source_path_errors(record):
+    """Reject duplicate bindings and inconsistent hashes, not multiple symbols per file."""
+    ident = record.get("id")
+    errors = []
+    seen_bindings = {}
+    hashes_by_path = {}
+    for label, source in _record_sources(record):
+        path = source.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        binding = (path, source.get("symbol"))
+        if binding in seen_bindings:
+            errors.append("%s: duplicate source binding across source/sources: %s (%s and %s)" % (
+                ident, binding, seen_bindings[binding], label))
+        else:
+            seen_bindings[binding] = label
+        sha256 = source.get("sha256")
+        if isinstance(sha256, str):
+            known = hashes_by_path.get(path)
+            if isinstance(known, str) and known != sha256:
+                errors.append("%s: inconsistent source hashes for %s" % (ident, path))
+            else:
+                hashes_by_path[path] = sha256
+    return errors
+
+
 def _source_hash_and_symbol_errors(ident, source, data, label):
     errors = []
     if data is None:
@@ -334,7 +374,8 @@ def _source_hash_and_symbol_errors(ident, source, data, label):
             errors.append("%s: source hash does not match %s: %s" % (ident, label, source.get("path")))
     symbol = source.get("symbol")
     if isinstance(symbol, str) and symbol and symbol not in data.decode("utf-8", errors="replace"):
-        errors.append("%s: source symbol missing at %s: %s" % (ident, label, symbol))
+        errors.append("%s: source symbol missing at %s: %s in %s" % (
+            ident, label, symbol, source.get("path")))
     return errors
 
 
@@ -344,15 +385,18 @@ def _check_verified_source(repo, record, head):
     source = record.get("source")
     if not isinstance(source, dict):
         return [], None
+    bindings = _record_sources(record)
     errors = []
     verified = record.get("verified_commit")
     if not isinstance(verified, str) or not SHA_RE.fullmatch(verified):
         return ["%s: %s requires a full 40-character verified_commit" % (ident, status)], None
-    if not isinstance(source.get("path"), str) or _safe_repo_path(source.get("path")) is None:
-        errors.append("%s: source.path must be a safe repository-relative path" % ident)
-        return errors, None
-    if not isinstance(source.get("sha256"), str) or not SHA256_RE.fullmatch(source.get("sha256")):
-        errors.append("%s: %s requires a full source.sha256" % (ident, status))
+    for label, bound_source in bindings:
+        path = bound_source.get("path")
+        if not isinstance(path, str) or _safe_repo_path(path) is None:
+            errors.append("%s: %s.path must be a safe repository-relative path" % (ident, label))
+        expected = bound_source.get("sha256")
+        if not isinstance(expected, str) or not SHA256_RE.fullmatch(expected):
+            errors.append("%s: %s requires a full %s.sha256" % (ident, status, label))
     if record.get("last_verified") is None:
         errors.append("%s: %s requires last_verified date" % (ident, status))
     verified_commit = _resolve_commit(repo, verified)
@@ -361,24 +405,39 @@ def _check_verified_source(repo, record, head):
     verified_tree = _resolve_tree(repo, verified)
     if verified_tree is None:
         errors.append("%s: cannot resolve tree at verified_commit" % ident)
-    verified_data = _read_git_object(repo, verified, source["path"])
-    errors.extend(_source_hash_and_symbol_errors(ident, source, verified_data, "verified_commit"))
-    if status == "release_only":
-        return errors, verified_tree
-    ancestor = _is_ancestor(repo, verified, head)
-    if ancestor is False:
-        errors.append("%s: current verified_commit is not an ancestor of checked HEAD" % ident)
-    elif ancestor is None:
-        errors.append("%s: cannot verify current verified_commit ancestry at HEAD" % ident)
-    head_data = _read_git_object(repo, head, source["path"])
-    errors.extend(_source_hash_and_symbol_errors(ident, source, head_data, "HEAD"))
-    try:
-        changed = _git(repo, "diff", "--quiet", verified, head, "--", source["path"])
-    except (OSError, subprocess.SubprocessError):
-        errors.append("%s: cannot compare verified_commit..HEAD source" % ident)
-    else:
-        if changed.returncode != 0:
-            errors.append("%s: source changed since verified_commit: %s" % (ident, source["path"]))
+    for label, bound_source in bindings:
+        path = bound_source.get("path")
+        if not isinstance(path, str) or _safe_repo_path(path) is None:
+            continue
+        verified_data = _read_git_object(repo, verified, path)
+        errors.extend(_source_hash_and_symbol_errors(
+            ident, bound_source, verified_data, "verified_commit"))
+
+    # Historical release_only primary bindings retain their existing semantics.
+    # Auxiliary bindings are current delivery inputs for both verified statuses,
+    # so they must also remain present and unchanged at the candidate HEAD.
+    check_head = status == "current" or any(label != "source" for label, _ in bindings)
+    if check_head:
+        ancestor = _is_ancestor(repo, verified, head)
+        if ancestor is False:
+            errors.append("%s: %s verified_commit is not an ancestor of checked HEAD" % (ident, status))
+        elif ancestor is None:
+            errors.append("%s: cannot verify %s verified_commit ancestry at HEAD" % (ident, status))
+    for label, bound_source in bindings:
+        if status == "release_only" and label == "source":
+            continue
+        path = bound_source.get("path")
+        if not isinstance(path, str) or _safe_repo_path(path) is None:
+            continue
+        head_data = _read_git_object(repo, head, path)
+        errors.extend(_source_hash_and_symbol_errors(ident, bound_source, head_data, "HEAD"))
+        try:
+            changed = _git(repo, "diff", "--quiet", verified, head, "--", path)
+        except (OSError, subprocess.SubprocessError):
+            errors.append("%s: cannot compare verified_commit..HEAD source" % ident)
+        else:
+            if changed.returncode != 0:
+                errors.append("%s: source changed since verified_commit: %s" % (ident, path))
     return errors, verified_tree
 
 
@@ -476,7 +535,8 @@ def _check_evidence(repo, record, head, verified_tree):
 def check(repo, head="HEAD", base=None):
     """Validate v2 shards and verify code/evidence against the candidate HEAD.
 
-    Historical ``release_only`` records are checked only at ``verified_commit``.
+    Historical ``release_only`` primary sources are checked only at
+    ``verified_commit``; auxiliary sources are also checked at candidate HEAD.
     When *base* is supplied, stable IDs are also compared between *base* and
     *head* graph revisions.
     """
@@ -500,6 +560,7 @@ def check(repo, head="HEAD", base=None):
             locations = details["shards"].get(ident, [])
             errors.append("duplicate id across shards: %s (%s)" % (ident, ", ".join(locations)))
         ids[ident] = record
+        errors.extend(_source_path_errors(record))
         if status in {"current", "release_only"}:
             source_errors, verified_tree = _check_verified_source(repo, record, head)
             errors.extend(source_errors)
@@ -1068,6 +1129,7 @@ def _verification_fingerprint(record):
     return (
         record.get("verification"), record.get("evidence"), record.get("last_verified"),
         record.get("last_verified_version"), record.get("verified_commit"), record.get("source"),
+        record.get("sources"),
     )
 
 
@@ -1127,8 +1189,8 @@ def check_flow_back(repo, issue_path, base, head, spec_path=None):
         candidate = after or before
         if not isinstance(candidate, dict) or candidate.get("kind") != "interface":
             continue
-        sources = [record.get("source", {}) for record in (before, after)
-                   if record and isinstance(record.get("source"), dict)]
+        sources = [source for record in (before, after) if record
+                   for _, source in _record_sources(record)]
         paths = {source.get("path") for source in sources if source.get("path")}
         hits = [entry for entry in diff_entries
                 if entry[1] in paths or entry[2] in paths]

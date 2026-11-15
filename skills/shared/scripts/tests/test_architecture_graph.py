@@ -39,9 +39,10 @@ class GraphTest(unittest.TestCase):
         self.git("config", "user.name", "T")
         self.git("config", "user.email", "t@e.invalid")
         (self.root / "src.py").write_text("def run(): pass\n", encoding="utf-8")
+        (self.root / "aux.py").write_text("def assist(): pass\n", encoding="utf-8")
         (self.root / "test.txt").write_text("test passed\n", encoding="utf-8")
         (self.root / "spec.md").write_text("spec evidence\n", encoding="utf-8")
-        self.git("add", "src.py", "test.txt", "spec.md", "evidence.txt")
+        self.git("add", "src.py", "aux.py", "test.txt", "spec.md", "evidence.txt")
         self.git("commit", "-qm", "fixture")
         return self.git("rev-parse", "HEAD")
 
@@ -96,6 +97,15 @@ class GraphTest(unittest.TestCase):
         row.update(changes)
         return row
 
+    def auxiliary_source(self, **changes):
+        self.init_repo()
+        source = {
+            "path": "aux.py", "symbol": "assist",
+            "sha256": digest(self.root / "aux.py"),
+        }
+        source.update(changes)
+        return source
+
     def write_legacy(self):
         (self.root / "docs/ARCHITECTURE.md").write_text(
             "<!-- baseline: 2026-10-22 -->\n"
@@ -112,11 +122,105 @@ class GraphTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertEqual(1, len(graph.select(records, module="A1", interface="entry")))
 
+    def test_valid_multi_source_current_and_release_only(self):
+        for status in ("current", "release_only"):
+            with self.subTest(status=status):
+                row = self.current_row(status=status, sources=[self.auxiliary_source()])
+                self.put([row])
+                records, errors = graph.check(self.root)
+                self.assertEqual([], errors)
+                self.assertEqual("src.py", records[0]["source"]["path"])
+                self.assertEqual(["aux.py"], [source["path"] for source in records[0]["sources"]])
+
+    def test_pending_multi_source_is_not_automatically_promoted(self):
+        row = self.row(sources=[self.auxiliary_source()])
+        self.put([row])
+        records, errors = graph.check(self.root)
+        self.assertEqual([], errors)
+        self.assertEqual("needs_verification", records[0]["status"])
+        self.assertIsNone(records[0]["verified_commit"])
+        self.assertEqual([], graph.select(records))
+        self.assertEqual(["a1.entry"], [
+            record["id"] for record in graph.select(records, status="needs_verification")
+        ])
+
+    def test_auxiliary_source_hash_symbol_and_missing_file_are_rejected(self):
+        cases = {
+            "hash": (self.auxiliary_source(sha256="0" * 64),
+                     "source hash does not match verified_commit: aux.py"),
+            "symbol": (self.auxiliary_source(symbol="missing"),
+                       "source symbol missing at verified_commit: missing"),
+            "missing": (self.auxiliary_source(path="missing.py", sha256="0" * 64),
+                        "cannot read source at verified_commit: missing.py"),
+        }
+        for status in ("current", "release_only"):
+            for label, (auxiliary, expected) in cases.items():
+                with self.subTest(status=status, case=label):
+                    self.put([self.current_row(status=status, sources=[auxiliary])])
+                    _, errors = graph.check(self.root)
+                    self.assertTrue(any(expected in error for error in errors), errors)
+                    self.assertTrue(any("HEAD" in error and auxiliary["path"] in error
+                                        for error in errors), errors)
+
+    def test_auxiliary_source_head_drift_is_rejected(self):
+        for status in ("current", "release_only"):
+            with self.subTest(status=status):
+                row = self.current_row(status=status, sources=[self.auxiliary_source()])
+                (self.root / "aux.py").write_text(
+                    "def assist(): return %r\n" % status, encoding="utf-8")
+                self.git("add", "aux.py")
+                self.git("commit", "-qm", "auxiliary source moved after verification")
+                self.put([row])
+                _, errors = graph.check(self.root)
+                self.assertTrue(any("stale source hash at HEAD: aux.py" in error
+                                    for error in errors), errors)
+                self.assertTrue(any("source changed since verified_commit: aux.py" in error
+                                    for error in errors), errors)
+
+    def test_duplicate_source_bindings_are_rejected_but_multiple_symbols_share_a_file(self):
+        cases = {
+            "primary": [self.auxiliary_source(path="src.py", symbol="run")],
+            "auxiliary": [self.auxiliary_source(), self.auxiliary_source()],
+            "same-symbol": [self.auxiliary_source(), self.auxiliary_source(sha256="0" * 64)],
+        }
+        for label, sources in cases.items():
+            with self.subTest(case=label):
+                self.put([self.row(sources=sources)])
+                _, errors = graph.check(self.root)
+                self.assertTrue(any("duplicate" in error or "unique" in error for error in errors), errors)
+
+        self.init_repo()
+        another_symbol = self.auxiliary_source(path="src.py", symbol="other",
+                                                sha256=digest(self.root / "src.py"))
+        self.put([self.row(sources=[another_symbol])])
+        _, errors = graph.check(self.root)
+        self.assertEqual(errors, [], errors)
+
+    def test_release_only_auxiliary_source_requires_head_ancestry(self):
+        row = self.current_row(status="release_only", sources=[self.auxiliary_source()])
+        self.git("checkout", "--orphan", "other")
+        self.git("rm", "-rf", ".")
+        (self.root / "src.py").write_text("def run(): pass\n", encoding="utf-8")
+        (self.root / "aux.py").write_text("def assist(): pass\n", encoding="utf-8")
+        self.git("add", "src.py", "aux.py")
+        self.git("commit", "-qm", "independent root")
+        self.put([row])
+        _, errors = graph.check(self.root)
+        self.assertTrue(any("release_only verified_commit is not an ancestor" in error
+                            for error in errors), errors)
+
     def test_unknown_fields_and_wrong_types_are_rejected(self):
         cases = [
             ("document", lambda doc: doc.update(extra=True)),
             ("record", lambda doc: doc["records"][0].update(extra=True)),
             ("source", lambda doc: doc["records"][0]["source"].update(extra=True)),
+            ("sources-type", lambda doc: doc["records"][0].update(sources={})),
+            ("sources-field", lambda doc: doc["records"][0].update(
+                sources=[{"path": "aux.py", "extra": True}])),
+            ("sources-sha256", lambda doc: doc["records"][0].update(
+                sources=[{"path": "aux.py", "sha256": "0" * 63}])),
+            ("sources-symbol", lambda doc: doc["records"][0].update(
+                sources=[{"path": "aux.py", "symbol": ""}])),
             ("relation", lambda doc: doc["records"][0]["relations"].append(
                 {"type": "calls", "target": "a1.other", "extra": True})),
             ("evidence", lambda doc: doc["records"][0]["evidence"][0].update(extra=True)),

@@ -7,6 +7,11 @@ import json
 import sys
 from pathlib import Path
 
+# Direct ``python3 -I path/to/dispatch_config.py`` must still resolve siblings.
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
 from process_check import InputError, read_first_yaml_block
 
 HOSTS = ("codex", "claude-code", "zcode", "dsh")
