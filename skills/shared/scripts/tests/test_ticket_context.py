@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Temporary-Git contract tests for frozen v2 ticket contexts and DoD parsing."""
+"""Temporary-Git contract tests for frozen v3 ticket contexts and DoD parsing."""
 from __future__ import annotations
 
 import copy
@@ -71,7 +71,7 @@ Implement it.
 
 ## 验收标准（DoD，可自动判定）
 
-- [ ] `python3 -I tests/test_a.py` → 期望输出 `ok`
+- [ ] `python3 -I tests/test_a.py` → 退出码 `0`；期望输出 `ok`
 - [x] `python3 -I tests/test_b.py` → 退出码 `0`
 
 ## 备注
@@ -118,7 +118,7 @@ class TicketContextTest(unittest.TestCase):
     def test_create_freezes_full_oids_hashes_scope_dod_and_output(self):
         output = self.feature / "impl/issue-001/ticket-context.json"
         context = tc.create_context(self.issue, self.root, output)
-        self.assertEqual(context["schema"], "agent-dev.ticket-context/v2")
+        self.assertEqual(context["schema"], "agent-dev.ticket-context/v3")
         self.assertEqual(context["target_branch"], "main")
         self.assertEqual(context["target_commit"], self.main)
         self.assertEqual(context["base"], self.main)
@@ -132,7 +132,9 @@ class TicketContextTest(unittest.TestCase):
         self.assertEqual(context["hashes"]["spec"], hashlib.sha256(self.spec.read_bytes()).hexdigest())
         self.assertEqual(context["hashes"]["config"], hashlib.sha256(self.config.read_bytes()).hexdigest())
         self.assertEqual([item["id"] for item in context["dod"]], ["DoD-1", "DoD-2"])
-        self.assertEqual(context["dod"][0]["expected"], "ok")
+        self.assertEqual(context["dod"][0]["expected_exit"], 0)
+        self.assertEqual(context["dod"][0]["expected_output"], "ok")
+        self.assertEqual(context["dod"][1]["expected_output"], "")
         self.assertEqual(context["gate2_context_digest"], tc.context_digest(context))
         self.assertEqual(tc.load_context(output), context)
         self.assertEqual(tc.create_context(self.issue, self.root), context)
@@ -166,6 +168,19 @@ class TicketContextTest(unittest.TestCase):
         self.assertNotEqual(changed_context["hashes"]["issue"], frozen["hashes"]["issue"])
         self.assertNotEqual(changed_context["hashes"]["dod"], frozen["hashes"]["dod"])
         self.assertNotEqual(changed_context["gate2_context_digest"], frozen["gate2_context_digest"])
+        self.issue.write_text(text.replace("退出码 `0`", "退出码 `1`"), encoding="utf-8")
+        changed_exit = tc.create_context(self.issue, self.root)
+        self.assertNotEqual(changed_exit["hashes"]["dod"], frozen["hashes"]["dod"])
+        self.assertNotEqual(changed_exit["gate2_context_digest"], changed_context["gate2_context_digest"])
+
+    def test_v2_context_is_rejected_without_automatic_migration(self):
+        context = tc.create_context(self.issue, self.root)
+        context["schema"] = "agent-dev.ticket-context/v2"
+        context["dod"] = [{"id": "DoD-1", "command": "python3 -I tests/test_a.py", "expected": "0"}]
+        path = self._write_context(context)
+        with self.assertRaisesRegex(tc.ContextError, "schema|const|expected"):
+            tc.load_context(path)
+        self.assertEqual(json.loads(path.read_text())["schema"], "agent-dev.ticket-context/v2")
 
     def test_target_branch_precedence_local_human_slug_and_legacy_since(self):
         config = {"main-branch": "main", "feature-closeout": {
@@ -199,6 +214,11 @@ class TicketContextTest(unittest.TestCase):
             "## 验收标准（DoD）\n- [ ] prefix `command`\n",
             "## 验收标准（DoD）\n- [ ] `same`\n- [x] `same`\n",
             "## 验收标准（DoD）\n- [ ] `unterminated\n",
+            "## 验收标准（DoD）\n- [ ] `cmd` → 期望输出 `old`\n",
+            "## 验收标准（DoD）\n- [ ] `cmd` → 退出码 `zero`\n",
+            "## 验收标准（DoD）\n- [ ] `cmd` → 期望输出 `x`；退出码 `0`\n",
+            "## 验收标准（DoD）\n- [ ] `cmd` → 退出码 `0`；退出码 `1`\n",
+            "## 验收标准（DoD）\n- [ ] `cmd` → 退出码 `0`；期望输出 ``\n",
         )
         for section in bad_sections:
             with self.subTest(section=section):
@@ -271,20 +291,29 @@ class TicketContextTest(unittest.TestCase):
         self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n", encoding="utf-8")
         self.issue.write_text(ISSUE.replace("architecture-updates: [interface.alpha, interface.beta]", "architecture-updates: []")
                               .replace("declared-scope: [src/a.py, tests/**]", "declared-scope: [src/a.py]"), encoding="utf-8")
-        (self.feature / "acceptance-plan.yaml").write_text("""schema: agent-dev.feature-acceptance/v1
-prd: prd.md
+        docs = self.root / "docs/features/m/demo"
+        docs.mkdir(parents=True, exist_ok=True)
+        prd = docs / "demo-prd-2026-11-14.md"
+        prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-1：Given 测试输入，When 执行测试，Then 退出码为 0\n", encoding="utf-8")
+        digest = hashlib.sha256(prd.read_bytes()).hexdigest()
+        (self.feature / "acceptance-plan.yaml").write_text(f"""schema: agent-dev.feature-acceptance/v2
 tech_spec: demo-tech-spec-2026-11-14.md
+documents:
+  prd:
+    path: docs/features/m/demo/demo-prd-2026-11-14.md
+    sha256: {digest}
 cases:
   AC-1:
     title: 命令验收
-    source: PRD#AC-01
+    source: {{document: prd, anchor: AC-1}}
     required: true
     executor: command
     oracle: auto
+    preconditions: [环境：隔离测试环境]
     steps: [执行测试]
     expected: 退出码为 0
     command: python3 -I tests/test_a.py
-    assertions: {exit: 0}
+    assertions: {{exit: 0}}
     evidence: [log]
 """, encoding="utf-8")
 
@@ -304,6 +333,14 @@ cases:
                               "--repo", str(self.root)], capture_output=True, text=True)
         self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
         self.assertTrue(json.loads(cli.stdout)["ok"])
+
+    def test_check_plan_rejects_missing_source_ac(self):
+        self.prepare_plan()
+        prd = self.root / "docs/features/m/demo/demo-prd-2026-11-14.md"
+        prd.write_text(prd.read_text() + "- AC-2：Given 新场景，When 未承接，Then 校验失败\n", encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("sha256" in error or "覆盖不完整" in error for error in result["errors"]), result["errors"])
 
     def test_check_plan_rejects_cycles_and_unserialised_overlap(self):
         self.prepare_plan()

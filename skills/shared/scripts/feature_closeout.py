@@ -29,10 +29,11 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_check import (  # noqa: E402  共享解析与 git 辅助，不另写第二份
     InputError, Report, git, parse_yaml_subset, read_first_yaml_block, read_frontmatter,
+    md_section, _table_rows, _evidence_pointer_problem, _placeholder,
 )
 
 CANDIDATE_SCHEMA = "agent-dev.feature-candidate/v2"
-PLAN_SCHEMA = "agent-dev.feature-acceptance/v1"
+PLAN_SCHEMA = "agent-dev.feature-acceptance/v2"
 RESULTS_SCHEMA = "agent-dev.feature-business-results/v2"
 EXECUTORS = ("command", "browser-agent", "human")
 ORACLES = ("auto", "auto+human-review", "human")
@@ -103,26 +104,46 @@ def read_plan(feature_dir: Path) -> dict:
     path = plan_source(feature_dir)
     if not path.is_file():
         raise InputError(f"{path} 不存在：技术方案阶段必须产出功能验收计划")
-    return parse_yaml_subset(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if text.lstrip().startswith("{"):
+        return json.loads(text, object_pairs_hook=_unique_json_object,
+                          parse_constant=_reject_json_constant)
+    return parse_yaml_subset(text)
 
 
 def validate_plan_data(plan: dict) -> list:
     errors = []
     if plan.get("schema") != PLAN_SCHEMA:
         errors.append(f"schema 应为 {PLAN_SCHEMA}")
+    documents = plan.get("documents")
+    if not isinstance(documents, dict) or not documents:
+        errors.append("documents 必须登记需求来源文档")
+        documents = {}
+    for alias, document in documents.items():
+        if alias not in ("prd", "change_request"):
+            errors.append(f"documents.{alias} 不是受支持的来源别名")
+            continue
+        if not isinstance(document, dict) or not document.get("path") or not re.fullmatch(
+                r"[0-9a-f]{64}", str(document.get("sha256") or "")):
+            errors.append(f"documents.{alias} 必须含 path 与 64 位 sha256")
     cases = plan.get("cases")
     if not isinstance(cases, dict) or not cases:
         return errors + ["cases 必须是以 AC 编号为键的非空映射"]
     for aid, case in cases.items():
         prefix = f"{aid}："
-        if not re.fullmatch(r"AC-[0-9]+", str(aid)):
-            errors.append(prefix + "编号须为 AC-<数字>")
+        if not re.fullmatch(r"AC-(?:D)?[0-9]+", str(aid)):
+            errors.append(prefix + "编号须为 AC-<数字> 或 AC-D<数字>")
         if not isinstance(case, dict):
             errors.append(prefix + "内容必须是映射")
             continue
         for key in ("title", "source", "expected"):
             if not case.get(key):
                 errors.append(prefix + f"缺 {key}")
+        source = case.get("source")
+        if not isinstance(source, dict) or source.get("document") not in documents:
+            errors.append(prefix + "source.document 必须引用 documents 中已登记的来源")
+        elif source.get("anchor") != aid:
+            errors.append(prefix + "case key 必须等于 source.anchor")
         if not isinstance(case.get("required"), bool):
             errors.append(prefix + "required 必须显式为 true / false")
         executor = case.get("executor")
@@ -132,11 +153,14 @@ def validate_plan_data(plan: dict) -> list:
         if oracle not in ORACLES:
             errors.append(prefix + f"oracle={oracle!r} 非法（{' / '.join(ORACLES)}）")
         steps = case.get("steps")
-        if not isinstance(steps, list) or not steps:
-            errors.append(prefix + "steps 必须是非空列表")
-        for list_key in ("preconditions", "human_steps", "evidence"):
-            if list_key in case and case.get(list_key) is not None and not isinstance(case.get(list_key), list):
-                errors.append(prefix + f"{list_key} 必须是列表")
+        if not isinstance(steps, list) or not steps or any(not isinstance(step, str) or not step.strip() for step in steps):
+            errors.append(prefix + "steps 必须是非空字符串列表")
+        for list_key in ("preconditions", "evidence"):
+            values = case.get(list_key)
+            if not isinstance(values, list) or not values or any(not isinstance(item, str) or not item.strip() for item in values):
+                errors.append(prefix + f"{list_key} 必须是非空字符串列表")
+        if "human_steps" in case and case.get("human_steps") is not None and not isinstance(case.get("human_steps"), list):
+            errors.append(prefix + "human_steps 必须是列表")
         if executor == "command" and not case.get("command"):
             errors.append(prefix + "command 执行方式缺 command")
         if executor == "human" and oracle != "human":
@@ -148,12 +172,110 @@ def validate_plan_data(plan: dict) -> list:
         if oracle in ("auto+human-review", "human"):
             if case.get("human_reason") not in HUMAN_REASONS:
                 errors.append(prefix + f"人工原因须为 {' / '.join(HUMAN_REASONS)}")
-        elif case.get("human_reason"):
-            errors.append(prefix + "auto 不需要 human_reason")
-        if executor == "browser-agent":
-            evidence = case.get("evidence")
-            if not isinstance(evidence, list) or "screenshot" not in evidence:
-                errors.append(prefix + "浏览器验收的 evidence 必须包含 screenshot")
+            if not isinstance(case.get("human_expect"), str) or not case.get("human_expect").strip():
+                errors.append(prefix + "人工 / 混合判定必须写非空 human_expect")
+        elif case.get("human_reason") or case.get("human_expect"):
+            errors.append(prefix + "auto 不需要 human_reason / human_expect")
+        if executor == "browser-agent" and "screenshot" not in (case.get("evidence") or []):
+            errors.append(prefix + "浏览器验收的 evidence 必须包含 screenshot")
+    return errors
+
+
+def _ac_ids(document: Path, heading: str) -> set:
+    text = document.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^###\s+%s\s*$\n(.*?)(?=^###\s+|^##\s+|\Z)" % re.escape(heading), text)
+    if not match:
+        raise InputError(f"{document.name} 缺少 ### {heading}")
+    identifiers = re.findall(r"(?m)^\s*[-*]\s+(AC-(?:D)?[0-9]+)\s*[：:]", match.group(1))
+    if len(set(identifiers)) != len(identifiers):
+        raise InputError(f"{document.name} 的 {heading} 存在重复 AC")
+    return set(identifiers)
+
+
+def validate_plan_sources(feature_dir: Path, plan: dict) -> list:
+    """Reconcile plan cases with real, hash-bound PRD / change-request AC sets."""
+    errors = []
+    try:
+        repo = repo_root_of(feature_dir)
+    except InputError as exc:
+        return [str(exc)]
+    documents = plan.get("documents") or {}
+    cases = plan.get("cases") or {}
+    docs_root = (repo / "docs" / "features" / feature_dir.parent.name / feature_dir.name).resolve()
+    resolved = {}
+    for alias, item in documents.items():
+        try:
+            value = item.get("path")
+            relative = Path(value)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise InputError(f"documents.{alias}.path 必须是当前 feature 的仓库相对路径")
+            path = (repo / relative).resolve()
+            path.relative_to(docs_root)
+            if not path.is_file():
+                raise InputError(f"documents.{alias}.path 不存在：{value}")
+            if sha256_file(path) != item.get("sha256"):
+                raise InputError(f"documents.{alias}.sha256 与当前文档不一致：{value}")
+            resolved[alias] = path
+        except (InputError, OSError, ValueError) as exc:
+            errors.append(str(exc))
+    if errors:
+        return errors
+    try:
+        prd_ids = _ac_ids(resolved["prd"], "端到端验收场景") if "prd" in resolved else set()
+        if "change_request" not in resolved:
+            expected = prd_ids
+            for aid, case in cases.items():
+                if (case.get("source") or {}).get("document") != "prd":
+                    errors.append(f"{aid}：标准路径只能引用 prd")
+        else:
+            change_path = resolved["change_request"]
+            delta_ids = _ac_ids(change_path, "Delta 验收场景")
+            frontmatter = read_frontmatter(change_path)
+            upstream_prd = str((frontmatter.get("upstream") or {}).get("prd") or "")
+            if upstream_prd and "prd" not in resolved:
+                errors.append("change-request 声明 upstream.prd，但 documents.prd 未登记")
+            if "prd" in resolved and (not upstream_prd or Path(upstream_prd).name != resolved["prd"].name):
+                errors.append("change-request upstream.prd 与 documents.prd.path 不一致")
+            baseline = frontmatter.get("baseline_ac") or {}
+            if not isinstance(baseline, dict) or any(key not in baseline for key in ("retain", "replace", "retire")):
+                errors.append("baseline_ac.retain/replace/retire 必须全部显式声明")
+                return errors
+            retain = baseline.get("retain") or []
+            replace = baseline.get("replace") or {}
+            retire = baseline.get("retire") or []
+            if not isinstance(retain, list) or not isinstance(replace, dict) or not isinstance(retire, list):
+                errors.append("baseline_ac.retain/replace/retire 类型必须为 list/dict/list")
+                return errors
+            retain = [str(value) for value in retain]
+            retire = [str(value) for value in retire]
+            replace = {str(key): str(value) for key, value in replace.items()}
+            for old in sorted(set(retain) | set(replace) | set(retire)):
+                if old not in prd_ids:
+                    errors.append(f"baseline_ac 引用了不存在的 PRD AC：{old}")
+            groups = [set(retain), set(replace), set(retire)]
+            for index, left in enumerate(groups):
+                for right in groups[index + 1:]:
+                    overlap = left & right
+                    if overlap:
+                        errors.append("baseline_ac 处置互斥冲突：" + ", ".join(sorted(overlap)))
+            for old, target in replace.items():
+                if target not in delta_ids:
+                    errors.append(f"baseline_ac.replace 目标不是实际 delta AC：{old} -> {target}")
+            if "prd" not in resolved and any((retain, replace, retire)):
+                errors.append("无 baseline PRD 时 retain/replace/retire 必须全部为空")
+            expected = set(delta_ids) | set(retain)
+            for aid, case in cases.items():
+                source = case.get("source") or {}
+                document = source.get("document")
+                if document == "change_request" and aid not in delta_ids:
+                    errors.append(f"{aid}：change-request 中不存在该 delta AC")
+                if document == "prd" and aid not in retain:
+                    errors.append(f"{aid}：baseline PRD AC 未声明 retain")
+        if set(cases) != set(expected):
+            errors.append("AC 覆盖不完整：缺 " + ", ".join(sorted(set(expected) - set(cases)))
+                          + "；额外 " + ", ".join(sorted(set(cases) - set(expected))))
+    except (InputError, OSError, ValueError) as exc:
+        errors.append(str(exc))
     return errors
 
 
@@ -360,6 +482,8 @@ def validate_plan(args) -> Report:
         rep.add("plan", "FAIL", str(exc))
         return rep
     errors = validate_plan_data(plan)
+    if not errors:
+        errors = validate_plan_sources(Path(args.feature_dir), plan)
     for error in errors:
         rep.add("plan", "FAIL", error)
     if not errors:
@@ -388,6 +512,12 @@ def check_plan_unchanged(rep: Report, feature_dir: Path, cand: dict):
         return
     if digest != meta.get("sha256"):
         rep.add("plan", "FAIL", "验收计划在冻结后发生变化；旧结果与报告不得套用，重新 freeze")
+    try:
+        plan = read_plan(feature_dir)
+        for error in validate_plan_data(plan) + validate_plan_sources(feature_dir, plan):
+            rep.add("plan-source", "FAIL", error)
+    except InputError as exc:
+        rep.add("plan-source", "FAIL", str(exc))
 
 
 CHECKER_FIELDS = ("issue", "context_digest", "commit", "tree", "verdict", "checker",
@@ -472,6 +602,8 @@ def freeze(args) -> Report:
     try:
         plan = read_plan(fdir)
         plan_errors = validate_plan_data(plan)
+        if not plan_errors:
+            plan_errors = validate_plan_sources(fdir, plan)
     except InputError as exc:
         plan, plan_errors = {}, [str(exc)]
     for error in plan_errors:
@@ -963,6 +1095,12 @@ def _report_decision(plan: dict, results: dict, evidence: dict, conformance: dic
     return "验收条件已满足" + suffix + waiting
 
 
+def _source_label(source) -> str:
+    if isinstance(source, dict):
+        return "%s#%s" % (source.get("document"), source.get("anchor"))
+    return str(source or "—")
+
+
 def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
     results = load_json(integ / "business-results.json")
     validation = Report()
@@ -1016,7 +1154,7 @@ def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
         human_result = human_names.get(hstat, hstat) if need_human else "不需要"
         artifacts = ", ".join(str(a.get("path")) for a in item.get("artifacts") or [] if isinstance(a, dict) and a.get("path"))
         lines.append(
-            f"| {aid} | {_md(spec.get('source'))} | {_md(item.get('executor') or spec.get('executor'))} | {oracle} | {status} | "
+            f"| {aid} | {_md(_source_label(spec.get('source')))} | {_md(item.get('executor') or spec.get('executor'))} | {oracle} | {status} | "
             f"{_md(_human_reason(spec, item)) if need_human else '—'} | {human_result} | {_md(artifacts)} |"
         )
     lines += ["", "## 人工验收清单", ""]
@@ -1130,6 +1268,88 @@ def _check_confirmation(rep: Report, integ: Path, cand: dict):
             rep.add("confirmation", "FAIL", f"merge-main 不包含 {forbidden} 授权")
 
 
+def _check_feature_conformance(rep: Report, fdir: Path, repo: Path, cand: dict):
+    path = fdir / "integration" / "conformance-feature.md"
+    conf = yaml_head(path)
+    tree = cand.get("candidate_tree")
+    if str(conf.get("verdict") or "") != "conform" or conf.get("candidate") != cand.get("candidate") or conf.get("candidate_tree") != tree:
+        rep.add("conformance", "FAIL", "feature 级覆盖核对须 verdict=conform 且绑定当前 candidate / tree")
+    if conf.get("issue") != "feature":
+        rep.add("conformance", "FAIL", "feature conformance 的 issue 必须为 feature")
+    for key in ("checker", "checker_session", "date"):
+        if not conf.get(key):
+            rep.add("conformance", "FAIL", f"feature conformance 缺 {key}")
+    cfg = load_config(fdir)
+    if conf.get("checker") and conf.get("checker") != (cfg.get("conformance") or {}).get("checker", "main-session"):
+        rep.add("conformance", "FAIL", "feature conformance checker 与配置不一致")
+    if conf.get("date"):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(conf["date"])):
+            rep.add("conformance", "FAIL", "feature conformance date 必须是 YYYY-MM-DD")
+        try:
+            datetime.fromisoformat(str(conf["date"])).date()
+        except ValueError:
+            rep.add("conformance", "FAIL", "feature conformance date 必须是合法 YYYY-MM-DD")
+    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
+    coverage = conf.get("coverage") or {}
+    if set(coverage.get("issues") or []) != wanted:
+        rep.add("conformance-coverage", "FAIL", "coverage.issues 必须精确等于 candidate 冻结票组")
+    expected_specs = {}
+    try:
+        import ticket_context
+        primary = repo_root_of(fdir)
+        for issue in sorted((fdir / "issues").glob("issue-*.md")):
+            fm = read_frontmatter(issue)
+            match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+            ident = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+            if ident in wanted:
+                spec = ticket_context.find_spec(issue, primary)
+                expected_specs[spec.relative_to(primary).as_posix()] = sha256_file(spec)
+    except (ImportError, ValueError, OSError, TypeError) as exc:
+        rep.add("conformance-coverage", "FAIL", f"无法展开 candidate spec 集合：{exc}")
+        return
+    actual_specs = {}
+    for item in coverage.get("specs") or []:
+        if isinstance(item, dict) and item.get("path"):
+            actual_specs[str(item["path"])] = str(item.get("sha256") or "")
+    if actual_specs != expected_specs:
+        rep.add("conformance-coverage", "FAIL", "coverage.specs 必须精确覆盖 candidate 全部 tech-spec 及当前 SHA256")
+    try:
+        text = path.read_text(encoding="utf-8")
+        rows = _table_rows(md_section(text, "Feature 级覆盖核对"))
+    except (OSError, InputError) as exc:
+        rep.add("conformance-coverage", "FAIL", str(exc))
+        return
+    if not rows:
+        rep.add("conformance-coverage", "FAIL", "Feature 级覆盖核对表为空；只有 YAML verdict 不能通过")
+    numbers = []
+    covered_issues = set()
+    for row in rows:
+        if len(row) < 6:
+            rep.add("conformance-coverage", "FAIL", "feature coverage row 缺编号/需求点/来源/issue/判定/证据")
+            continue
+        number, requirement, source, issue_id, decision, evidence = row[:6]
+        if not re.fullmatch(r"[0-9]+", number):
+            rep.add("conformance-coverage", "FAIL", f"feature coverage 编号非法：{number}")
+        else:
+            numbers.append(int(number))
+        if _placeholder(requirement) or _placeholder(source) or "#" not in source:
+            rep.add("conformance-coverage", "FAIL", f"feature coverage {number} 缺需求点或 spec 节锚点")
+        if issue_id not in wanted:
+            rep.add("conformance-coverage", "FAIL", f"feature coverage {number} 引用了 candidate 外票：{issue_id}")
+            continue
+        covered_issues.add(issue_id)
+        if decision != "已实现":
+            rep.add("conformance-coverage", "FAIL", f"feature coverage {number} 含未实现或语义偏差")
+        problem = _evidence_pointer_problem(evidence, repo, fdir / "impl" / issue_id)
+        if _placeholder(evidence) or problem:
+            rep.add("conformance-coverage", "FAIL", f"feature coverage {number} 证据无效：{problem}")
+    if numbers and numbers != list(range(1, len(rows) + 1)):
+        rep.add("conformance-coverage", "FAIL", "feature coverage 编号必须连续且唯一")
+    missing_issues = wanted - covered_issues
+    if missing_issues:
+        rep.add("conformance-coverage", "FAIL", "feature coverage 未覆盖全部 candidate 票：" + ", ".join(sorted(missing_issues)))
+
+
 def check(args) -> Report:
     rep = Report()
     fdir = Path(args.feature_dir)
@@ -1173,21 +1393,7 @@ def check(args) -> Report:
         if ev.get("all-passed") is not True:
             rep.add("evidence", "FAIL", "evidence 头 all-passed 不是 true")
 
-    conf = yaml_head(integ / "conformance-feature.md")
-    if str(conf.get("verdict") or "") != "conform" or conf.get("candidate") != cand.get("candidate") or conf.get("candidate_tree") != tree:
-        rep.add("conformance", "FAIL", "feature 级覆盖核对须 verdict=conform 且绑定当前 candidate / tree")
-    for key in ("checker", "checker_session", "date"):
-        if not conf.get(key):
-            rep.add("conformance", "FAIL", f"feature conformance 缺 {key}")
-    if conf.get("checker") and conf.get("checker") != (cfg.get("conformance") or {}).get("checker", "main-session"):
-        rep.add("conformance", "FAIL", "feature conformance checker 与配置不一致")
-    if conf.get("date"):
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(conf["date"])):
-            rep.add("conformance", "FAIL", "feature conformance date 必须是 YYYY-MM-DD")
-        try:
-            datetime.fromisoformat(str(conf["date"])).date()
-        except ValueError:
-            rep.add("conformance", "FAIL", "feature conformance date 必须是合法 YYYY-MM-DD")
+    _check_feature_conformance(rep, fdir, repo, cand)
 
     results = load_json(integ / "business-results.json")
     _check_results(rep, fdir, results, plan, cand, args.phase)

@@ -68,7 +68,7 @@ architecture-updates: []
 # Demo
 
 ## 验收标准（DoD，可自动判定）
-- [ ] `python3 -I tests/test_dod.py` → 期望输出 `dod-ok`
+- [ ] `python3 -I tests/test_dod.py` → 退出码 `0`；期望输出 `dod-ok`
 
 ## 备注
 上游：tech-spec `demo-tech-spec-2026-11-14.md`，相关节 `#3`。
@@ -143,6 +143,8 @@ class VerifyIssueTest(unittest.TestCase):
                 document = json.loads((self.impl / ("verification-%s.json" % runner)).read_text())
                 self.assertTrue(document["pass"])
                 self.assertEqual([r["id"] for r in document["records"]], ["DoD-1", "fast"])
+                self.assertEqual(document["records"][0]["expected_exit"], 0)
+                self.assertEqual(document["records"][0]["expected_output"], "dod-ok")
                 self.assertTrue(all(r["started"] and r["actual_exit"] == 0 for r in document["records"]))
                 self.assertEqual(document["head"], self.head)
                 self.assertEqual(document["tree"], sh(self.root, "git", "rev-parse", "HEAD^{tree}"))
@@ -176,6 +178,21 @@ class VerifyIssueTest(unittest.TestCase):
         document = json.loads((self.impl / "verification-implementer.json").read_text())
         self.assertTrue(document["pass"])
         self.assertEqual(len(document["records"]), 2)
+
+    def test_expected_nonzero_exit_does_not_require_output_or_zero_text(self):
+        self.commit_test_dod("import sys\nsys.exit(3)\n")
+        self.issue.write_text(self.issue.read_text().replace(
+            "`python3 -I tests/test_dod.py` → 退出码 `0`；期望输出 `dod-ok`",
+            "`python3 -I tests/test_dod.py` → 退出码 `3`"), encoding="utf-8")
+        self.context = tc.create_context(self.issue, self.root, self.context_path)
+        code, out = self.run_ticket()
+        self.assertEqual(code, 0, out)
+        document = json.loads((self.impl / "verification-implementer.json").read_text())
+        record = document["records"][0]
+        self.assertEqual(record["expected_exit"], 3)
+        self.assertEqual(record["actual_exit"], 3)
+        self.assertEqual(record["expected_output"], "")
+        self.assertNotIn("0", (self.impl / record["raw_log"]["path"]).read_text())
 
     def test_frozen_dod_fast_commands_and_unbound_retries_are_rejected(self):
         self.assertEqual(self.run_ticket()[0], 0)

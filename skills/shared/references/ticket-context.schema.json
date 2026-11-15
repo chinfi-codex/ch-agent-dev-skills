@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "agent-dev.ticket-context/v2",
+  "$id": "agent-dev.ticket-context/v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,7 +22,7 @@
     "dod"
   ],
   "properties": {
-    "schema": {"const": "agent-dev.ticket-context/v2"},
+    "schema": {"const": "agent-dev.ticket-context/v3"},
     "issue_id": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
     "issue_path": {"$ref": "#/definitions/repo-path"},
     "feature_dir": {"$ref": "#/definitions/repo-path"},
@@ -62,11 +62,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "command", "expected"],
+        "required": ["id", "command", "expected_exit", "expected_output"],
         "properties": {
           "id": {"type": "string", "pattern": "^DoD-[1-9][0-9]*$"},
           "command": {"type": "string", "minLength": 1},
-          "expected": {"type": ["string", "null"]}
+          "expected_exit": {"type": "integer"},
+          "expected_output": {"type": "string"}
         }
       }
     }

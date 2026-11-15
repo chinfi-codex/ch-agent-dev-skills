@@ -209,7 +209,7 @@ def _dod_items(parsed, context):
     seen = set()
     for index, item in enumerate(value, 1):
         if isinstance(item, str):
-            raise VerificationError("DoD %d is not structured by ticket_context (id/command/expected)" % index)
+            raise VerificationError("DoD %d is not structured by ticket_context (id/command/expected_exit/expected_output)" % index)
         ident = str(_get(item, "id", "dod_id", "dod-id", default="") or "").strip()
         command = _get(item, "command")
         if not ident or not isinstance(command, str) or not command.strip():
@@ -217,17 +217,12 @@ def _dod_items(parsed, context):
         if ident in seen:
             raise VerificationError("duplicate DoD id: %s" % ident)
         seen.add(ident)
-        expected = _get(item, "expected", default={})
-        expected_exit = _get(item, "expected_exit", "expected-exit", "exit")
-        if expected_exit is None:
-            expected_exit = _get(expected, "exit", "exit_code", "exit-code", default=0)
-        expected_output = _get(item, "expected_output", "expected-output", "output")
-        if expected_output is None and isinstance(expected, str):
-            expected_output = expected
-        if expected_output is None:
-            expected_output = _get(expected, "output", "contains", default="")
+        expected_exit = _get(item, "expected_exit")
+        expected_output = _get(item, "expected_output")
         if not isinstance(expected_exit, int) or isinstance(expected_exit, bool):
             raise VerificationError("%s expected exit must be an integer" % ident)
+        if not isinstance(expected_output, str):
+            raise VerificationError("%s expected output must be a string" % ident)
         categories = _get(item, "categories", "category", default=[])
         if isinstance(categories, str):
             categories = [categories]
@@ -242,7 +237,7 @@ def _dod_items(parsed, context):
         tasks.append({
             "id": ident, "kind": "dod", "command": command.strip(),
             "cwd": str(_get(item, "cwd", default=".")),
-            "expected_exit": expected_exit, "expected_output": str(expected_output or ""),
+            "expected_exit": expected_exit, "expected_output": expected_output,
             "categories": list(categories or []), "environment": list(environment or []),
             "quarantine": list(quarantine or []),
             "test_paths": list(_get(item, "test_paths", "test-paths", default=[]) or []),

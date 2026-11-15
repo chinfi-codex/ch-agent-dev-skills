@@ -172,7 +172,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
 3. 被派发实现会话到此停止：票置 `mr-submitted` 并写事件，结构化回报分支 / worktree、MR、ticket context、verification、receipt、评审报告和 Medium-Low 遗留。不得合并或自清。
 4. 主会话接手后：
    - 对同一候选执行 `verify_issue.py run supervisor`，生成独立复跑证据；
-   - 先反向枚举需求，再对照覆盖矩阵打开代码，完成 conformance 及集成票 feature 级核对；
+   - 先反向枚举需求，再对照覆盖矩阵打开代码，完成本票 conformance；唯一叶子另做票级 feature 全量，多叶子不提前重复，最终由 integration candidate 统一核一次；
    - 执行 `process_check.py --phase close`；
    - 只通过以下入口合并：
      ```bash

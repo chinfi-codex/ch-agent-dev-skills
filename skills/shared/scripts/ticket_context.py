@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and consume immutable v2 ticket contexts for delivery and gates.
+"""Create and consume immutable v3 ticket contexts for delivery and gates.
 
 Public API:
     target_branch(config, frontmatter, feature_dir=None) -> str
@@ -59,7 +59,7 @@ from state_store import atomic_json_write
 
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "ticket-context.schema.json"
-CONTEXT_SCHEMA = "agent-dev.ticket-context/v2"
+CONTEXT_SCHEMA = "agent-dev.ticket-context/v3"
 _OID = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -217,7 +217,7 @@ def _dod_section(text: str) -> str:
 
 
 def parse_dod(text: str) -> List[Dict[str, Any]]:
-    """Parse DoD checkbox backtick commands and optional expected-output text."""
+    """Parse commands with independent expected exit and optional output assertion."""
     section = _dod_section(text)
     checkbox_lines = [line for line in section.splitlines()
                       if re.match(r"^\s*[-*]\s+\[[ xX]\]", line)]
@@ -226,30 +226,27 @@ def parse_dod(text: str) -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     seen: Dict[str, int] = {}
     for line in checkbox_lines:
-        match = re.match(r"^\s*[-*]\s+\[[ xX]\]\s*(.*)$", line)
-        remainder = match.group(1) if match else ""
-        if remainder.count("`") % 2:
-            raise ContextError("malformed DoD backtick quoting: %s" % line.strip())
-        fields = re.findall(r"`([^`\n]*)`", remainder)
-        if not fields or not fields[0].strip():
+        remainder = re.match(r"^\s*[-*]\s+\[[ xX]\]\s*(.*)$", line).group(1)
+        match = re.fullmatch(r"`([^`\n]+)`\s*(.*)", remainder)
+        if not match or not match.group(1).strip():
             raise ContextError("DoD checkbox lacks a non-empty backtick command: %s" % line.strip())
-        if len(fields) > 2:
-            raise ContextError("DoD item has too many backtick fields: %s" % line.strip())
-        prefix = remainder.split("`", 1)[0].strip()
-        if prefix:
-            raise ContextError("unexpected text before DoD command: %s" % line.strip())
-        command = fields[0].strip()
-        expected = fields[1].strip() if len(fields) == 2 else None
-        if len(fields) == 2 and not expected:
-            raise ContextError("DoD expected-output field is empty: %s" % line.strip())
+        command, suffix = match.group(1).strip(), match.group(2).strip()
+        expected_exit, expected_output = 0, ""
+        if suffix:
+            oracle = re.fullmatch(r"→\s*退出码\s*`(-?[0-9]+)`\s*(?:；\s*期望输出\s*`([^`\n]*)`)?", suffix)
+            if not oracle:
+                raise ContextError("DoD oracle must be → 退出码 `<integer>` with optional ；期望输出 `<text>`: %s" % line.strip())
+            expected_exit = int(oracle.group(1))
+            if oracle.group(2) is not None:
+                expected_output = oracle.group(2).strip()
+                if not expected_output:
+                    raise ContextError("DoD expected-output field is empty: %s" % line.strip())
         if command in seen:
             raise ContextError("duplicate DoD command at DoD-%d and DoD-%d" %
                                (seen[command], len(result) + 1))
         seen[command] = len(result) + 1
-        result.append({"id": "DoD-%d" % (len(result) + 1),
-                       "command": command, "expected": expected})
-    # A checkbox-looking line that the strict expression did not understand is
-    # an error, rather than silently disappearing from the verification list.
+        result.append({"id": "DoD-%d" % (len(result) + 1), "command": command,
+                       "expected_exit": expected_exit, "expected_output": expected_output})
     for line in section.splitlines():
         if re.match(r"^\s*[-*]\s+\[", line) and line not in checkbox_lines:
             raise ContextError("malformed DoD checkbox: %s" % line.strip())
@@ -618,6 +615,7 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         import feature_closeout
         plan = feature_closeout.read_plan(feature)
         errors.extend(feature_closeout.validate_plan_data(plan))
+        errors.extend(feature_closeout.validate_plan_sources(feature, plan))
         if str(plan.get("tech_spec") or "") != spec.name:
             errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
     except (ImportError, ValueError, OSError, TypeError) as exc:
