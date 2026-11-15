@@ -111,6 +111,8 @@ class SlotsTest(unittest.TestCase):
         self.wait_holder("victim")
         a.send_signal(signal.SIGKILL)
         a.wait(timeout=10)
+        a.stdout.close()
+        a.stderr.close()
         r = self.cli("status", "--json")  # status 顺带回收
         self.assertEqual(json.loads(r.stdout)["holders"], [])
         b = self.spawn("next", 8, 0.1, extra=("--queue-timeout", "10"))

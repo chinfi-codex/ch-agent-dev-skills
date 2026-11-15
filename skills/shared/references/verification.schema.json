@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.verification/v2",
+  "title": "Ticket DoD and fast verification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "issue", "runner", "base", "head", "tree", "before", "after",
+    "records", "red_records", "bug_regression", "pass", "counts", "identity",
+    "generated_at", "manifest"
+  ],
+  "properties": {
+    "schema": {"const": "agent-dev.verification/v2"},
+    "issue": {"type": "string", "minLength": 1},
+    "runner": {"enum": ["implementer", "supervisor"]},
+    "base": {"type": "string", "format": "git-sha"},
+    "head": {"type": "string", "format": "git-sha"},
+    "tree": {"type": "string", "format": "git-sha"},
+    "before": {"$ref": "#/definitions/snapshot"},
+    "after": {"$ref": "#/definitions/snapshot"},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/record"}
+    },
+    "red_records": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/record"}
+    },
+    "bug_regression": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pass", "revert", "red", "restore", "green"],
+          "properties": {
+            "pass": {"type": "boolean"},
+            "revert": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/record"}},
+            "red": {"$ref": "#/definitions/record"},
+            "restore": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/record"}},
+            "green": {"$ref": "#/definitions/record"}
+          }
+        }
+      ]
+    },
+    "pass": {"type": "boolean"},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed", "non_gating", "env_skip", "quarantined", "load_flake"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "non_gating": {"type": "integer", "minimum": 0},
+        "env_skip": {"type": "integer", "minimum": 0},
+        "quarantined": {"type": "integer", "minimum": 0},
+        "load_flake": {"type": "integer", "minimum": 0}
+      }
+    },
+    "identity": {"$ref": "#/definitions/identity"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "manifest": {"type": "string", "minLength": 1}
+  },
+  "definitions": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "tree", "tracked_clean", "untracked_source"],
+      "properties": {
+        "head": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "tracked_clean": {"type": "boolean"},
+        "untracked_source": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "agent", "session", "model", "effort", "role"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "agent": {"type": "string", "minLength": 1},
+        "session": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "effort": {"type": "string", "minLength": 1},
+        "role": {"enum": ["development", "supervisor", "review"]},
+        "tier": {"enum": ["default", "escalated"]}
+      }
+    },
+    "raw-log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "format": "sha256"}
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "kind", "command", "cwd", "expected_exit", "expected_output",
+        "actual_exit", "duration_seconds", "started_at", "ended_at", "raw_log",
+        "runner", "head", "tree", "environment", "started", "timed_out",
+        "output_matched", "gating", "status", "pass", "attempt", "test_paths",
+        "skip_proof"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["dod", "fast", "red", "bug-revert", "bug-red", "bug-restore", "bug-green"]},
+        "command": {"type": "string", "minLength": 1},
+        "cwd": {"type": "string", "minLength": 1},
+        "expected_exit": {"anyOf": [{"type": "integer"}, {"enum": ["nonzero"]}]},
+        "expected_output": {"type": "string"},
+        "actual_exit": {"type": ["integer", "null"]},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "raw_log": {"$ref": "#/definitions/raw-log"},
+        "runner": {"enum": ["implementer", "supervisor"]},
+        "head": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "environment": {"type": "object"},
+        "started": {"type": "boolean"},
+        "timed_out": {"type": "boolean"},
+        "output_matched": {"type": "boolean"},
+        "gating": {"type": "boolean"},
+        "status": {"enum": ["pass", "fail", "non-gating", "env-skip", "quarantined", "load-flake"]},
+        "pass": {"type": "boolean"},
+        "attempt": {"type": "integer", "minimum": 1},
+        "test_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "skip_proof": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "items"],
+          "properties": {
+            "kind": {"enum": ["none", "env-skip", "quarantine"]},
+            "items": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "retry_of": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -45,6 +45,10 @@ allowed-tools:
 
 {{DISPATCH_PROTOCOL}}
 
+{{PROGRESS_EVENTS}}
+
+{{HUMAN_DECISION}}
+
 {{SUPERVISION_LOOP}}
 
 
@@ -68,7 +72,7 @@ allowed-tools:
 
 ## 上游读取规则
 
-- `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
+- `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`；存在时先运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，旧版本或非法配置不得继续
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
 - 补读：`./docs/GLOSSARY.md`、通过 `architecture_graph.py --repo <项目根> --interface <关键词>` 查询接口图谱（tech-spec 3.2 非空时作为契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
@@ -100,12 +104,12 @@ allowed-tools:
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：PRD 的每个稳定 AC 都必须在 `acceptance-plan.yaml` 恰好出现一次；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
-**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 的每个接口变更点，必须落在某张承接票的 DoD 里并引用稳定图谱 ID；用 `architecture_graph.py --interface <关键词> --status needs_verification` 核对迁移中记录，再检查对应分片 diff。无承接票的接口变更点，要么补票，要么在 3.2 显式标注「不进入架构图谱」（如纯内部重构），不许无声漏掉。覆盖表中接口变更点单列一类呈现。
+**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 固定表的每个稳定 ID 必须恰好落入一张承接票 frontmatter `architecture-updates`，并在 DoD 写入 `architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD`（期望退出码 0）。逐 ID 核 spec 动作、supersedes、分片、代码和证据，不能只引用 architecture 字样或旧首页表。无承接票的变更点必须补票；确属纯内部且不进入图谱的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
 
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
-- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的生产代码路径 / glob 清单）
-- **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期实测超任一红线同样停止并退回再拆
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置和架构分片路径 / glob；生产子集用于粒度统计）
+- **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
 - **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与集成态核对；它仍只跑本票 DoD + fast，并始终接受 feature 级 conformance 核对，同样受上述粒度红线约束
 
@@ -136,7 +140,7 @@ allowed-tools:
 
 - 向用户说清：共拆出几票、哪几票可以立即开工（没有前置依赖）、关键的先后手关系一句话带过
 - 提示时附离场说明，用大白话：你可以宣布「离场自动跑」进入无人值守——我会先把「我能自主做什么、绝不做什么、预算和额度上限、什么时候停」写下来给你过目，你点头后我自动跑完全程（见「监督循环 · 无人值守模式」）
-- 本 skill 的职责到此结束；**门②是执行段之前唯一的人审检查点，之后全程不再等人审核**。主会话按上方「派发协议」与「监督循环」逐票派发、监督执行直到逐票合并完成（实现动作发生在被派发的独立对话内，不违反本会话 DOC_MODE）
+- 本 skill 的职责到此结束；**门②是执行段之前唯一的例行人工确认点**。之后由主会话按「派发协议」与「监督循环」逐票派发、监督合并与清场，无例行人工审核；异常或越界问题通过 human-decision 单点处理（实现动作发生在独立对话内，不违反本会话 DOC_MODE）
 
 ---
 
@@ -145,6 +149,6 @@ allowed-tools:
 - tech-spec 未确认不开拆；`acceptance-plan.yaml` 缺失或校验不过不开拆；拆解不改变方案与验收计划内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
-- 票一旦 confirmed，标题 / DoD / declared-scope 不得由本 skill 单方面修改；变更须重新过门②。实现期登记实际 diff 漂移；超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以补跑测试代替
+- 票一旦 confirmed，标题 / DoD / declared-scope / architecture-updates 不得由本 skill 或实现方单方面修改；变更须重新过门②并生成新 ticket context。实现期任何 changed path 越界都直接 FAIL，超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以登记漂移或补跑测试代替
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

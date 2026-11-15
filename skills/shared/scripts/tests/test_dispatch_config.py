@@ -155,6 +155,10 @@ class DispatchConfigTest(unittest.TestCase):
         self.assertIn('model_reasoning_effort = "medium"', codex["agents/development.toml"])
         zcode = dc.render(self.dispatch, "zcode")
         self.assertIn("thoughtLevel: high", zcode["agents/supervisor-review.md"])
+        self.assertIn("receipt", zcode["agents/supervisor-review.md"])
+        self.assertIn("human-decision", zcode["agents/development.md"])
+        self.assertIn("不直接问人", zcode["agents/development.md"])
+        self.assertIn("不合并、不清场", zcode["agents/development-escalated.md"])
         dsh = dc.render(self.dispatch, "dsh")
         self.assertIn("provider: spawn", dsh["cordis.patch.yml"])
         self.assertIn("toolName: subagent", dsh["cordis.patch.yml"])
@@ -177,6 +181,35 @@ class DispatchConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(dc.ConfigError, "拒绝覆盖"):
                 dc.write_rendered(files, output)
             self.assertEqual(path.read_text(encoding="utf-8"), "user-owned\n")
+    def test_dsh_native_session_command_is_canonical_and_validated(self):
+        candidate = fixture()
+        candidate["dispatch"]["hosts"]["dsh"]["native_session_command"] = "query-native-session --json"
+        validated = dc.validate(candidate)
+        self.assertEqual(validated["hosts"]["dsh"]["native_session_command"],
+                         "query-native-session --json")
+        for host in ("zcode", "codex", "claude-code"):
+            bad = fixture()
+            bad["dispatch"]["hosts"][host]["native_session_command"] = "query"
+            with self.subTest(host=host), self.assertRaisesRegex(dc.ConfigError, "仅用于 DSH"):
+                dc.validate(bad)
+        bad = fixture()
+        bad["dispatch"]["hosts"]["dsh"]["native_session_command"] = "query\nrm -rf /"
+        with self.assertRaisesRegex(dc.ConfigError, "单行"):
+            dc.validate(bad)
+
+    def test_render_check_is_read_only_and_reports_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            files = dc.render(self.dispatch, "zcode")
+            self.assertEqual(set(dc.check_rendered(files, output)), set(files))
+            dc.write_rendered(files, output)
+            before = {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+            self.assertEqual(dc.check_rendered(files, output), [])
+            after = {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+            self.assertEqual(before, after)
+            target = output / "agents/development.md"
+            target.write_text("stale\n", encoding="utf-8")
+            self.assertEqual(dc.check_rendered(files, output), ["agents/development.md"])
 
 
 if __name__ == "__main__":

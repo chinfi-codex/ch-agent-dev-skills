@@ -3,10 +3,14 @@
 import json
 import os
 import sys
+import contextlib
+import io
+from datetime import datetime, timezone
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -144,24 +148,64 @@ class SwimFixture(unittest.TestCase):
                          datetime(2026, 1, 1).timestamp())
         self.assertIsNone(by_uid["模块C/需求丙#issue-009"]["done_ts"])
 
-    def test_summary_facts_include_blockers(self):
-        """泳道票节点带卡点素材（等人备注/打回次数），事实清单如实收录"""
+    def test_summary_facts_include_decision_contract_errors(self):
+        """旧 needs-human note 缺活动包时显式报契约错误，不充当决定真源。"""
         feat = self.repo / "dev" / "features" / "模块A" / "需求甲"
         write_issue(self.repo, "模块A", "需求甲", "issue-003", "卡点票", "needs-human",
                     extra="verify-fails: 2\n")
         (feat / "progress.jsonl").write_text(
-            '{"ts": "2026-01-02 10:00", "event": "needs-human", "issue": "issue-003", "note": "资损口径需要人拍板"}\n',
+            '{"ts": "2026-01-02 10:00", "event": "needs-human", "issue": "issue-003", "note": "旧备注"}\n',
             encoding="utf-8")
         p = self.swim()
         node = next(i for f in p["features"] if f["id"] == "模块A/需求甲"
                     for i in f["issues"] if i["id"] == "issue-003")
         self.assertEqual(node["verify_fails"], 2)
-        self.assertIn("资损口径", node["human_note"])
+        self.assertIsNone(node["decision"])
+        self.assertIn("缺少活动", node["contract_error"])
+        self.assertEqual(node["human_note"], "")
         facts = progress._summary_facts(p)
         self.assertIn("卡点票", facts)
-        self.assertIn("资损口径需要人拍板", facts)
+        self.assertIn("契约错误", facts)
+        self.assertNotIn("旧备注", facts)
         self.assertIn("复跑打回 2 次", facts)
-        self.assertIn("等人", facts)
+
+    def test_tree_and_swim_project_same_active_decision(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "--allow-empty", "-q", "-m", "init"], check=True)
+        feat = self.repo / "dev" / "features" / "模块A" / "需求甲"
+        (feat / "decisions").mkdir()
+        packet = {"id": "decision-1", "status": "waiting",
+                  "question": {"decision": "请决定发布范围"},
+                  "scope": {"issue": "issue-001"}}
+        with mock.patch("human_decision.active_for_issue", return_value=packet):
+            swim = self.swim()
+            tree = progress.build_tree_payload(self.repo, 30)
+        swim_node = next(i for f in swim["features"] if f["id"] == "模块A/需求甲"
+                         for i in f["issues"] if i["id"] == "issue-001")
+        tree_node = next(n for n in tree["tree"] if n.get("kind") == "ticket" and n["id"] == "issue-001")
+        self.assertEqual(swim_node["decision"], packet)
+        self.assertEqual(tree_node["decision"], packet)
+        self.assertIsNone(swim_node["contract_error"])
+        self.assertEqual(swim_node["human_note"], "请决定发布范围")
+
+    def test_rfc3339_merged_event_feeds_hosts_and_replay(self):
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        self.assertEqual(progress.parse_ts(timestamp), datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp())
+        feat = self.repo / "dev" / "features" / "模块A" / "需求甲"
+        (feat / "progress.jsonl").write_text(json.dumps({
+            "ts": timestamp, "event": "merged", "issue": "issue-001", "host": "zcode",
+            "model": "model-x", "commit": "a" * 40}) + "\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            progress.hosts_command(SimpleNamespace(repo=self.repo, hours=24, stall_min=30))
+        self.assertIn("合并 1", output.getvalue())
+        self.assertIn("zcode·model-x", output.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            progress.replay_command(SimpleNamespace(repo=self.repo, registry=None, project=None,
+                                                    host="zcode", issue="issue-001", hours=24))
+        self.assertIn("merged", output.getvalue())
+        self.assertIn("a" * 40, output.getvalue())
+        self.assertNotIn("??:??", output.getvalue())
 
     def test_call_llm_against_mock_server(self):
         """_call_llm 走 OpenAI 兼容 /chat/completions 并取回 content"""
@@ -193,6 +237,7 @@ class SwimFixture(unittest.TestCase):
             self.assertEqual(seen["auth"], "Bearer k")
         finally:
             srv.shutdown()
+            srv.server_close()
 
     def test_summary_config_precedence(self):
         """配置优先级：参数 > 环境变量 > 宿主 host.json /model（密钥回退同目录 local.env）"""
@@ -221,6 +266,20 @@ class SwimFixture(unittest.TestCase):
         self.assertEqual(progress._summary_config(
             SimpleNamespace(base_url="http://arg", model="m2", api_key="k2"), home=home),
             ("http://arg", "m2", "k2"))
+
+    def test_demo_creates_real_decision_packet_and_projection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "demo"
+            progress.demo_command(SimpleNamespace(dir=str(root)))
+            packet = root / "pandu/dev/features/auth/session-login/decisions/dec-demo-oauth-retry.json"
+            data = json.loads(packet.read_text(encoding="utf-8"))
+            self.assertEqual(data["status"], "pending")
+            self.assertEqual(data["presentation"]["header"], "登录重试")
+            feature = root / "pandu/dev/features/auth/session-login"
+            issues = progress.load_issues(root / "pandu", feature, progress.load_events(feature), {})
+            issue = next(item for item in issues if item["id"] == "issue-007")
+            self.assertEqual(issue["decision"]["id"], "dec-demo-oauth-retry")
+            self.assertIsNone(issue["contract_error"])
 
     def test_works_without_git(self):
         with tempfile.TemporaryDirectory() as bare:

@@ -1,14 +1,14 @@
 ---
 name: ai-review
-version: 0.7.1
+version: 0.8.0
 default-mode: DOC_MODE
 default-mode-strict: true
 description: |
-  Independent code review powered by open-code-review (ocr). Modes:
-  delegate (default — ocr filters files and resolves rules, a fresh
-  independent conversation reviews; no LLM endpoint needed), local, ci
-  (GitLab CI auto-review on MR push). Review-only: never modifies code,
-  writes the review report only.
+  Independent code review over the frozen ticket diff. OCR filters files and
+  rules in delegate mode; local and CI modes are optional. Produces only a
+  review report and a structured receipt candidate. Never edits code, ticket
+  state, evidence, decisions, or merge state and never reviews in the
+  implementer conversation.
 allowed-tools:
   - Read
   - Write
@@ -29,108 +29,95 @@ allowed-tools:
 
 {{DEV_CONFIG}}
 
+{{HUMAN_DECISION}}
+
 # /ai-review
 
-你是独立评审员（Reviewer）。你负责：**用 open-code-review（`ocr`）对固定点以来的 diff 评审，解析评审结果为评审报告与 BLOCKER 清单，供回修与主会话合并判断使用**。
+你是独立评审员（Reviewer）。你负责：**对 ticket context 冻结 base 以来的 diff 评审，产出评审报告与 review receipt 候选，供回修和主会话合并判断**。
 
-复测位置：评审员默认只读实现方的 DoD + fast evidence 回执；需要独立复测时，在本票 worktree 对同一固定提交只重跑相关 DoD / fast，禁止引用实现对话自述，也不得加跑票级 scoped / full。OCR 本地筛文件 / 静态分析不是测试，不受此限制。
+铁律：**只评不改**。不修代码、不改测试 / 票 / evidence / 决策包、不执行合并或清理；文件写入仅限 `reviews/**` 的评审报告。「顺手修了」是违规。
 
-铁律：**只评不改**。不修代码、不修测试、不改票；产出只有一份评审报告（`reviews/**`）。「顺手修了」是违规。
+评审默认只读 runner 的 DoD + fast 证据；需要独立复测时，在同一候选只重跑相关 DoD / fast，禁止引用实现对话自述或加跑 scoped / full。OCR 筛文件和静态分析不属于测试执行。
 
-你不负责：
+评审模式：
 
-- 修复任何发现的问题（回修是 Implementer 的事，且必须回到同一实现上下文）
-- 合并动作（评审通过后由主会话直接合并，无需人审；本 skill 只产出结论与报告）
-- 评审引擎的部署与端点配置（`/setup-dev` 与人的事）
+| 模式 | 结果来源 |
+| --- | --- |
+| `delegate`（默认） | OCR preview / rule + 独立宿主对话逐文件评审 |
+| `local` | 票 worktree 内的 OCR JSON |
+| `ci` | MR discussions + CI artifacts `.ocr/ocr-result.json` |
 
-评审引擎与模式（按 `agents-config.ocr.mode`）：
+## Step 0：固定与校验
 
-| 模式 | 触发 | ocr 在哪跑 | 结果来源 |
-|---|---|---|---|
-| `delegate`（默认） | 每次评审 | 本地（ocr 只做文件筛选与规则解析，不调 LLM） | 宿主 agent 内新开的独立对话评审 |
-| `local` | push 前本地跑 | 票的 worktree 内 | `ocr review --format json --output` |
-| `ci` | MR push 自动触发 | GitLab CI job | MR 内联 discussions + CI artifacts `.ocr/ocr-result.json` |
+- base / HEAD / tree 必须来自 ticket context，不接受临时 main...HEAD 或自由 ref 覆盖。ref 有效、diff 非空、`ocr --version` 可用，否则停止。
+- 先运行 `agents_config.py validate` 和 dispatch 角色校验；缺配置或角色过期即停。
+- 输入必须包含票、spec、process-check-review JSON、实现者 host/session/agent、评审者 host/session/agent 和 preview 清单。实现者与评审者身份相同即拒绝。
 
----
+## Step 1：定位需求背景
 
-## 工作流
+按 commit 票号 → 本需求票文件 → 调用方显式提供的 ticket context 定位。读取票「要做什么 / DoD / 不做什么」、tech-spec 约束与指定锚点、PRD 相关节。
 
-### Step 0：固定与校验
+找不到唯一票或关键输入时：**只返回未持久化 human-decision envelope，不直接问人、不写票、不伪造报告路径或代码结论**。background 超 OCR 限制时先摘要，不静默截断。
 
-- 固定点：默认 `<main-branch>...HEAD` 的 merge-base（与 `ocr review --from <main-branch> --to HEAD` 一致）；用户显式给出 commit / 分支 / tag 时以用户为准
-- **先校验再开工**：ref 有效、diff 非空（`git rev-parse` + `git diff --stat`）；`ocr --version` 可用。失败立即报错返回，不开工
-- `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`
+## Step 2：按模式评审
 
-### Step 1：定位 Spec（需求背景）
+### delegate（默认）
 
-按优先级：commit 消息中的票引用（`issue-NNN`）→ `./dev/features/` 下两层模式匹配（`*/*/issues/`，含存量平铺 `*/issues/`）→ 用户显式给出 → 问用户。同时读 tech-spec 约束/假设栏与 PRD 相关节。
+- `ocr delegate preview --format json` 获取文件与 merge base 元数据；`ocr delegate rule --format json <paths...>` 获取规则。
+- 使用独立 `supervisor-review` 对话逐文件评审，输入为冻结 diff + 规则 + 票 DoD；输出 path/content/start_line/end_line/category/severity。
+- preview 中每个文件必须为 reviewed 或 skipped（带原因），不得静默遗漏。首轮一次审完整个 diff并列全 BLOCKER，不留给后续轮。
 
-票文件是 ocr 的**业务背景输入**（`--background` / `--background-file`）：把「要做什么 + DoD 验收命令 + 不做什么」喂给评审，相当于意图核对。注意 background 文件上限（原始 ≤1 MiB、净化后 ≤8000 字符），超限先摘要再传，不得静默截断。
+### local
 
-### Step 2：按模式执行评审
+```bash
+ocr review --from <ticket-context.base> --to HEAD \
+  --background-file <票文件> --format json --output .ocr-local-result.json
+```
 
-**ci 模式**（MR 已存在，CI 已跑或正在跑）：
+项目 `.opencodereview/rule.json` 自动生效，临时覆盖必须显式记录。
 
-- `glab mr view <IID>` 取 MR 状态；必要时 `glab ci status` 等待 review job 结束
-- 结果获取优先级：CI artifacts 的 `.ocr/ocr-result.json`（结构化）→ MR discussions（`glab api` 拉取 OCR 发出的内联评论）
-- CI job 失败：读 `.ocr/ocr-stderr.log`，报告原因（端点不通 / 变量缺失），不代替人改 CI 配置
+### ci
 
-**local 模式**（push 前或项目未接 CI）：
+- 用 `glab mr view` / `glab ci status` 核 MR 与 review job。
+- 优先读取 CI artifact `.ocr/ocr-result.json`，再读 MR discussions。
+- CI 配置失败只报告，不代修；OCR CI job 身份可作为独立评审信任材料。
 
-- 在票 worktree 内执行：
-  ```bash
-  ocr review --from <main-branch> --to HEAD \
-    --background-file <票文件> \
-    --format json --output .ocr-local-result.json
-  ```
-- 项目有 `.opencodereview/rule.json` 时自动生效；需要临时覆盖用 `--rule <file>`
+## Step 3：读取流程结果并做语义复核
 
-**delegate 模式**（默认）：
+机器流程核对只由 `process_check.py --phase review` 执行，评审读取结果、不重复 grep / 数文件 / 比对证据。未收到时可只读运行一次，不加 `--json`；FAIL 项原样列为 critical BLOCKER，结论 blocked。
 
-- `ocr delegate preview --format json` 取可评审文件清单与模式元数据；`ocr delegate rule --format json <paths...>` 取各文件规则
-- 以**独立对话**执行逐文件评审：Claude Code `Task` / ZCode `Agent` 使用 `subagent_type=supervisor-review`，Codex 使用 `agent_type=supervisor-review`，DSH `subagent` 显式传 `supervisor-review` 的 `provider / model / reasoning_effort`；新实例、不共享实现会话上下文。逐文件输入为 diff（按 preview 给的 merge_base）+ 规则组 + 票 DoD，输出 path/content/start_line/end_line/category/severity 结构
-- 评审对话固定按「派发协议」用 `resolve --role review` 绑定当前宿主 `supervisor-review` 模型 / effort；不随被评审票的开发档切换。评审严格性由规则组、票 DoD 与红线复核保证，不靠开发模型档位
-- 覆盖率强制：preview 清单中每个文件必为 reviewed 或 skipped（带原因），不得静默遗漏
-- **首轮穷尽**：首轮评审一次审完整个 diff、列全所有 BLOCKER，不按批次冻结分段评审、不把可见问题留到后续轮
+语义复核包括：
 
-### Step 3：流程核对读取 + 语义复核（只判代码，不判测试执行）
+- **测试更新**：既有测试逐条映射真实 DoD / spec 锚点，冲突说明成立且只改相关断言 / 夹具；新增测试有 runner 见红。无映射、删除或放宽无关断言 → critical。
+- **生成物**：生成器在临时工作区重跑后 tree 一致，无额外字段或越界输出；文字声明不算。
+- **严格 scope**：所有 changed paths 都必须在冻结 declared-scope 内，生产文件 / LOC 不超上限；不得自行扩大 scope 或用补测试 / 模型升级放行。
+- **替代清理**：旧代码、文件、配置、失效引用无保留依据却仍存在 → high。
+- **架构**：逐稳定 ID 核 tech-spec 3.2、票 architecture-updates、分片、代码和证据；current 祖先 / hash / 证据不成立、flow-back 漏补或首页与生成结果不一致 → critical。
+- **测试质量**：未走真实主路径、未制造目标并发 / 失败场景、断言被弱化仍按 correctness 报。
+- 性能 / 展示无功能错误时只记 Medium 人工确认，不作 BLOCKER。
 
-**职责切分**：可机器判定的流程核对（红线 glob 命中与登记、漂移登记、票粒度上限、DoD + fast evidence 与 commit 一致性）**只由** `../shared/scripts/process_check.py` 做一次——`/implement` 发起评审前已跑 `--phase review` 且必须通过，结果 JSON 路径随评审输入传入。评审员**读它，不重做**：不再自行 grep 红线、数文件、比对 evidence 头。
+评审结论只由代码、票 / spec 一致性和测试质量决定。不运行、不等待、不评判 CI full；full 晋级由 `delivery.py promote` 单独处理。runner 证据的新鲜度由 process_check 把关。
 
-- 未收到核对结果 → 自行只读运行一次（`python3 ../shared/scripts/process_check.py --issue <票文件> --repo <worktree> --phase review`，不加 `--json`，输出不落盘）；结果为 FAIL → 报告只引用其 FAIL 行列为 BLOCKER（critical），不展开复核，结论 `blocked`
-- 核对结果中的 `REVIEW` 项是交给评审的语义判断，按下方逐项处理
+## Step 4：报告与 receipt 候选
 
-**语义复核**（脚本判不了，评审独有）：
+- critical / high = BLOCKER；medium 记遗留；low 仅明显有价值时报。
+- 报告写 total / reviewed / skipped 及原因；skipped 比例异常必须显式提示。
+- 按 `shared/templates/dev-review-report.md` 写到 `reviews/`。findings 原样保留，不改严重度、不删条目；异议另写「评审员意见」。
+- 返回结构化 receipt 候选：issue、base/head/tree/diff、报告路径与内容、process-check 路径、preview 覆盖、findings、轮次、实现 / 评审身份、模型 / effort、trust 材料。**调用方负责用 `review_receipt.py create` 计算哈希并生成回执，本 skill 不写 receipt。**
 
-- **测试改动映射**：核对结果列出的「已登记的既有文件改动」逐条对照 impl-log「红线接触记录」——`mechanical-refresh` 白名单内的确只动所列字段；「需求驱动更新」的「测试 → 票 DoD 条目 / tech-spec 节锚点」映射成立、冲突说明成立、改动限于被变更行为覆盖的断言与夹具 → 正常；映射不上或借机放宽无关断言 → **BLOCKER（critical）**，视同红线
-- **票粒度复核**：核对结果显示实际生产文件数 / LOC 超过 `verify-policy.ticket-max-files` / `ticket-max-loc` 时，必须退回再拆；不得以补跑 scoped / full、模块隔离认定或提高模型档位代替。漂移是否仍属本票范围由主会话裁决，评审不得自行扩大 `declared-scope` 放行
-- **清理复核**：diff 引入对既有实现的替代，而被替代的旧实现（代码 / 文件 / 失效引用）仍留存，且 tech-spec 约束栏无保留依据 → **BLOCKER（high）**：该删没删——版本回溯由 Git 承担，不留注释残留、兼容开关、双路径并存
-- **契约 diff 复核**（`docs/architecture/*.json`）：票 DoD 含契约条目时，核对对应稳定 ID 的分片改动与 tech-spec 3.2 一致；`current` 必须有可复核来源哈希、提交和证据，缺证应为 `needs_verification`。票未声明契约条目而改动图谱记录绑定的代码位置（flow-back）：漏补分片或 impl-log 映射缺失 → **BLOCKER（critical）**。`docs/ARCHITECTURE.md` 是生成首页，不审核手工架构事实
-- 性能阈值、展示样式问题（`gate-scope.non-gating`），无伴随功能错误时记 Medium「人工确认项」，不作 BLOCKER
+## Step 5：结论与复审
 
-**与测试执行解耦**：评审结论只由代码与票 / spec 的一致性决定。不运行、不等待、不评判 CI full 或套件级测试状态——CI full 是否已跑、归因是否完成，一律不开 BLOCKER、不推迟签发、不写「待 full 验证后再 pass」；分支 / main 晋级时由 `process_check.py --phase promote` 把关。票级 evidence 是否真实记录 DoD + fast 并与最终 commit 一致，由 `process_check.py --phase merge` 核对。**测试代码本身的质量仍在评审范围**：测试未走真实主路径、DoD 断言未真正覆盖票面行为（如并发顺序未被制造）、断言被弱化，照常按 correctness 报。
-
-### Step 4：解析与映射
-
-- findings 按严重度映射：**critical / high = BLOCKER**（回修依据）；medium 记遗留；low 仅明显有价值时报
-- 覆盖统计：total / reviewed / skipped（含原因）写进报告；skipped 占比异常（如大面积 exclude）显式提示
-- 按模板 `shared/templates/dev-review-report.md`（相对本 SKILL.md 为 `../shared/templates/dev-review-report.md`）产出报告，写入 `./dev/features/<feature-module>/<feature-slug>/reviews/<feature-summary>-review-<issue-id>-YYYY-MM-DD.md`
-
-### Step 5：结论、返回与校准
-
-- 结论：无 BLOCKER → `pass`；仅 medium / low → `pass-with-notes`；任一 BLOCKER → `blocked`
-- 复审轮（同一评审对话被续接，输入为「回修 commit 范围 + 上轮报告路径」）：**范围 = 回修增量 diff + 上轮 BLOCKER 是否闭合 + 回修引入的回归**，Step 3 读取新 HEAD 的 `process_check.py --phase review` 结果、只对回修触及的 `REVIEW` 项做语义复核；在上轮已审且本轮未改动的代码中新发现的 high，标「首轮漏报」并默认转后续票（记 Medium 遗留 + 建议票），仅 critical、红线命中、数据 / 判定结果错误仍阻塞；复审结果写成独立短报告 `...-review-<issue-id>-rN-YYYY-MM-DD.md`（只含本轮 BLOCKER 表与闭合状态），原报告头部「结论」更新为最新一轮并链接各轮报告，收口方以头部结论为准
-- 报告路径与结论返回调用方（`/implement` 被派发对话或主会话），供回修或主会话合并判断
-- 标准失配校准：若连续多轮首轮全 PASS / 全 BLOCK，提示人用已合并 MR 回测误报漏报，再修订 `.opencodereview/rule.json` 的 `rules`；反复出现的判据沉淀进仓库 `REVIEW.md`（无则提示人创建）
-
----
+- 无 BLOCKER → `pass`；仅 Medium / Low → `pass-with-notes`；任一 BLOCKER → `blocked`。
+- 同票复审优先续接原评审对话，输入回修 commit 范围、上轮报告 / receipt。范围 = 回修增量 + 旧 BLOCKER 闭合 + 新增回归；重新读取新 HEAD 的 process review。
+- 在首轮已审且本轮未改代码中新发现 high，标「首轮漏报」并默认转后续票；critical、deny、数据 / 判定错误仍阻塞。
+- 复审生成独立 `rN` 短报告，原报告头部更新最新结论并链接各轮；调用方生成带 round 和 previous receipt hash 的新回执。
+- 连续多轮全 PASS / 全 BLOCK 时，提示用已合并 MR 回测误报漏报并修订规则；反复判据沉淀进 `REVIEW.md`，不在本轮自行放宽。
 
 ## 硬约束
 
-- 只评不改：除 `reviews/**` 报告外不写任何文件；不代 Implementer 修 BLOCKER
-- 评审必须由独立于实现的实例执行（ci 模式天然独立——CI 环境；local / delegate 模式不得在实现会话内代评）；首轮评审必须新开独立对话，同票复审可续接该对话（见 Step 5 复审轮），跨票一律新开
-- 固定点校验失败、ocr 不可用、端点不通：报告并停，不自修配置绕过
-- 流程核对只读 `process_check.py` 结果，不重做；其 FAIL 项一律 Critical，无论引擎结论；超票粒度上限、旧实现该删没删（替代落地而旧代码留存、无约束依据）、旧测试改动映射不成立（需求驱动更新复核不通过）与契约更新缺失或偏离 tech-spec 3.2 意图（含 flow-back 漏补记）同列 BLOCKER
-- 不以 CI full 未跑 / 归因未完 / evidence 未更新开 BLOCKER 或推迟结论；DoD + fast 证据的新鲜度由 process_check 把关，测试代码质量问题照常评
-- findings 原样入报告：不改写严重度、不删减条目；对引擎结论有异议另起「评审员意见」节，不覆盖原文
-- 用词遵循 GLOSSARY 标准术语
+- 除 `reviews/**` 报告外不写任何文件；不代 Implementer 修复，不创建 / 回答 / 路由 human-decision。
+- 评审必须独立于实现；首轮新开，同票复审可续接原评审对话，跨票一律新开。不得在主会话或实现会话内代评。
+- 固定 context、OCR、端点或身份校验失败即停，不自修配置绕过。
+- 流程 FAIL、超 scope / 粒度、旧实现残留、测试映射不成立、生成器不洁净、契约 / flow-back / 首页检查失败均列 BLOCKER。
+- 不因 CI full 未跑开 BLOCKER；测试代码质量问题照常评。
+- 用词遵循 GLOSSARY 标准术语。

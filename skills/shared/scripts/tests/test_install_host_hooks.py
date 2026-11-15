@@ -95,6 +95,13 @@ class InstallHostHooksTest(unittest.TestCase):
         self.assertEqual(len(data["hooks"]["Stop"]), 1)
         self.assertNotIn("session_title.py", str(data))
 
+    def test_sync_rejects_python_cache_artifacts_before_distribution(self):
+        text = (Path(__file__).resolve().parents[4] / "sync.sh").read_text(encoding="utf-8")
+        self.assertIn("__pycache__", text)
+        self.assertIn("*.py[cod]", text)
+        self.assertIn("refuse: Python cache artifacts", text)
+        self.assertLess(text.index("refuse: Python cache artifacts"), text.index("rsync -a"))
+
 
 if __name__ == "__main__":
     unittest.main()

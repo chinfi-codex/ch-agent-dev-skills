@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.ticket-context/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "issue_id",
+    "issue_path",
+    "feature_dir",
+    "spec_path",
+    "config_path",
+    "target_branch",
+    "target_commit",
+    "base",
+    "source_head",
+    "source_tree",
+    "declared_scope",
+    "architecture_updates",
+    "hashes",
+    "gate2_context_digest",
+    "dod"
+  ],
+  "properties": {
+    "schema": {"const": "agent-dev.ticket-context/v2"},
+    "issue_id": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
+    "issue_path": {"$ref": "#/definitions/repo-path"},
+    "feature_dir": {"$ref": "#/definitions/repo-path"},
+    "spec_path": {"$ref": "#/definitions/repo-path"},
+    "config_path": {"$ref": "#/definitions/repo-path"},
+    "target_branch": {"type": "string", "minLength": 1},
+    "target_commit": {"type": "string", "format": "git-sha"},
+    "base": {"type": "string", "format": "git-sha"},
+    "source_head": {"type": "string", "format": "git-sha"},
+    "source_tree": {"type": "string", "format": "git-sha"},
+    "declared_scope": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "architecture_updates": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "dod", "spec", "config"],
+      "properties": {
+        "issue": {"type": "string", "format": "sha256"},
+        "dod": {"type": "string", "format": "sha256"},
+        "spec": {"type": "string", "format": "sha256"},
+        "config": {"type": "string", "format": "sha256"}
+      }
+    },
+    "gate2_context_digest": {"type": "string", "format": "sha256"},
+    "dod": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "command", "expected"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^DoD-[1-9][0-9]*$"},
+          "command": {"type": "string", "minLength": 1},
+          "expected": {"type": ["string", "null"]}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "repo-path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/].*$"
+    }
+  }
+}

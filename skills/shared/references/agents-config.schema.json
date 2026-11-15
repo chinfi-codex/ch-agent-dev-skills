@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.agents-config/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema-version",
+    "tracker",
+    "main-branch",
+    "repo-level",
+    "quality-gate",
+    "host-budget",
+    "verify-policy",
+    "feature-closeout",
+    "dispatch",
+    "enforcement"
+  ],
+  "properties": {
+    "schema-version": {"const": 2},
+    "tracker": {"enum": ["local", "gitlab"]},
+    "main-branch": {"$ref": "#/definitions/branch"},
+    "repo-level": {"enum": ["A", "B", "C"]},
+    "quality-gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fast"],
+      "properties": {"fast": {"$ref": "#/definitions/command"}}
+    },
+    "host-budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "max-runs", "queue-timeout"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 1},
+        "max-runs": {"type": "integer", "minimum": 1},
+        "queue-timeout": {"type": "integer", "minimum": 1}
+      }
+    },
+    "verify-policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticket-max-files",
+        "ticket-max-loc",
+        "deny",
+        "test-change",
+        "generated-refresh",
+        "base-freeze",
+        "attribution",
+        "gate-scope"
+      ],
+      "properties": {
+        "ticket-max-files": {"type": "integer", "minimum": 1},
+        "ticket-max-loc": {"type": "integer", "minimum": 1},
+        "production-exclude": {"$ref": "#/definitions/glob-list"},
+        "deny": {"$ref": "#/definitions/glob-list"},
+        "test-change": {"$ref": "#/definitions/glob-list"},
+        "generated-refresh": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "glob", "generator"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9-]*$"},
+              "glob": {"$ref": "#/definitions/glob"},
+              "generator": {"$ref": "#/definitions/command"}
+            }
+          }
+        },
+        "scope": {
+          "anyOf": [
+            {"const": "strict"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {"const": "strict"},
+                "require-declared": {"const": true},
+                "allow-drift": {"const": false},
+                "production-exclude": {"$ref": "#/definitions/glob-list"}
+              }
+            }
+          ]
+        },
+        "base-freeze": {"const": true},
+        "attribution": {"enum": ["quarantine", "two-sided"]},
+        "quarantine-max-age-days": {"type": "integer", "minimum": 1},
+        "gate-scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["categories-file", "non-gating", "env-skip"],
+          "properties": {
+            "categories-file": {"type": ["string", "null"], "minLength": 1},
+            "non-gating": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9-]*$"}
+            },
+            "env-skip": {"type": "boolean"}
+          }
+        },
+        "daily-regression": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["enabled", "workflow", "record-dir", "skip-if-unchanged", "max-gap-days"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "workflow": {"type": ["string", "null"], "minLength": 1},
+            "record-dir": {"$ref": "#/definitions/path"},
+            "skip-if-unchanged": {"type": "boolean"},
+            "max-gap-days": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "max-fix-rounds": {"type": "integer", "minimum": 0},
+    "review-round-alert": {"type": "integer", "minimum": 1},
+    "conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "sample-rate", "checker"],
+      "properties": {
+        "mode": {"enum": ["always", "sampled"]},
+        "sample-rate": {"type": ["string", "number"]},
+        "checker": {"enum": ["main-session", "dispatched"]}
+      }
+    },
+    "feature-closeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["server-enforced", "cooperative-ci", "local-human"]},
+        "integration-branch": {"type": "string", "minLength": 1},
+        "since": {"type": ["string", "null"], "format": "date"},
+        "verify-budget-seconds": {"type": "integer", "minimum": 1},
+        "selection-map": {"type": ["string", "null"], "minLength": 1},
+        "ci": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["provider", "base-url", "repository", "workflow", "artifact", "token-env"],
+          "properties": {
+            "provider": {"enum": ["gitea", "gitlab"]},
+            "base-url": {"type": "string", "minLength": 1},
+            "repository": {"type": "string", "minLength": 1},
+            "workflow": {"type": "string", "minLength": 1},
+            "artifact": {"$ref": "#/definitions/path"},
+            "token-env": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"}
+          }
+        },
+        "verify-instance": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["name", "deploy", "lease"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "deploy": {"$ref": "#/definitions/command"},
+            "lease": {"$ref": "#/definitions/path"}
+          }
+        },
+        "prod": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["instance", "sync", "dry-run", "status", "rollback"],
+          "properties": {
+            "instance": {"type": "string", "minLength": 1},
+            "sync": {"$ref": "#/definitions/command"},
+            "dry-run": {"type": "boolean"},
+            "status": {"$ref": "#/definitions/command"},
+            "rollback": {"$ref": "#/definitions/command"}
+          }
+        }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema-version", "executor", "parallel-max", "hosts"],
+      "properties": {
+        "schema-version": {"const": 1},
+        "executor": {"const": "subagent"},
+        "parallel-max": {"type": "integer", "minimum": 1},
+        "hosts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "codex": {"$ref": "#/definitions/host-routes"},
+            "claude-code": {"$ref": "#/definitions/host-routes"},
+            "zcode": {"$ref": "#/definitions/host-routes"},
+            "dsh": {"$ref": "#/definitions/host-routes"}
+          }
+        }
+      }
+    },
+    "ocr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "provider", "model", "rule-file"],
+      "properties": {
+        "mode": {"enum": ["delegate", "local", "ci"]},
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "rule-file": {"$ref": "#/definitions/path"}
+      }
+    },
+    "gitlab-ci": {"enum": ["enabled", "manual"]},
+    "artifact-budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "impl-log-max-lines": {"type": "integer", "minimum": 1},
+        "evidence-max-lines": {"type": "integer", "minimum": 1},
+        "impl-dir-max-mb": {"type": "integer", "minimum": 1},
+        "integration-dir-max-mb": {"type": "integer", "minimum": 1},
+        "artifact-manifest-max-mb": {"type": "integer", "minimum": 1}
+      }
+    },
+    "integration-runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ready-timeout-seconds": {"type": "integer", "minimum": 1},
+        "stop-timeout-seconds": {"type": "integer", "minimum": 1},
+        "lease-timeout-seconds": {"type": "integer", "minimum": 1},
+        "runtime-dir": {"$ref": "#/definitions/path"},
+        "dev-service": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["start", "ready", "stop", "status"],
+          "properties": {
+            "start": {"$ref": "#/definitions/command"},
+            "ready": {"$ref": "#/definitions/command"},
+            "stop": {"$ref": "#/definitions/command"},
+            "status": {"$ref": "#/definitions/command"}
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keep-generations": {"type": "integer", "minimum": 1},
+        "salvage-days": {"type": "integer", "minimum": 0},
+        "journal-days": {"type": "integer", "minimum": 0},
+        "integration-days": {"type": "integer", "minimum": 0}
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review-trust"],
+      "properties": {
+        "review-trust": {"enum": ["host-verified", "operator-attested"]},
+        "require-host-capabilities": {"type": "boolean"},
+        "require-protected-branch": {"type": "boolean"},
+        "require-expected-sha": {"type": "boolean"},
+        "require-clean-tree": {"const": true}
+      }
+    }
+  },
+  "definitions": {
+    "command": {"type": "string", "minLength": 1},
+    "path": {"type": "string", "minLength": 1},
+    "glob": {"type": "string", "minLength": 1},
+    "glob-list": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/definitions/glob"}
+    },
+    "branch": {"type": "string", "minLength": 1},
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "effort"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "effort": {"enum": ["low", "medium", "high", "xhigh", "max", "ultra", "disabled", "enabled", "off"]}
+      }
+    },
+    "host-routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supervisor-review", "development"],
+      "properties": {
+        "supervisor-review": {"$ref": "#/definitions/route"},
+        "native_session_command": {"type": ["string", "null"], "minLength": 1},
+        "development": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "escalated"],
+          "properties": {
+            "default": {"$ref": "#/definitions/route"},
+            "escalated": {"$ref": "#/definitions/route"}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 # 同步 skills/ 到本机各 agent 宿主的 skills 目录。
-# 两件事：1) 重新生成全部 SKILL.md；2) 按各宿主布局分发（平铺：skill 目录 + shared）。
+# 两件事：1) 只读核对全部 SKILL.md 与模板/片段一致；2) 按各宿主布局分发（平铺：skill 目录 + shared）。
 #   Claude Code / ZCode / Kimi Code / Codex / DeepSeek Harness（DSH）：平铺到各宿主 skills 目录。
 #   DSH 默认使用 ~/.dsh/skills/；设置 DSH_HOME 时使用 $DSH_HOME/skills/。
 # 用法：在仓库根目录执行 bash ./sync.sh（维护者环境需 Node >= 22.6）
 set -euo pipefail
 
+case "$(uname -s)" in
+  Darwin|Linux) ;;
+  *) echo "agent-dev v2 is POSIX-only (macOS/Linux); unsupported host: $(uname -s)" >&2; exit 2 ;;
+esac
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACK="$ROOT/skills"
 
-node --experimental-strip-types "$PACK/scripts/gen-skill-docs.ts"
+node --experimental-strip-types "$PACK/scripts/gen-skill-docs.ts" --check
+if find "$PACK" \( -type d -name __pycache__ -o -type f -name '*.py[cod]' \) -print -quit | grep -q .; then
+  echo "refuse: Python cache artifacts found under $PACK; remove __pycache__ / *.pyc before sync" >&2
+  exit 1
+fi
 
 FLAT_ITEMS=(ceo-office pd-plan issue prd pd-review review tech-spec issue-split implement ai-review setup-dev prototype handoff shared)
 
@@ -67,27 +76,34 @@ if [ -d "$HOME/.claude" ]; then install_title_hooks claude "$HOME/.claude/skills
 if [ -d "$HOME/.zcode" ]; then install_title_hooks zcode "$HOME/.zcode/skills"; fi
 if [ -d "$HOME/.codex" ]; then install_title_hooks codex "$HOME/.codex/skills"; fi
 
-# DSH 使用原生 bundle 调 sessionTitle.rename；Desktop 正在运行时只同步文件，
-# 不违反官方“完全退出后改 desktop profile”的要求。其余 profile 可直接注册。
-install_dsh_title_plugin() {
+# DSH 注册 session-title 与 progress-panel。Desktop 正在运行时只同步文件，
+# 不违反官方“完全退出后改 desktop profile”的要求；其余 profile 可直接注册。
+install_dsh_plugin() {
   local cli="$1"
   local profile="$2"
   local package="$3"
   if [ "$profile" = "desktop" ] && pgrep -f '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness' >/dev/null; then
-    echo "skip: DeepSeek Harness Desktop 正在运行；完全退出后执行本脚本以注册 session 标题插件"
+    echo "pending: DeepSeek Harness Desktop 正在运行；完全退出后重跑以注册 $package"
     return 0
   fi
   "$cli" plugin --profile "$profile" add "$package"
 }
-DSH_PACKAGE="${DSH_TITLE_PACKAGE:-$DSH_ROOT/skills/shared/dsh-session-title}"
-if [ -d "$DSH_PACKAGE" ]; then
+DSH_PACKAGES=(
+  "${DSH_TITLE_PACKAGE:-$DSH_ROOT/skills/shared/dsh-session-title}"
+  "${DSH_PROGRESS_PACKAGE:-$DSH_ROOT/skills/shared/dsh-progress-panel}"
+)
+for DSH_PACKAGE in "${DSH_PACKAGES[@]}"; do
+  if [ ! -d "$DSH_PACKAGE" ]; then
+    echo "skip: DSH 插件目录不存在：$DSH_PACKAGE"
+    continue
+  fi
   if [ -n "${DSH_CLI:-}" ]; then
-    install_dsh_title_plugin "$DSH_CLI" "${DSH_PROFILE:-desktop}" "$DSH_PACKAGE"
+    install_dsh_plugin "$DSH_CLI" "${DSH_PROFILE:-desktop}" "$DSH_PACKAGE"
   elif [ -x "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" ]; then
-    install_dsh_title_plugin "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" desktop "$DSH_PACKAGE"
+    install_dsh_plugin "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" desktop "$DSH_PACKAGE"
   elif command -v dsh >/dev/null 2>&1; then
-    install_dsh_title_plugin "$(command -v dsh)" "${DSH_PROFILE:-headless}" "$DSH_PACKAGE"
+    install_dsh_plugin "$(command -v dsh)" "${DSH_PROFILE:-headless}" "$DSH_PACKAGE"
   else
     echo "skip: 找不到 dsh CLI；仅同步 $DSH_PACKAGE，未注册 profile bundle"
   fi
-fi
+done

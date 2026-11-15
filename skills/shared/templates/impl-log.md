@@ -8,6 +8,8 @@
 | feature-slug | `<feature-slug>` |
 | issue | `<issue-id>` |
 | 分支 | `feat/<feature-slug>-<issue-id>` |
+| ticket context | `impl/<issue-id>/ticket-context.json` |
+| 冻结 base / target | `<完整 base commit>` / `<target branch>@<完整 target commit>` |
 | worktree | `.worktrees/<issue-id>/` |
 | 状态 | `in-progress` / `mr-submitted` / `needs-human` |
 
@@ -32,16 +34,16 @@
 
 ## 红线接触记录
 
-命中 `agents-config.redlines` 的情况与处理（正常应为「无」；TDD 新增测试与「需求驱动更新」除外，逐条说明）。需求驱动更新逐条登记：测试文件 → 票 DoD 条目 / tech-spec 节锚点 + 冲突说明 + 改动范围声明（仅限被变更行为覆盖的断言 / 夹具）。
+`verify-policy.deny` 命中即停止，不能登记放行；此处记录事实与 human-decision。`test-change` 逐条登记：测试文件 → 票 DoD 条目 / tech-spec 节锚点 + 冲突说明 + 改动范围声明（仅限相关断言 / 夹具）+ runner 见红 / 独立评审闭合。`generated-refresh` 逐条登记稳定 ID、生成命令与临时工作区 tree 比对结果；没有这些证据时不得继续。
 
-## 漂移记录
+## 范围变更记录
 
-实测 diff（merge-base..HEAD）超出票 `declared-scope` 的登记处，规则见 `agents-config.verify-policy`：
+`declared-scope` 在 ticket context 中冻结，所有 changed paths 都参与对账。越界不能靠登记继续：退回 `/issue-split` 重新确认并生成新 context；生产文件数 / LOC 超上限同样必须再拆或创建 human-decision。
 
-| 检查时点 | 漂移文件清单 | 是否仍属本票范围 | 处理（登记继续 / 停止再拆 / needs-human） |
-|---|---|---|---|
+| 检查时点 | 越界文件 | 处理（退回重新确认 / 再拆 / human-decision） | 新 context（若有） |
+| --- | --- | --- | --- |
 
-（正常应至少每自修复轮次一行；无漂移也要留一行「无漂移」。`process_check.py` 按文件路径核对漂移登记。漂移不改变票级 DoD + fast 范围；实测超过 `ticket-max-files` / `ticket-max-loc` 必须停止再拆，不得以补跑测试替代。）
+（无越界写「无越界」。此处只作审计说明，不是放行依据；process_check 按冻结 scope 和完整 diff 判定。）
 
 ## 自修复轮次记录
 

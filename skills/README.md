@@ -13,7 +13,7 @@
 - `handoff/`: 会话交接 skill（横切；不落盘，交接提示词直接输出在对话里供复制到新会话）
 - `shared/fragments/`: 多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
 - `shared/templates/`: 输出格式模板（不内联，agent 运行时按指针读取）
-- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode / DSH 会话命名及 hooks 非破坏安装
+- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`。v2 核心包括：`agents_config.py` / `ticket_context.py`（冻结输入）、`verify_issue.py`（真实 DoD + fast）、`review_receipt.py`（独立评审）、`process_check.py`（只读门禁）、`delivery.py`（唯一合并）、`human_decision.py`（主会话问人）、`progress.py close-and-clean/reconcile`（可恢复清理）、`architecture_graph.py`（逐 ID 架构闭环）；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode / DSH 会话命名及 hooks 非破坏安装
 - `shared/dsh-session-title/`: DSH 原生 bundle，监听宿主事件并调用 `ctx.sessionTitle.rename()`，与 Python 两阶段同步 accepted title
 - `scripts/`: 生成 `SKILL.md` 的构建脚本
 
@@ -52,17 +52,17 @@ powershell -ExecutionPolicy Bypass -File skills/scripts/build-all.ps1
 bash ./sync.sh
 ```
 
-或：
+或（**仅 macOS / Linux**；v2 依赖 POSIX flock 与 dev 软链，Windows 的 sync.ps1 会 fail closed）：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\sync.ps1
+```bash
+bash ./sync.sh
 ```
 
 同步脚本会自动做两件事：
-1. 重新生成各个 `SKILL.md`
+1. 用 `gen-skill-docs.ts --check` 只读核对全部生成物，发现漂移即停止，不隐式重写
 2. 把最新的各 skill 目录与 `shared/` 复制到你的宿主 skills 目录（如 `~/.claude/skills/`；DSH 默认为 `~/.dsh/skills/`，设置 `DSH_HOME` 时为 `$DSH_HOME/skills/`）
 
-此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks，并注册 DSH 原生 session 标题 bundle；不会覆盖已有 hooks。Kimi Code 只同步 skills，不装 hooks。共享脚本与 DSH 桥接回归：
+此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks，并注册 DSH session-title 与 progress-panel 两个 bundle；不会覆盖已有 hooks。Kimi Code 只同步 skills，不装 hooks。共享脚本与 DSH 桥接回归：
 
 ```bash
 python3 -m unittest discover -s skills/shared/scripts/tests -v

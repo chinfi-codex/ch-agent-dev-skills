@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.artifact-generation/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "subject", "generation", "candidate_tree", "status", "artifacts"],
+  "properties": {
+    "schema": {"const": "agent-dev.artifact-generation/v2"},
+    "subject": {"type": "string", "minLength": 1},
+    "generation": {"type": "string", "minLength": 1},
+    "candidate_tree": {"type": "string", "format": "git-sha"},
+    "status": {"enum": ["running", "current", "superseded"]},
+    "supersedes": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "sha256", "size"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))"},
+          "kind": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "format": "sha256"},
+          "size": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

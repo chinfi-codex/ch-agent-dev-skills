@@ -4,7 +4,7 @@
 |---|---|
 | feature-slug | `<feature-slug>` |
 | issue | `<issue-id>`（tracker 模式附 IID / URL） |
-| 源分支 | `feat/<feature-slug>-<issue-id>` → `main` |
+| 源分支 | `feat/<feature-slug>-<issue-id>` → `<ticket-context.target_branch>` |
 | 状态 | ready（评审通过，由主会话合并，无需人审） |
 
 ## 变更摘要
@@ -13,8 +13,8 @@
 
 ## 证据摘要
 
-- 实际执行的 DoD 验收命令与 `quality-gate.fast` 全部通过，详见 `evidence-<issue-id>.md`（`all-passed: true` 只代表本票 DoD + fast，不代表关联选择集或完整套件已运行）
-- 票级不执行 scoped / full，不记录任何票级测试档位。分支 / main 晋级另附 `--phase promote` 核对通过的 CI full run / tree / trusted run proof；禁止把本票证据写成 CI full 已通过
+- 实现会话与主会话均由 `verify_issue.py` 实际执行 DoD 验收命令与 `quality-gate.fast`，结构化记录、完整 HEAD/tree、退出码与日志哈希见 `verification-implementer.json`、`verification-supervisor.json`；`evidence-<issue-id>.md` 只是确定性生成视图
+- 票级不执行 scoped / full。分支 / main 晋级由 `delivery.py promote` 在线核对 CI run、候选 tree 与受信来源；禁止把票级证据写成 CI full 已通过
 - commit：`<hash>`
 
 ## 评审结论
@@ -32,6 +32,6 @@
 
 ## 合并后动作（由主会话执行，无需人操作）
 
-- 主会话合并 MR（`glab mr merge` 或本地 `git merge --no-ff`）；合并冲突先 rebase 主分支重跑 fast 质量门，仍无法解决才升级给人
-- 票状态置 `done`；删除远 / 本地分支；清理 worktree `.worktrees/<issue-id>/`
-- （后续阶段接 P4 验证 / P5 发布——当前版本不自动执行）
+- 主会话通过 `delivery.py merge` 完成门禁复核与合并；目标分支前进时先 `delivery.py rebase` 并重新生成验证、评审和符合性结论
+- 合并登记成功后、总结前调用 `close-and-clean`，按 journal 清理 worktree、精确 upstream 与失效过程产物；任何未完成步骤必须报告，不能声称已全部清理
+- （后续 P4 验证 / P5 发布——当前 skill 不自动执行，push / Prod 需另行授权）
