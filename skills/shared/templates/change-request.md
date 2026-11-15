@@ -1,3 +1,17 @@
+---
+doc_type: change-request
+feature_module: <feature-module>
+feature_slug: <feature-slug>
+feature_summary: <feature-summary>
+version: YYYY-MM-DD
+upstream:
+  prd: <baseline PRD 文件名；无则留空>
+baseline_ac:
+  retain: []             # 本轮仍受影响、必须在 candidate 重验的 baseline AC
+  replace: {}            # 旧 AC -> 替代它的 AC-Dxx；旧 AC 不再单独验收
+  retire: []             # 明确退出本轮及现行验收的 baseline AC
+---
+
 # Change Request 输出模板
 
 > 本文件是 `/issue` 的输出格式模板，由 agent 在产出文档前读取。
@@ -22,6 +36,11 @@
 
 ### 功能变化
 - …
+
+### Delta 验收场景
+
+> 每个 delta 使用 feature 内唯一且不复用的 `AC-D<序号>`。acceptance plan 必须覆盖全部 delta 与 retain baseline；replace / retire 的旧 AC 不得混入。
+- AC-D01：Given <前置状态>，When <动作>，Then <量化预期>
 
 ### 异常与边界
 - …

@@ -163,8 +163,9 @@ class CIProofFixture:
         sh(self.repo, "init", "-q", "-b", "main")
         sh(self.repo, "config", "user.email", "t@t")
         sh(self.repo, "config", "user.name", "t")
-        (self.repo / ".gitignore").write_text("dev/\n.worktrees/\n")
+        (self.repo / ".gitignore").write_text("dev/\n.worktrees/\ndocs/\n")
         (self.repo / "a.py").write_text("A = 0\n")
+        (self.repo / "test_a.py").write_text("assert True\n")
         sh(self.repo, "add", ".")
         sh(self.repo, "commit", "-qm", "base")
         self.base_commit = sh(self.repo, "rev-parse", "HEAD")
@@ -406,29 +407,52 @@ enforcement: %s
 
     def candidate(self, mode="cooperative-ci"):
         self.configure(mode)
+        prd = self.repo / "docs" / "features" / "mod" / "demo" / "demo-prd-2026-11-14.md"
+        prd.parent.mkdir(parents=True, exist_ok=True)
+        prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-1：Given 测试输入，When 执行命令，Then 退出码为 0\n")
         plan = {
-            "schema": "agent-dev.feature-acceptance/v1", "cases": {
-                "AC-1": {"title": "Command", "source": "PRD#AC-1", "required": True,
+            "schema": "agent-dev.feature-acceptance/v2",
+            "documents": {"prd": {"path": "docs/features/mod/demo/demo-prd-2026-11-14.md",
+                                    "sha256": hashlib.sha256(prd.read_bytes()).hexdigest()}},
+            "cases": {
+                "AC-1": {"title": "Command", "source": {"document": "prd", "anchor": "AC-1"}, "required": True,
                           "executor": "command", "oracle": "auto", "steps": ["run"],
+                          "preconditions": ["环境：隔离测试环境"],
                           "expected": "exit zero", "command": "python3 -I t.py",
                           "assertions": {"exit": 0}, "evidence": ["log"], "human_reason": None}}}
         plan_bytes = (json.dumps(plan, ensure_ascii=False, sort_keys=True) + "\n").encode()
         (self.fdir / "acceptance-plan.yaml").write_bytes(plan_bytes)
         plan_sha = hashlib.sha256(plan_bytes).hexdigest()
+        (self.fdir / "issues").mkdir(exist_ok=True)
+        (self.fdir / "impl" / "issue-001").mkdir(parents=True, exist_ok=True)
+        spec = self.fdir / "demo-tech-spec-2026-11-14.md"
+        spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n")
+        (self.fdir / "issues" / "issue-001-x.md").write_text(
+            "---\nissue-id: issue-001\nfeature-slug: demo\nstatus: done\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
+        (self.fdir / "impl" / "issue-001" / "verification-supervisor.json").write_text(
+            json.dumps({"records": [{"id": "DoD-1"}]}))
         candidate = {
             "schema": "agent-dev.feature-candidate/v2", "feature": "mod/demo", "round": None,
             "mode": mode, "integration_branch": "feat/demo", "candidate_ref": "refs/heads/feat/demo",
             "main_branch": "main", "main_head": self.base_commit, "merge_base": self.base_commit,
             "candidate": self.commit, "candidate_tree": self.tree, "frozen_at": "2026-11-15T00:00:00Z",
-            "issues": [], "acceptance_plan": {"path": "acceptance-plan.yaml", "sha256": plan_sha, "cases": ["AC-1"]},
+            "issues": [{"id": "issue-001"}], "acceptance_plan": {"path": "acceptance-plan.yaml", "sha256": plan_sha, "cases": ["AC-1"]},
         }
         (self.integ / "candidate.json").write_text(json.dumps(candidate))
         (self.integ / "acceptance-plan.json").write_bytes(plan_bytes)
         (self.integ / "evidence.md").write_text(
             "```yaml\ncandidate: %s\ncandidate_tree: %s\nall-passed: true\nran: {direct: 1, indirect: 0, deferred: 0, quarantined: 0}\n```\n" % (self.commit, self.tree))
+        spec_rel = spec.relative_to(self.repo).as_posix()
+        spec_sha = hashlib.sha256(spec.read_bytes()).hexdigest()
         (self.integ / "conformance-feature.md").write_text(
-            "```yaml\nverdict: conform\ncandidate: %s\ncandidate_tree: %s\n"
-            "checker: main-session\nchecker_session: main-feature\ndate: 2026-11-15\n```\n" % (self.commit, self.tree))
+            "```yaml\nissue: feature\nverdict: conform\ncandidate: %s\ncandidate_tree: %s\n"
+            "checker: main-session\nchecker_session: main-feature\ndate: 2026-11-15\n"
+            "coverage:\n  issues: [issue-001]\n  specs:\n    - {path: %s, sha256: %s}\n```\n\n"
+            "## Feature 级覆盖核对\n\n"
+            "| 编号 | 需求点 | 来源 | 票 | 判定 | 证据 |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| 1 | 命令行为 | demo-tech-spec-2026-11-14.md#3 | issue-001 | 已实现 | a.py:run + test_a.py + verification-supervisor.json#DoD-1 |\n"
+            % (self.commit, self.tree, spec_rel, spec_sha))
         generation_dir = self.integ / "raw" / "manual-command"
         generation_dir.mkdir(parents=True)
         raw = b"command-raw\n"

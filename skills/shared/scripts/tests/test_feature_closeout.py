@@ -60,8 +60,9 @@ def sh(cwd, *args):
 
 def command_case():
     return {
-        "title": "命令业务验收", "source": "PRD#AC-01", "required": True,
+        "title": "命令业务验收", "source": {"document": "prd", "anchor": "AC-1"}, "required": True,
         "executor": "command", "oracle": "auto", "steps": ["执行验收命令"],
+        "preconditions": ["环境：隔离测试环境", "数据：输入记录 1 条"],
         "expected": "退出码为 0", "command": "python3 -I t.py",
         "assertions": {"exit": 0}, "evidence": ["log"], "human_reason": None,
     }
@@ -69,8 +70,9 @@ def command_case():
 
 def browser_case():
     return {
-        "title": "浏览器业务验收", "source": "PRD#AC-01", "required": True,
+        "title": "浏览器业务验收", "source": {"document": "prd", "anchor": "AC-1"}, "required": True,
         "executor": "browser-agent", "oracle": "auto", "steps": ["打开页面"],
+        "preconditions": ["环境：浏览器测试实例", "数据：匹配记录 1 条"],
         "expected": "只显示匹配结果", "assertions": {"dom": "只有匹配项"},
         "evidence": ["screenshot"], "human_reason": None,
     }
@@ -78,18 +80,24 @@ def browser_case():
 
 def human_case():
     return {
-        "title": "看业务结论", "source": "PRD#AC-02", "required": True,
+        "title": "看业务结论", "source": {"document": "prd", "anchor": "AC-2"}, "required": True,
         "executor": "human", "oracle": "human", "steps": ["打开报告"],
+        "preconditions": ["环境：候选报告只读访问", "数据：报告 1 份及已确认基准 1 份"],
         "expected": "领域结论合理", "human_reason": "domain-judgment",
+        "evidence": ["human-review-record"], "human_expect": "关键事实与已确认基准一致，错误数 == 0 条",
     }
 
 
-def plan_text(cases):
-    lines = ["schema: agent-dev.feature-acceptance/v1", "prd: prd.md", "tech_spec: demo-tech-spec-2026-11-14.md", "cases:"]
+def plan_text(cases, documents):
+    lines = ["schema: agent-dev.feature-acceptance/v2", "tech_spec: demo-tech-spec-2026-11-14.md", "documents:"]
+    for alias, document in documents.items():
+        lines += [f"  {alias}:", f"    path: {document['path']}", f"    sha256: {document['sha256']}"]
+    lines.append("cases:")
     for aid, case in cases.items():
         lines += [f"  {aid}:", f"    title: {json.dumps(case['title'], ensure_ascii=False)}",
-                  f"    source: {case['source']}", f"    required: {'true' if case['required'] else 'false'}",
+                  f"    source: {{document: {case['source']['document']}, anchor: {case['source']['anchor']}}}", f"    required: {'true' if case['required'] else 'false'}",
                   f"    executor: {case['executor']}", f"    oracle: {case['oracle']}",
+                  f"    preconditions: {json.dumps(case.get('preconditions', []), ensure_ascii=False)}",
                   f"    steps: {json.dumps(case['steps'], ensure_ascii=False)}",
                   f"    expected: {json.dumps(case['expected'], ensure_ascii=False)}"]
         if case.get("command"):
@@ -101,6 +109,8 @@ def plan_text(cases):
         if case.get("evidence"):
             lines.append(f"    evidence: {json.dumps(case['evidence'], ensure_ascii=False)}")
         reason = case.get("human_reason")
+        if case.get("human_expect"):
+            lines.append(f"    human_expect: {json.dumps(case['human_expect'], ensure_ascii=False)}")
         lines.append("    human_reason:" if reason is None else f"    human_reason: {reason}")
     return "\n".join(lines) + "\n"
 
@@ -115,13 +125,14 @@ class FeatureCloseoutTest(unittest.TestCase):
         sh(self.root, "config", "user.name", "t")
         (self.root / "src").mkdir()
         (self.root / "src" / "a.py").write_text("x = 1\n")
-        (self.root / ".gitignore").write_text("dev/\n.worktrees/\n")
+        (self.root / ".gitignore").write_text("dev/\n.worktrees/\ndocs/\n")
         sh(self.root, "add", ".")
         sh(self.root, "commit", "-qm", "init")
         self.wt = self.root / ".worktrees" / "integration-demo"
         sh(self.root, "worktree", "add", "-q", str(self.wt), "-b", "feat/demo", "main")
         (self.wt / "src" / "a.py").write_text("x = 2\n")
         (self.wt / "t.py").write_text("from pathlib import Path\nassert 'x = 2' in Path('src/a.py').read_text()\n")
+        (self.wt / "src" / "test_a.py").write_text("assert True\n")
         sh(self.wt, "add", ".")
         sh(self.wt, "commit", "-qm", "issue-001")
         self.merged_commit = sh(self.wt, "rev-parse", "HEAD")
@@ -130,11 +141,22 @@ class FeatureCloseoutTest(unittest.TestCase):
         self.fdir = self.root / "dev" / "features" / "mod" / SLUG
         (self.fdir / "issues").mkdir(parents=True)
         (self.fdir / "impl" / "issue-001").mkdir(parents=True)
+        (self.fdir / "impl" / "issue-001" / "verification-supervisor.json").write_text(
+            json.dumps({"records": [{"id": "DoD-1"}]}), encoding="utf-8")
         (self.fdir / "demo-tech-spec-2026-11-14.md").write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n")
         self.write_issue("done")
         self.write_conformance("conform")
         self.write_merged(self.merged_commit)
         self.cases = {"AC-1": command_case(), "AC-2": human_case()}
+        self.docs = self.root / "docs" / "features" / "mod" / SLUG
+        self.docs.mkdir(parents=True)
+        self.prd = self.docs / "demo-prd-2026-11-14.md"
+        self.prd.write_text("""# PRD
+
+### 端到端验收场景
+- AC-1：Given 测试数据，When 执行命令，Then 退出码为 0
+- AC-2：Given 候选报告，When 人工核对，Then 关键事实错误数为 0
+""", encoding="utf-8")
         self.write_plan()
 
     def tearDown(self):
@@ -144,10 +166,11 @@ class FeatureCloseoutTest(unittest.TestCase):
         (self.fdir / "issues" / "issue-001-x.md").write_text(
             f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: {status}\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
 
-    def write_conformance(self, verdict):
+    def write_conformance(self, verdict, issue_id="issue-001"):
         tree = sh(self.wt, "rev-parse", "HEAD^{tree}")
-        (self.fdir / "impl" / "issue-001" / "conformance-issue-001.md").write_text(
-            "```yaml\nissue: issue-001\ncontext_digest: %s\ncommit: %s\ntree: %s\nverdict: %s\n"
+        (self.fdir / "impl" / issue_id).mkdir(parents=True, exist_ok=True)
+        (self.fdir / "impl" / issue_id / f"conformance-{issue_id}.md").write_text(
+            f"```yaml\nissue: {issue_id}\ncontext_digest: %s\ncommit: %s\ntree: %s\nverdict: %s\n"
             "checker: main-session\nchecker_session: main-1\n"
             "selection: {algorithm: sha256-v1, rate: 1, selected: true}\ndate: 2026-11-15\n```\n" %
             ("a" * 64, self.merged_commit, tree, verdict))
@@ -171,14 +194,22 @@ class FeatureCloseoutTest(unittest.TestCase):
         return {"type": kind, "path": path.relative_to(self.fdir).as_posix(), "sha256": digest,
                 "candidate": self.head, "candidate_tree": self.tree, "generation": generation}
 
-    def write_merged(self, commit):
-        event_id = "merge-" + hashlib.sha256(("issue-001:" + commit).encode()).hexdigest()[:24]
-        (self.fdir / "progress.jsonl").write_text(json.dumps({
-            "event_id": event_id, "operation_id": event_id,
-            "event": "merged", "issue": "issue-001", "commit": commit}) + "\n")
+    def write_merged(self, commit, issue_id="issue-001", append=False):
+        event_id = "merge-" + hashlib.sha256((issue_id + ":" + commit).encode()).hexdigest()[:24]
+        mode = "a" if append else "w"
+        with (self.fdir / "progress.jsonl").open(mode, encoding="utf-8") as stream:
+            stream.write(json.dumps({
+                "event_id": event_id, "operation_id": event_id,
+                "event": "merged", "issue": issue_id, "commit": commit}) + "\n")
 
     def write_plan(self):
-        (self.fdir / "acceptance-plan.yaml").write_text(plan_text(self.cases))
+        documents = {"prd": {"path": self.prd.relative_to(self.root).as_posix(),
+                              "sha256": hashlib.sha256(self.prd.read_bytes()).hexdigest()}}
+        if getattr(self, "change_request", None):
+            documents["change_request"] = {
+                "path": self.change_request.relative_to(self.root).as_posix(),
+                "sha256": hashlib.sha256(self.change_request.read_bytes()).hexdigest()}
+        (self.fdir / "acceptance-plan.yaml").write_text(plan_text(self.cases, documents))
 
     def run_cli(self, *args, script=SCRIPT):
         return subprocess.run([sys.executable, "-I", str(script), *args], capture_output=True, text=True)
@@ -241,13 +272,49 @@ class FeatureCloseoutTest(unittest.TestCase):
         (integ / "evidence.md").write_text(
             f"```yaml\ncandidate: {self.head}\ncandidate_tree: {self.tree}\nall-passed: {'true' if all_passed else 'false'}\n"
             "ran:\n  direct: 3\n  indirect: 5\n  deferred: 0\n  quarantined: 0\n```\n")
-        (integ / "conformance-feature.md").write_text(
-            f"```yaml\nverdict: conform\ncandidate: {self.head}\ncandidate_tree: {self.tree}\n"
-            "checker: main-session\nchecker_session: main-feature\ndate: 2026-11-15\n```\n")
+        (integ / "conformance-feature.md").write_text(self.feature_conformance_text())
         (integ / "business-results.json").write_text(json.dumps({
             "schema": "agent-dev.feature-business-results/v2", "candidate": self.head,
             "candidate_tree": self.tree, "plan_sha256": self.candidate["acceptance_plan"]["sha256"],
             "environment": {"name": "integration-test"}, "items": items}))
+
+    def add_second_leaf(self):
+        (self.fdir / "issues" / "issue-002-y.md").write_text(
+            f"---\nissue-id: issue-002\nfeature-slug: {SLUG}\nstatus: done\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# y\n")
+        (self.fdir / "impl" / "issue-002").mkdir(parents=True, exist_ok=True)
+        (self.fdir / "impl" / "issue-002" / "verification-supervisor.json").write_text(
+            json.dumps({"records": [{"id": "DoD-1"}]}), encoding="utf-8")
+        self.write_conformance("conform", "issue-002")
+        self.write_merged(self.merged_commit, "issue-002", append=True)
+
+    def feature_conformance_text(self):
+        spec = self.fdir / "demo-tech-spec-2026-11-14.md"
+        spec_rel = spec.relative_to(self.root).as_posix()
+        spec_sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+        issue_ids = sorted(item["id"] for item in self.candidate["issues"])
+        rows = "\n".join(
+            f"| {index} | 命令行为 | demo-tech-spec-2026-11-14.md#3 | {issue_id} | 已实现 | src/a.py:run + src/test_a.py + verification-supervisor.json#DoD-1 |"
+            for index, issue_id in enumerate(issue_ids, 1))
+        return f"""```yaml
+issue: feature
+verdict: conform
+candidate: {self.head}
+candidate_tree: {self.tree}
+checker: main-session
+checker_session: main-feature
+date: 2026-11-15
+coverage:
+  issues: [{', '.join(issue_ids)}]
+  specs:
+    - {{path: {spec_rel}, sha256: {spec_sha}}}
+```
+
+## Feature 级覆盖核对
+
+| 编号 | 需求点 | 来源 | 票 | 判定 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+{rows}
+"""
 
     def confirm(self, **overrides):
         self.report()
@@ -313,6 +380,90 @@ class FeatureCloseoutTest(unittest.TestCase):
         self.write_issue("done")
 
     # ---- common candidate freeze ----
+    def write_change_request(self, retain="[]", replace="{}", retire="[]"):
+        self.change_request = self.docs / "demo-change-request-2026-11-15.md"
+        self.change_request.write_text("""---
+doc_type: change-request
+upstream:
+  prd: demo-prd-2026-11-14.md
+baseline_ac:
+  retain: %s
+  replace: %s
+  retire: %s
+---
+# Change Request
+
+### Delta 验收场景
+- AC-D1：Given 旧行为，When 执行变更，Then 新行为退出码为 0
+""" % (retain, replace, retire), encoding="utf-8")
+
+    def validate_plan(self):
+        return self.run_cli("validate-plan", "--feature-dir", str(self.fdir))
+
+    def test_standard_source_requires_full_prd_coverage(self):
+        self.cases = {"AC-1": command_case()}
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("AC 覆盖不完整", result.stdout)
+
+    def test_delta_and_retained_baseline_reconcile(self):
+        self.write_change_request(retain="[AC-2]")
+        delta = command_case()
+        delta["source"] = {"document": "change_request", "anchor": "AC-D1"}
+        self.cases = {"AC-D1": delta, "AC-2": human_case()}
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_replace_retire_and_document_drift_fail(self):
+        self.write_change_request(replace="{AC-1: AC-D1}", retire="[AC-2]")
+        delta = command_case()
+        delta["source"] = {"document": "change_request", "anchor": "AC-D1"}
+        self.cases = {"AC-D1": delta, "AC-2": human_case()}
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("AC-2", result.stdout)
+        self.write_change_request(retain="[AC-2]")
+        self.cases = {"AC-D1": delta, "AC-2": human_case()}
+        self.write_plan()
+        self.prd.write_text(self.prd.read_text() + "\n需求文档已漂移\n", encoding="utf-8")
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("sha256", result.stdout)
+
+    def test_baseline_ac_dispositions_must_be_explicit(self):
+        self.write_change_request(retain="[AC-2]")
+        self.change_request.write_text(self.change_request.read_text().replace("baseline_ac:", "baseline_ac_missing:"), encoding="utf-8")
+        delta = command_case()
+        delta["source"] = {"document": "change_request", "anchor": "AC-D1"}
+        self.cases = {"AC-D1": delta, "AC-2": human_case()}
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("全部显式声明", result.stdout)
+
+    def test_required_case_structure_fields_fail(self):
+        case = command_case()
+        del case["preconditions"]
+        self.cases = {"AC-1": case}
+        self.prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-1：Given 输入，When 执行，Then 退出码为 0\n", encoding="utf-8")
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("preconditions", result.stdout)
+        case = human_case()
+        del case["human_expect"]
+        del case["evidence"]
+        self.cases = {"AC-2": case}
+        self.prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-2：Given 报告，When 人核，Then 无错误\n", encoding="utf-8")
+        self.write_plan()
+        result = self.validate_plan()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("human_expect", result.stdout)
+        self.assertIn("evidence", result.stdout)
+
     def test_freeze_green_binds_full_merged_ancestor_and_plan(self):
         result = self.freeze()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -408,9 +559,9 @@ status: 已确认（待拆解）
                 self.assertEqual(result.returncode, 2)
 
     def test_freeze_requires_main_synced_and_rejects_drift_ignore_config(self):
-        (self.root / "docs").mkdir()
+        (self.root / "docs").mkdir(exist_ok=True)
         (self.root / "docs" / "n.md").write_text("n\n")
-        sh(self.root, "add", "docs")
+        sh(self.root, "add", "-f", "docs")
         sh(self.root, "commit", "-qm", "main moves")
         result = self.freeze()
         self.assertEqual(result.returncode, 1)
@@ -453,6 +604,7 @@ status: 已确认（待拆解）
         self.assertEqual(result.returncode, 1)
         self.assertIn("verify_issue", result.stdout)
         self.cases = {"AC-1": browser_case()}
+        self.prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-1：Given 测试页面，When 打开页面，Then 只显示匹配项\n", encoding="utf-8")
         self.write_plan()
         self.freeze()
         browser = self.browser_result()
@@ -523,9 +675,9 @@ status: 已确认（待拆解）
         self.freeze()
         self.write_evidence([self.auto_result(), self.human_result(True)])
         self.confirm()
-        (self.root / "docs").mkdir()
+        (self.root / "docs").mkdir(exist_ok=True)
         (self.root / "docs" / "n.md").write_text("n\n")
-        sh(self.root, "add", "docs")
+        sh(self.root, "add", "-f", "docs")
         sh(self.root, "commit", "-qm", "docs drift")
         result = self.check("merge", generate_report=False)
         self.assertEqual(result.returncode, 1)
@@ -546,6 +698,33 @@ status: 已确认（待拆解）
         self.assertIn("活动人工决策", result.stdout)
 
     # ---- in-process record_merge through delivery.promote ----
+    def test_multi_leaf_candidate_uses_one_scoped_coverage_record(self):
+        self.add_second_leaf()
+        self.ready_local()
+        self.assertEqual(["issue-001", "issue-002"], sorted(item["id"] for item in self.candidate["issues"]))
+        text = (self.fdir / "integration" / "conformance-feature.md").read_text()
+        self.assertEqual(2, text.count("verification-supervisor.json#DoD-1"))
+        self.assertEqual(self.check("verify", generate_report=False).returncode, 0)
+
+    def test_candidate_empty_coverage_and_missing_leaf_fail(self):
+        self.ready_local()
+        path = self.fdir / "integration" / "conformance-feature.md"
+        path.write_text(f"```yaml\nissue: feature\nverdict: conform\ncandidate: {self.head}\ncandidate_tree: {self.tree}\n"
+                        "checker: main-session\nchecker_session: main-feature\ndate: 2026-11-15\n```\n")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("coverage", result.stdout)
+
+    def test_candidate_missing_leaf_evidence_fails(self):
+        self.add_second_leaf()
+        self.ready_local()
+        path = self.fdir / "integration" / "conformance-feature.md"
+        path.write_text("\n".join(line for line in path.read_text().splitlines()
+                                  if not line.startswith("| 2 |")), encoding="utf-8")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("未覆盖全部", result.stdout)
+
     def test_no_ff_promote_and_same_operation_record_replay(self):
         self.ready_local()
         captured = {}

@@ -151,4 +151,25 @@ business_results_sha256: <最终 business-results.json 的 SHA256>
 
 ## 6. conformance-feature.md
 
-复用 `shared/templates/conformance.md`，`issue: feature`，并在 YAML 头补充 `candidate: <完整 commit>`、`candidate_tree: <tree>`、`verdict: conform`：对 tech-spec 全节枚举需求点，对照各票覆盖矩阵并集，抓票间接缝缺口。另核 PRD 的 AC 编号全部进入 `acceptance-plan.yaml`，且每条 AC 都有执行方式、最终判定和实际结果，不能用票级 DoD 的并集代替需求级功能验收。
+`issue: feature`，并绑定 `candidate: <完整 commit>`、`candidate_tree: <tree>`、`verdict: conform`。多叶子不在各票提前做 feature 全量；全部票 done 后只在本 candidate 统一核一次。YAML 必须声明完整作用域，正文必须有非空覆盖表，且每张票至少一行有效证据：
+
+```yaml
+issue: feature
+candidate: <完整 commit>
+candidate_tree: <tree>
+verdict: conform
+checker: main-session
+checker_session: <实际会话>
+date: YYYY-MM-DD
+coverage:
+  issues: [issue-001, issue-002]       # 与 candidate 冻结票组精确一致
+  specs:
+    - {path: dev/features/<module>/<slug>/<spec>.md, sha256: <当前 spec SHA256>}
+```
+
+| 编号 | 需求点 | 来源（spec 节锚点） | 票 | 判定 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | <feature 行为点> | <spec>#<节> | issue-001 | 已实现 | <candidate HEAD 的代码:符号 + 测试 + verification-supervisor.json#DoD-1> |
+| 2 | <跨叶子接缝> | <spec>#<节> | issue-002 | 已实现 | <该票 impl 下的代码:符号 + 测试 + verification-supervisor.json#DoD-1> |
+
+对 tech-spec 全节枚举需求点，对照各票覆盖矩阵并集抓票间接缝缺口。另核 PRD 或 change-request delta + retained baseline AC 全部进入 `acceptance-plan.yaml`，且每条 AC 都有执行方式、最终判定和实际结果，不能用票级 DoD 并集代替需求级功能验收。只有 YAML 头、漏票/漏 spec、空表、未知票或不存在的代码/测试/verification fragment 均不得通过。

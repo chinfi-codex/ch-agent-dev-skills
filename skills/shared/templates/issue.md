@@ -30,10 +30,10 @@ created: YYYY-MM-DD
 
 ## 验收标准（DoD，可自动判定）
 
-- [ ] `<验收命令>` → 期望输出 `<关键输出 / 退出码 0>`
-- [ ] `<验收命令>` → 期望输出 `<...>`
+- [ ] `<验收命令>` → 退出码 `<整数>`
+- [ ] `<验收命令>` → 退出码 `<整数>`；期望输出 `<关键输出子串>`
 
-（每条必须是可直接执行的命令 + 可判定的期望，禁止「功能正常」「体验符合预期」类表述。契约更新条目同样可判定：本票 `architecture-updates` 非空时，承接票须含 `python3 ../shared/scripts/architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD` → 退出码 0；稳定 ID、分片、代码证据与生成首页必须一致。）
+（每条必须是可直接执行的命令 + 明确的期望退出码；期望输出可选，省略时不做输出断言，禁止「功能正常」「体验符合预期」类表述。契约更新条目同样可判定：本票 `architecture-updates` 非空时，承接票须含 `python3 ../shared/scripts/architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD` → 退出码 `0`；稳定 ID、分片、代码证据与生成首页必须一致。）
 
 ## 人工确认项（不阻塞交付）
 

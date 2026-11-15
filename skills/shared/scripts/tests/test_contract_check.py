@@ -94,13 +94,13 @@ status: confirmed
 
 ## 验收标准（DoD，可自动判定）
 
-- [ ] `pytest tests/test_x.py` → 期望输出 `exit 0`
+- [ ] `pytest tests/test_x.py` → 退出码 `0`；期望输出 `exit 0`
 """
 
 ISSUE_WITH_CONTRACT = ISSUE_NO_CONTRACT.replace(
-    "- [ ] `pytest tests/test_x.py` → 期望输出 `exit 0`",
-    "- [ ] `pytest tests/test_x.py` → 期望输出 `exit 0`\n"
-    "- [ ] `git diff main...HEAD -- docs/ARCHITECTURE.md | grep load_config_v2` → 期望输出 `命中接口条目`",
+    "- [ ] `pytest tests/test_x.py` → 退出码 `0`；期望输出 `exit 0`",
+    "- [ ] `pytest tests/test_x.py` → 退出码 `0`；期望输出 `exit 0`\n"
+    "- [ ] `git diff main...HEAD -- docs/ARCHITECTURE.md | grep load_config_v2` → 退出码 `0`；期望输出 `命中接口条目`",
 )
 
 

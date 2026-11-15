@@ -376,6 +376,11 @@ options:
 - 影响边界
 - 验收口径
 
+验收契约必须同时满足：
+- frontmatter `baseline_ac.retain / replace / retire` 显式列出且互斥；未列出的 baseline 不得声称本轮已重验，replace 的目标必须是实际 delta AC。
+- `### Delta 验收场景` 使用 `AC-D<序号>`。先扫描本 feature 既有 PRD 与 change-request，取下一个未使用序号；定稿后不复用、不重排。
+- 后续 acceptance plan 必须覆盖全部 delta 与 retain baseline；replace / retire 的旧 AC 不得混入。
+
 ---
 
 

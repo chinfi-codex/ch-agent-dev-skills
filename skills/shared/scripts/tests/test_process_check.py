@@ -552,6 +552,27 @@ class ProcessCheckV2Test(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("feature-level coverage", out)
 
+    def test_multi_leaf_skips_duplicate_feature_coverage_but_keeps_ticket_gate(self):
+        self.successor.write_text(SUCCESSOR.replace("blocked-by: [issue-001]", "blocked-by: []"), encoding="utf-8")
+        self.write_conformance(feature=False)
+        code, out = self.check("close")
+        self.assertEqual(code, 0, out)
+        self.write_conformance(feature=False, empty=True)
+        code, out = self.check("close")
+        self.assertEqual(code, 1)
+        self.assertIn("empty requirement-point table", out)
+        self.write_conformance(verdict="skipped", feature=False)
+        code, out = self.check("close")
+        self.assertEqual(code, 1)
+        self.assertIn("integration", out)
+
+    def test_single_leaf_still_requires_ticket_feature_coverage(self):
+        self.successor.unlink()
+        self.write_conformance(feature=False)
+        code, out = self.check("close")
+        self.assertEqual(code, 1)
+        self.assertIn("feature-level coverage", out)
+
     def mark_bug_ticket(self):
         self.issue.write_text(ISSUE.replace("type: feature", "type: bug").replace(
             "declared-scope: [src/**, tests/**]", "declared-scope: [src/**, tests/**, docs/**, generated/**]"),

@@ -217,6 +217,15 @@ def _integration_ticket(issue: Path, issue_id: str, parsed_issue) -> bool:
     return True
 
 
+def _integration_leaf_count(issue: Path, parsed_issue) -> int:
+    count = 0
+    for candidate in sorted(issue.parent.glob("issue-*.md")):
+        ident = str(parsed_issue(candidate).get("frontmatter", {}).get("issue-id") or "")
+        if _integration_ticket(candidate, ident, parsed_issue):
+            count += 1
+    return count
+
+
 def target_branch(config: dict, fm: dict, feature_dir=None) -> str:
     """Compatibility delegate; ticket_context remains the only v2 rule."""
     try:
@@ -831,7 +840,8 @@ def _evidence_pointer_problem(text, repo, impl_dir):
     return None
 
 
-def _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration, log_text, head, tree, repo):
+def _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration, log_text, head, tree, repo,
+                       feature_coverage_required):
     path = impl_dir / ("conformance-%s.md" % issue_id)
     if not path.is_file():
         rep.add("conformance", "FAIL", "conformance record missing: %s" % path.name)
@@ -920,7 +930,7 @@ def _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration
                 lines = [line for line in sample.splitlines() if ident and ident in line]
                 if not lines or not any(_evidence_pointer_problem(line, repo, impl_dir) is None for line in lines):
                     rep.add("conformance", "FAIL", "critical matrix row %s is absent from sampled code/test/evidence record" % ident)
-        if integration:
+        if feature_coverage_required:
             feature = md_section(text, "Feature 级覆盖核对")
             feature_rows = _table_rows(feature)
             if not feature_rows or any(any(cell in {"未实现", "语义偏差"} for cell in row) for row in feature_rows):
@@ -1085,7 +1095,8 @@ def run(args):
                 rep.add("bug-regression", "FAIL", "bug regression proof invalid: %s" % exc)
 
     if args.phase == "close":
-        _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration, log_text, head, tree, repo)
+        _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration, log_text, head, tree, repo,
+                           integration and _integration_leaf_count(issue, tc.parse_issue) == 1)
         _check_human_decisions(rep, root, context, issue_id)
 
     meta = {

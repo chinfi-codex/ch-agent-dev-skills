@@ -10,7 +10,7 @@
 4. **收口**：
    - 先跑 `process_check.py --phase merge`，核对 implementer runner、严格 scope、架构、预算、独立 review receipt 与精确候选；再确认评审结论和 MR ready。
    - 主会话在同一票 worktree 对同一候选执行 `verify_issue.py run supervisor`，只重跑冻结 DoD + fast，输出与 implementer 证据不得矛盾。工作区已被外部回收时按分支重建并验证 dev 软链；异文件系统不可达则保持未验证，不假装复跑。
-   - 完成需求符合性核对：先不看覆盖矩阵，从票和 spec 反向枚举，再打开代码逐条核全部 ★；集成票另核 tech-spec 全节与各票矩阵并集。always 每票必核，sampled 由 context digest 确定性决定，集成票不得 skipped。
+   - 完成需求符合性核对：先不看覆盖矩阵，从票和 spec 反向枚举，再打开代码逐条核全部 ★。唯一叶子另核票级 tech-spec 全节与各票矩阵并集；多叶子只核本票，不提前做 feature 全量，全部票 done 后在 candidate 统一核一次。always 每票必核，sampled 由 context digest 确定性决定，任何叶子不得 skipped。
    - 跑 `process_check.py --phase close`，核 supervisor runner、receipt、conformance、architecture、活动 decision 和候选一致性。
    - 只执行 `python3 ../shared/scripts/delivery.py merge --context <ticket-context.json>`。delivery 统一执行合并、done + merged、journal，并在总结前调用 close-and-clean。不得另跑裸 git/glab merge 或公开 record-merge。
 5. **CI 与晋级**：票级 merge / close 永远只核 DoD + fast，本机任何 worktree 不执行 full。server-enforced / cooperative-ci 由 `delivery.py promote` 经 CI API 核 run、artifact、ref、commit/tree、归因与外部能力；分支或 tree 前进即重新验证。server-enforced 能力未知即停，cooperative 输出必须注明无服务端强制。CI 不可用时保持未验证，不降级本机补跑。
@@ -23,7 +23,7 @@
 
 全部票 done 后按以下顺序执行；所有产物写主工作区 integration/，不写集成 worktree、不提交到集成分支。`executor` 决定谁执行，`oracle` 决定谁最终验收，浏览器操作不能替代人的业务判断。
 
-1. **前提**：全票 done + merged 完整 commit 且为候选祖先、每票 conformance conform、无活动 human-decision；feature 级覆盖落 `conformance-feature.md`；PRD 稳定 AC 全部进入 acceptance-plan.yaml 且 validate-plan 通过。
+1. **前提**：全票 done + merged 完整 commit 且为候选祖先、每票 conformance conform、无活动 human-decision；feature 级覆盖只落 candidate 的 `conformance-feature.md`，coverage.issues / specs 精确覆盖本轮票与方案，且每张票至少一行有效证据；PRD 或 change-request delta + retained baseline AC 全部进入 acceptance-plan.yaml 且 validate-plan 通过。
 2. **同步并冻结**：集成 worktree 先同步 main，冲突在集成分支解决；`feature_closeout.py freeze` 绑定候选 tree、计划哈希与快照。main 或候选之后任何前进都必须重新同步、freeze 和验证，旧结果、报告与确认失效。
 3. **准备候选环境**：配置了 verify-instance 时由 integration_runtime 获取租约、部署并核 candidate；否则按显式 dev-service 配置启动集成 worktree 实例。运行记录包含 lease/service ID、candidate 和日志代际。浏览器不可用时 AC 记 unverified 或转人工。
 4. **自动证据与首次报告**：后台执行 fast → `scoped_select.py`（经 test_slots 包装，direct 全跑、indirect 到预算停发并记 feature deferred，不跑 full）→ command / browser-agent AC 的真实执行与 generation 证据。自动 pass 必须有实际断言；浏览器还需 URL、actions、console/page error 和当前候选截图。清单外失败只做单项 base 归因，本需求引入则开回修票并重新 freeze。

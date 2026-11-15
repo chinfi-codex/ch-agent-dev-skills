@@ -68,7 +68,7 @@ class DeliveryTest(unittest.TestCase):
         (self.root / "src").mkdir()
         (self.root / "src" / "a.py").write_text("x = 1\n")
         (self.root / "t.py").write_text("from pathlib import Path\nassert int(Path('src/a.py').read_text().split('=')[1]) in (1, 2, 3)\n")
-        (self.root / ".gitignore").write_text("dev/\n.worktrees/\n.logs/\n")
+        (self.root / ".gitignore").write_text("dev/\n.worktrees/\n.logs/\ndocs/\n")
         sh(self.root, "add", ".")
         sh(self.root, "commit", "-qm", "init")
         sh(self.root, "branch", "feat/demo", "main")
@@ -78,20 +78,28 @@ class DeliveryTest(unittest.TestCase):
         (self.fdir / "issues").mkdir(parents=True)
         self.spec = self.fdir / "demo-tech-spec-2026-11-14.md"
         self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n\nTicket scope: src/a.py.\n")
-        (self.fdir / "acceptance-plan.yaml").write_text("""schema: agent-dev.feature-acceptance/v1
-prd: prd.md
+        prd = self.root / "docs" / "features" / "mod" / "demo" / "demo-prd-2026-11-14.md"
+        prd.parent.mkdir(parents=True)
+        prd.write_text("# PRD\n\n### 端到端验收场景\n- AC-1：Given 测试输入，When 执行命令，Then 退出码为 0\n")
+        digest = __import__("hashlib").sha256(prd.read_bytes()).hexdigest()
+        (self.fdir / "acceptance-plan.yaml").write_text(f"""schema: agent-dev.feature-acceptance/v2
 tech_spec: demo-tech-spec-2026-11-14.md
+documents:
+  prd:
+    path: docs/features/mod/demo/demo-prd-2026-11-14.md
+    sha256: {digest}
 cases:
   AC-1:
     title: 命令验收
-    source: PRD#AC-01
+    source: {{document: prd, anchor: AC-1}}
     required: true
     executor: command
     oracle: auto
+    preconditions: [环境：隔离测试环境]
     steps: [执行命令]
     expected: 退出码为 0
     command: python3 -I t.py
-    assertions: {exit: 0}
+    assertions: {{exit: 0}}
     evidence: [log]
 """)
         self.issue = self.fdir / "issues" / "issue-001-x.md"

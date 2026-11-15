@@ -32,6 +32,6 @@ verdict ≠ conform 时逐条写：需求要什么、实现做了什么、偏在
 
 实际打开核对过的代码位置与结论——至少覆盖矩阵中全部 ★ 关键路径行；只照抄矩阵不打开代码，等于没核。
 
-## Feature 级覆盖核对（仅集成票）
+## Feature 级覆盖核对（仅唯一叶子的票级记录）
 
-对 tech-spec 全节（不只票锚点）枚举 feature 级需求点，对照本 feature 各票覆盖矩阵的并集，抓票间接缝缺口（A 票以为 B 票做的部分）。非集成票删去本节。
+只有 DAG 只有一个叶子时，票级 conformance 才保留本节：对 tech-spec 全节枚举 feature 级需求点，对照各票覆盖矩阵并集，抓票间接缝缺口。多叶子时各票只写本票需求点，不得提前做 feature 全量；全部票 done 后统一在 candidate 的 `integration/conformance-feature.md` 核一次。非叶子删去本节；多叶子仍必须完成本票需求点和 ★ 证据，且不得 skipped。

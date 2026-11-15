@@ -81,7 +81,7 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 ### 5.1 功能验收计划（需求收口用）
 
-唯一真源是同目录 `acceptance-plan.yaml`，按 `shared/templates/acceptance-plan.yaml` 编写。PRD 的每个端到端 AC 必须逐条承接，并写成可独立执行的完整测试 case，计划同时声明：
+唯一真源是同目录 `acceptance-plan.yaml`（`agent-dev.feature-acceptance/v2`），按 `shared/templates/acceptance-plan.yaml` 编写。标准路径必须逐条承接 PRD 的全部端到端 AC；小变更路径必须覆盖 change-request 的全部 `AC-Dxx` 与 `baseline_ac.retain`，replace / retire 不得混入。`documents` 用 path + SHA256 绑定真实需求文档，`case.source` 用 `{document, anchor}` 且与 case key 一致。每条 AC 写成可独立执行的完整测试 case，计划同时声明：
 
 - `executor`：`command | browser-agent | human`——谁执行操作、采集结果；
 - `oracle`：`auto | auto+human-review | human`——谁作最终验收判断；

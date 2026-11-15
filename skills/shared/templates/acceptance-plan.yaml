@@ -10,13 +10,20 @@
 #    精确文本、状态或布尔结果可以直接写目标值；数量、比例、耗时、错误数等必须写数值与单位，不得只写“正常 / 合理 / 快速 / 正确 / 无异常”。
 # 6. 所有阈值必须来自 PRD、change request 或已确认决策；上游未给阈值时进入技术方案待确认项，不得编造数值。
 # 7. 以下数值仅演示完整写法，生成实际计划时必须替换为对应 AC 的已确认口径。
-schema: agent-dev.feature-acceptance/v1
-prd: <PRD 文件名>
+schema: agent-dev.feature-acceptance/v2
 tech_spec: <tech-spec 文件名>
+documents:
+  prd:
+    path: docs/features/<feature-module>/<feature-slug>/<PRD 文件名>
+    sha256: <PRD 文件的 64 位 SHA256>
+  # 小变更路径必须登记 change_request；有 baseline PRD 时同时保留 prd。
+  # change_request:
+  #   path: docs/features/<feature-module>/<feature-slug>/<change-request 文件名>
+  #   sha256: <change-request 文件的 64 位 SHA256>
 cases:
   AC-01:
     title: 示例：导入 20 条有效记录（替换为实际 AC）
-    source: "PRD#端到端验收场景-AC-01"
+    source: {document: prd, anchor: AC-01}
     required: true
     executor: command          # command | browser-agent | human：谁执行、采集结果
     oracle: auto               # auto | auto+human-review | human：谁作最终验收判断
@@ -34,7 +41,7 @@ cases:
 
   AC-02:
     title: 示例：从 3 条记录中筛选出 2 条匹配记录（替换为实际 AC）
-    source: "PRD#端到端验收场景-AC-02"
+    source: {document: prd, anchor: AC-02}
     required: true
     executor: browser-agent
     oracle: auto
@@ -52,7 +59,7 @@ cases:
 
   AC-03:
     title: 示例：5 种视口展示记录详情并由人复核版式（替换为实际 AC）
-    source: "PRD#端到端验收场景-AC-03"
+    source: {document: prd, anchor: AC-03}
     required: true
     executor: browser-agent
     oracle: auto+human-review
@@ -71,7 +78,7 @@ cases:
 
   AC-04:
     title: 示例：人工核对 10 份领域报告的关键结论（替换为实际 AC）
-    source: "PRD#端到端验收场景-AC-04"
+    source: {document: prd, anchor: AC-04}
     required: true
     executor: human
     oracle: human
