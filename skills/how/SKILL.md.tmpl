@@ -1,0 +1,73 @@
+---
+name: how
+version: 0.1.0
+description: |
+  Explain how a subsystem, mechanism, or code path actually works. Use before
+  changing ownership, layering, public contracts, or unfamiliar code. Complex
+  questions use 2-4 parallel explorers and one independent explainer; use /why
+  for historical motivation rather than runtime mechanics.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Task
+---
+
+{{COMPLETION_STATUS}}
+
+# /how
+
+你负责回答“**X 现在如何工作**”，建立足以安全修改系统的运行时心智模型。你不回答“为什么当初这样设计”；动机、阈值来源和取舍交给 `/why`。
+
+## 不可破坏的边界
+
+- 除调用方明确要求的 `dev/features/<feature-module>/<feature-slug>/research/` 调查报告外，不写任何文件，不改代码、票、配置、架构分片或外部状态。
+- 事实必须来自实际读取的代码和文档，逐条给 `path:symbol` 或 `path:line`；推断和未追踪完整的部分单独标注。
+- 范围含糊时先声明自己的解释并继续，不因可消歧的小问题阻塞；用户可随时纠正范围。
+- 不复制 pstack 的模型 slug。默认继承当前宿主模型；调用方显式指定的模型被宿主拒绝时，回退继承并披露。若宿主提供实时模型列表，可在同一模型族内选最接近的有效项；无法确认时该角色记 gap，不跨宿主套模型、不静默换族。
+
+## Step 1：判断复杂度
+
+- **Simple**：单模块、小工具、窄函数或窄问题。不启动 explorer；启动一个 explainer，在同一 pass 内读代码并解释。使用 `references/explainer-prompt.md`，去掉 explorer-findings 输入，直接进入 Step 4。
+- **Complex**：跨文件/服务、横切特性、子系统或完整架构概览。进入 Step 2。
+- 难以判断时走 Simple，避免把窄问题扩大成昂贵调查。
+
+## Step 2：Complex 并行探索
+
+1. 把问题拆成 **2–4 个互不重复的调查角度**，例如入口与调用链、状态与数据流、边界与失败路径、实现归属与测试。每个角度必须是一个独立 slice，不是让多人重复读同一份代码。
+2. 在同一轮并行启动全部 explorer。Claude Code 使用 `Task(subagent_type=general-purpose, readonly=true)`；其他宿主映射为自身只读子代理原语，不支持的参数省略但保持只读语义。
+3. 每个 explorer 的提示词必须完整包含 `references/explorer-prompt.md`、原始问题、自己的角度和仓库根；不得只看主会话摘要。
+4. explorer 只读，不写报告文件；结果返回主会话。一个 explorer 失败时记录其角度和缺口，不把其他角度的结果冒充全覆盖。
+
+宿主没有子代理能力时，由主会话按同一角度逐个执行角色，并在报告中披露“顺序降级”；不得跳过角度或把单次泛读称为并行探索。
+
+## Step 3：独立综合
+
+全部 explorer 返回后，启动一个 explainer，输入：
+
+- `references/explainer-prompt.md`；
+- 原始问题与范围解释；
+- 每一份 explorer 原始结果，包括空结果、冲突和 open questions。
+
+explainer 必须只读核查冲突和关键缺口，合并重叠描述，不任选一方、不重新做一遍无差别搜索。主会话不代替 explainer 综合。
+
+## Step 4：呈现与可选持久化
+
+呈现 explainer 的结果，只允许轻度澄清和补充当前对话上下文，**不做实质性重写**。章节按适用性保留：
+
+```text
+Overview
+Key Concepts
+How It Works
+Where Things Live
+Gotchas
+Open Questions
+```
+
+- `How It Works` 是最长部分，写清触发点、函数级步骤、数据/控制流、决策点和失败路径。
+- 多组件或数据变换有助于理解时画 Mermaid；简单关系用 ASCII；纯装饰图不画。宿主无图形能力时 Mermaid 源码本身就是兜底。
+- 所有 explorer 的 Files Read 汇总为覆盖清单；未读取、未追踪、角色失败和范围假设进入 Open Questions，不能消失。
+- 调用方提供 feature-module/slug 或明确要求落盘时，按 `shared/templates/how-report.md` 写入 `dev/features/<feature-module>/<feature-slug>/research/<topic>-how-YYYY-MM-DD.md`。报告保留 explainer 正文和覆盖信息；否则只返回对话结果。
+- 供 `/tech-spec` 使用时，末尾增加 `Design Facts / Constraints / Unknowns` 三栏，只抽取已有证据，不在这里选择新架构。

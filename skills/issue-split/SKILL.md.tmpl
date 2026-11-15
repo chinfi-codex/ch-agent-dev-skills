@@ -31,7 +31,7 @@ allowed-tools:
 
 {{MODE_GUARD}}
 
-本 skill 可额外执行一次只读文档校验：`python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>`。它只验证功能验收计划，不属于实现或测试执行；其他实现导向命令限制不变。
+本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`architecture_graph.py check-design` 和 `ticket_context.py check-plan`。它们只验证功能验收计划、设计结构与整组票计划，不属于实现或测试执行；其他实现导向命令限制不变。
 
 {{GLOSSARY}}
 
@@ -115,7 +115,19 @@ allowed-tools:
 
 **判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
 
+**本地 proposed 草稿**：按 `shared/templates/issue.md` 在 `issues/` 下形成每票一个文件，frontmatter 写 `status: proposed`、唯一 `blocked-by`、完整 `declared-scope` 和 `architecture-updates`。这只是门②前的本地文档草稿，不是 tracker 发布，也不得派发。每票备注必须引用同一 active tech-spec 和对应 How/Why 决策锚点；历史其他 spec 的票不得混入当前组。
+
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
+
+先运行三道只读检查，任一失败就回 Step 1 或 `/tech-spec`，不得把失败草稿交给用户批准：
+
+```bash
+python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>
+python3 ../shared/scripts/architecture_graph.py check-design --repo <项目根> --spec <tech-spec>
+python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一票> --repo <项目根>
+```
+
+`check-design` 不要求接口已 current；`check-plan` 检查组内 DAG、scope 重叠串行、DoD、架构 ID 唯一承接和 AC 计划。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
 
 向用户呈现编号清单，一次审全部：
 
@@ -132,8 +144,8 @@ allowed-tools:
 
 确认后按 `agents-config.tracker` 发布：
 
-- **local 模式**（默认）：按模板 `shared/templates/issue.md`（相对本 SKILL.md 为 `../shared/templates/issue.md`）在 `./dev/features/<feature-module>/<feature-slug>/issues/` 下每票一个文件，依赖序编号（issue-001 起），frontmatter `status: confirmed`
-- **gitlab 模式**：本地票文件照写（本地真源），另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
+- **local 模式**（默认）：把门②前已写入的本地 proposed 草稿置为 `status: confirmed`，不得借发布改写标题 / DoD / declared-scope / architecture-updates；若内容有变，重新运行 checker 并过门②
+- **gitlab 模式**：本地票文件同样先由 proposed 置 confirmed，另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
 - 修改父级 issue / tech-spec / PRD：禁止
 
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）

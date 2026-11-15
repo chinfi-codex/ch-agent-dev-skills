@@ -94,7 +94,7 @@
         },
         "feature": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          "pattern": "^[^/\\\\]{1,64}/[^/\\\\]{1,64}$"
         },
         "issue": {
           "type": "string",
@@ -231,7 +231,7 @@
                     ]
                   },
                   "next_status": {
-                    "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "deferred", "cancelled"]
+                    "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "proposed", "deferred", "cancelled"]
                   },
                   "prompt": {
                     "$ref": "#/definitions/nullable-text"
@@ -239,7 +239,7 @@
                   "operation": {
                     "anyOf": [
                       {
-                        "enum": ["reconcile-routing", "re-split", "request-review", "collect-evidence"]
+                        "enum": ["reconcile-routing", "re-split", "redesign", "request-review", "collect-evidence"]
                       },
                       {
                         "type": "null"
@@ -404,7 +404,7 @@
                   ]
                 },
                 "next_status": {
-                  "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "deferred", "cancelled"]
+                  "enum": ["confirmed", "in-progress", "in-review", "mr-submitted", "proposed", "deferred", "cancelled"]
                 },
                 "prompt": {
                   "$ref": "#/definitions/nullable-text"
@@ -412,7 +412,7 @@
                 "operation": {
                   "anyOf": [
                     {
-                      "enum": ["reconcile-routing", "re-split", "request-review", "collect-evidence"]
+                      "enum": ["reconcile-routing", "re-split", "redesign", "request-review", "collect-evidence"]
                     },
                     {
                       "type": "null"

@@ -20,7 +20,7 @@ if find "$PACK" \( -type d -name __pycache__ -o -type f -name '*.py[cod]' \) -pr
   exit 1
 fi
 
-FLAT_ITEMS=(ceo-office pd-plan issue prd pd-review review tech-spec issue-split implement ai-review setup-dev prototype handoff shared)
+FLAT_ITEMS=(ceo-office pd-plan issue prd pd-review review how why tech-spec issue-split implement ai-review setup-dev prototype handoff shared)
 
 sync_flat() {
   local target_root="$1"

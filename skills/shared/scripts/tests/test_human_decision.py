@@ -395,6 +395,45 @@ blocked-by: [issue-001]
         with self.assertRaises(hd.DecisionError):
             hd.validate_request(envelope, repo=self.repo, now=T0)
 
+    def test_unicode_feature_scope_is_allowed_without_path_traversal(self):
+        envelope = self.envelope()
+        envelope["scope"]["feature"] = "订单模块/中文需求"
+        hd.validate_request(envelope, repo=self.repo, now=T0)
+        self.assertEqual((self.repo / "dev/features/订单模块/中文需求").resolve(),
+                         hd._feature_dir(self.repo, "订单模块/中文需求"))
+        for invalid in ("../escape", "mod/../escape", "mod\\escape/slug", "mod/\nslug"):
+            with self.subTest(invalid=invalid), self.assertRaises(hd.DecisionError):
+                hd._feature_dir(self.repo, invalid)
+
+    def test_redesign_returns_to_proposed_without_dispatch_increment(self):
+        envelope = self.envelope()
+        redesign = copy.deepcopy(envelope["question"]["options"][0])
+        redesign["id"] = "redesign"
+        redesign["label"] = "重新检查承重设计"
+        redesign["description"] = "暂停实现并重新核对调查证据、方案和票范围。"
+        redesign["route"] = {
+            "action": "supervisor", "strategy": "none", "role": None, "tier": None,
+            "next_status": "proposed", "prompt": None, "operation": "redesign",
+        }
+        envelope["question"]["options"] = [redesign, envelope["question"]["options"][2]]
+        envelope["question"]["recommendation"] = "redesign"
+        invalid = copy.deepcopy(envelope)
+        invalid["question"]["options"][0]["route"]["next_status"] = "confirmed"
+        with self.assertRaises(hd.DecisionError):
+            hd.validate_request(invalid, repo=self.repo, now=T0)
+        hd.request(self.repo, envelope, main_session=True, now=T0)
+        hd.present(self.repo, FEATURE, "dec-one", main_session=True, now=T1)
+        hd.answer(self.repo, FEATURE, "dec-one", option_id="redesign", text="重新核对设计。",
+                  current_basis=self.basis(), main_session=True, now=T2)
+        packet = hd.route_begin(self.repo, FEATURE, "dec-one", current_basis=self.basis(),
+                                main_session=True, now=T3)
+        self.assertEqual("proposed", packet["route"]["plan"]["next_status"])
+        self.assertEqual(packet["route"]["plan"]["attempts_before"], packet["route"]["plan"]["attempts_after"])
+        hd.route_ack(self.repo, FEATURE, "dec-one", route_id=packet["route"]["route_id"],
+                     ack=self.host_ack(packet), main_session=True, now=T4)
+        self.assertIn("status: proposed", self.issue_text())
+        self.assertIn("attempts: 3", self.issue_text())
+
     def test_answer_requires_same_basis_and_preserves_raw_text(self):
         self.waiting()
         changed = self.basis()

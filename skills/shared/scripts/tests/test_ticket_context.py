@@ -267,6 +267,58 @@ class TicketContextTest(unittest.TestCase):
         with self.assertRaisesRegex(tc.ContextError, "rev-parse"):
             tc.create_context(self.issue, self.root)
 
+    def prepare_plan(self):
+        self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n", encoding="utf-8")
+        self.issue.write_text(ISSUE.replace("architecture-updates: [interface.alpha, interface.beta]", "architecture-updates: []")
+                              .replace("declared-scope: [src/a.py, tests/**]", "declared-scope: [src/a.py]"), encoding="utf-8")
+        (self.feature / "acceptance-plan.yaml").write_text("""schema: agent-dev.feature-acceptance/v1
+prd: prd.md
+tech_spec: demo-tech-spec-2026-11-14.md
+cases:
+  AC-1:
+    title: 命令验收
+    source: PRD#AC-01
+    required: true
+    executor: command
+    oracle: auto
+    steps: [执行测试]
+    expected: 退出码为 0
+    command: python3 -I tests/test_a.py
+    assertions: {exit: 0}
+    evidence: [log]
+""", encoding="utf-8")
+
+    def write_second_plan_issue(self, blocked="[]", scope="src/b.py"):
+        text = self.issue.read_text(encoding="utf-8").replace("issue-001", "issue-002")
+        text = text.replace("status: confirmed", "status: proposed\nblocked-by: " + blocked)
+        text = text.replace("declared-scope: [src/a.py]", "declared-scope: [" + scope + "]")
+        path = self.feature / "issues/issue-002-demo.md"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_check_plan_validates_group_and_cli(self):
+        self.prepare_plan()
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        cli = subprocess.run([sys.executable, "-I", str(SCRIPT), "check-plan", "--issue", str(self.issue),
+                              "--repo", str(self.root)], capture_output=True, text=True)
+        self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
+        self.assertTrue(json.loads(cli.stdout)["ok"])
+
+    def test_check_plan_rejects_cycles_and_unserialised_overlap(self):
+        self.prepare_plan()
+        self.issue.write_text(self.issue.read_text(encoding="utf-8").replace(
+            "status: confirmed", "status: proposed\nblocked-by: [issue-002]"), encoding="utf-8")
+        self.write_second_plan_issue(blocked="[issue-001]")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("cycle" in error for error in result["errors"]), result["errors"])
+        self.issue.write_text(self.issue.read_text(encoding="utf-8").replace("blocked-by: [issue-002]", "blocked-by: []"), encoding="utf-8")
+        second = self.feature / "issues/issue-002-demo.md"
+        second.write_text(second.read_text(encoding="utf-8").replace("blocked-by: [issue-001]", "blocked-by: []")
+                          .replace("declared-scope: [src/b.py]", "declared-scope: [src/a.py]"), encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("overlapping scope" in error for error in result["errors"]), result["errors"])
+
     def test_cli_create_show_validate(self):
         output = self.feature / "impl/issue-001/cli-context.json"
         create = subprocess.run([sys.executable, "-I", str(SCRIPT), "create", "--issue", str(self.issue),

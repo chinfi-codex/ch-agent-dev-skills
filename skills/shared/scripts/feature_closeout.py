@@ -434,6 +434,31 @@ def checker_projection(issue_id, header, config):
 
 # ---------- freeze ----------
 
+
+def _check_architecture_feature(rep: Report, repo: Path, fdir: Path, issue_files: list, head: str):
+    """Run the full active-spec architecture gate on an integration candidate."""
+    try:
+        import architecture_graph
+        import ticket_context
+        primary = repo_root_of(fdir)
+        groups = {}
+        for issue in issue_files:
+            spec = ticket_context.find_spec(issue, primary)
+            groups.setdefault(spec, []).append(issue)
+        for spec, issues in sorted(groups.items(), key=lambda item: str(item[0])):
+            leaves, errors = architecture_graph.active_spec_leaves(spec.parent.glob("*-tech-spec-*.md"))
+            if spec.name not in leaves:
+                errors.append(f"{spec.name}: not an active confirmed leaf tech-spec")
+            errors.extend(architecture_graph.check_flow_forward(
+                repo, spec, issues, head=head))
+            rep.extend("architecture-feature", [str(error) for error in errors])
+        if (repo / "docs" / "architecture").is_dir() and list((repo / "docs" / "architecture").glob("*.json")):
+            _, errors = architecture_graph.render_homepage(repo, write=False, head=head)
+            rep.extend("architecture-homepage", [str(error) for error in errors])
+    except (ImportError, ValueError, OSError, TypeError) as exc:
+        rep.add("architecture-feature", "FAIL", f"feature architecture validation failed: {exc}")
+
+
 def freeze(args) -> Report:
     rep = Report()
     fdir = Path(args.feature_dir)
@@ -475,6 +500,7 @@ def freeze(args) -> Report:
         rep.add("worktree", "FAIL", f"集成 worktree 有未提交或未跟踪改动 {len(dirty)} 处；冻结前先提交、清理或还原")
 
     issues = []
+    flow_files = []
     merged = last_merged(fdir)
     files = sorted((fdir / "issues").glob("issue-*.md"))
     if not files:
@@ -503,6 +529,7 @@ def freeze(args) -> Report:
         status = str(fm.get("status") or "")
         if status == "deferred" or (scope and iid not in scope):
             continue
+        flow_files.append(f)
         conf = yaml_head(fdir / "impl" / iid / f"conformance-{iid}.md")
         verdict = str(conf.get("verdict") or "")
         merged_commit = merged.get(iid)
@@ -529,6 +556,8 @@ def freeze(args) -> Report:
             rep.add("conformance", "FAIL", f"{iid} conformance verdict={verdict or '<缺>'}，每票均须 conform；集成票绝不允许 skipped")
         check_no_active_decisions(rep, fdir, iid)
     check_no_active_decisions(rep, fdir)
+    candidate_head, _ = head_info(repo)
+    _check_architecture_feature(rep, repo, fdir, flow_files, candidate_head)
 
     main = cfg["main-branch"]
     main_head = git(repo, "rev-parse", main).strip()
@@ -1124,6 +1153,15 @@ def check(args) -> Report:
         rep.add("candidate", "FAIL", f"集成分支 HEAD/tree 与冻结候选不一致：冻结后有新提交或 tree 改写，重新 freeze")
     _check_main_unchanged(rep, repo, cfg, cand)
     check_plan_unchanged(rep, fdir, cand)
+    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
+    flow_files = []
+    for issue in sorted((fdir / "issues").glob("issue-*.md")):
+        fm = read_frontmatter(issue)
+        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+        if iid in wanted and str(fm.get("status") or "") != "deferred":
+            flow_files.append(issue)
+    _check_architecture_feature(rep, repo, fdir, flow_files, str(cand.get("candidate")))
     plan = frozen_plan(cand, integ)
 
     ev = yaml_head(integ / "evidence.md")

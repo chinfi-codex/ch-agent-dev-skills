@@ -76,7 +76,24 @@ class DeliveryTest(unittest.TestCase):
         (self.root / "dev" / "agents-config.md").write_text(CONFIG)
         self.fdir = self.root / "dev" / "features" / "mod" / "demo"
         (self.fdir / "issues").mkdir(parents=True)
-        (self.fdir / "spec.md").write_text("# Spec\n\nTicket scope: src/a.py.\n")
+        self.spec = self.fdir / "demo-tech-spec-2026-11-14.md"
+        self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n\nTicket scope: src/a.py.\n")
+        (self.fdir / "acceptance-plan.yaml").write_text("""schema: agent-dev.feature-acceptance/v1
+prd: prd.md
+tech_spec: demo-tech-spec-2026-11-14.md
+cases:
+  AC-1:
+    title: 命令验收
+    source: PRD#AC-01
+    required: true
+    executor: command
+    oracle: auto
+    steps: [执行命令]
+    expected: 退出码为 0
+    command: python3 -I t.py
+    assertions: {exit: 0}
+    evidence: [log]
+""")
         self.issue = self.fdir / "issues" / "issue-001-x.md"
         self.write_issue()
         self.integration = self.root / ".worktrees" / "integration-demo"
@@ -88,9 +105,9 @@ class DeliveryTest(unittest.TestCase):
     def write_issue(self, target=None):
         explicit = f"target-branch: {target}\n" if target else ""
         self.issue.write_text(
-            "---\nissue-id: issue-001\nfeature-slug: demo\ntitle: X\nstatus: in-review\n"
-            f"declared-scope: [src/a.py]\narchitecture-updates: []\ntech-spec: spec.md\n{explicit}---\n"
-            "# X\n\n## DoD\n\n- [ ] `python3 -I t.py`\n")
+            "---\nissue-id: issue-001\nfeature-slug: demo\ntitle: X\nstatus: confirmed\nblocked-by: []\n"
+            f"declared-scope: [src/a.py]\narchitecture-updates: []\ntech-spec: {self.spec.name}\n{explicit}---\n"
+            "# X\n\n## 要做什么\n\n演示命令行为。\n\n## DoD\n\n- [ ] `python3 -I t.py`\n")
 
     @property
     def context_path(self):
@@ -161,7 +178,7 @@ class DeliveryTest(unittest.TestCase):
         self.assertEqual(context["target_branch"], "feat/demo")
         self.assertEqual(context["target_commit"], sh(self.integration, "rev-parse", "HEAD"))
         self.assertEqual(context["declared_scope"], ["src/a.py"])
-        self.assertEqual(context["hashes"]["spec"], __import__("hashlib").sha256((self.fdir / "spec.md").read_bytes()).hexdigest())
+        self.assertEqual(context["hashes"]["spec"], __import__("hashlib").sha256(self.spec.read_bytes()).hexdigest())
         self.assertEqual(payload["branch"], "feat/demo-issue-001")
 
     def test_start_resumes_interrupted_context_creation(self):
@@ -172,9 +189,47 @@ class DeliveryTest(unittest.TestCase):
         self.assertEqual(first["source_head"], second["source_head"])
         self.assertTrue(self.context_path.is_file())
 
+    def test_start_rejects_proposed_active_without_state_and_foreign_target_without_side_effects(self):
+        self.issue.write_text(self.issue.read_text().replace("status: confirmed", "status: proposed"))
+        with self.assertRaisesRegex(delivery.DeliveryError, "fresh start requires confirmed"):
+            self.start()
+        self.issue.write_text(self.issue.read_text().replace("status: proposed", "status: in-review"))
+        with self.assertRaisesRegex(delivery.DeliveryError, "existing delivery state"):
+            self.start()
+        self.write_issue(target="release/ticket")
+        with self.assertRaisesRegex(delivery.DeliveryError, "feature integration branch"):
+            self.start()
+        self.assertFalse(self.source.exists())
+
+    def test_start_rejects_unfinished_dependency_before_git_mutation(self):
+        second = self.fdir / "issues" / "issue-002-y.md"
+        second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
+                          .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]"), encoding="utf-8")
+        self.issue.write_text(self.issue.read_text().replace("blocked-by: []", "blocked-by: [issue-002]"), encoding="utf-8")
+        with self.assertRaisesRegex(delivery.DeliveryError, "dependency is not done"):
+            self.start()
+        self.assertFalse(self.source.exists())
+        second.write_text(second.read_text().replace("status: confirmed", "status: done"), encoding="utf-8")
+        result = self.start()
+        self.assertEqual(result["target"], "feat/demo")
+
+    def test_confirmed_redesign_refreezes_context_but_active_resume_cannot(self):
+        first = self.start()
+        old = self.context
+        self.spec.write_text(self.spec.read_text() + "\nDEC-01 replaced by new evidence.\n", encoding="utf-8")
+        self.issue.write_text(self.issue.read_text().replace("status: confirmed", "status: in-progress"), encoding="utf-8")
+        with self.assertRaisesRegex(delivery.DeliveryError, "active resume cannot silently refreeze"):
+            self.start()
+        self.assertEqual(self.context["gate2_context_digest"], old["gate2_context_digest"])
+        self.issue.write_text(self.issue.read_text().replace("status: in-progress", "status: confirmed"), encoding="utf-8")
+        second = self.start()
+        self.assertEqual(first["branch"], second["branch"])
+        self.assertNotEqual(self.context["gate2_context_digest"], old["gate2_context_digest"])
+        self.assertNotEqual(self.context["hashes"]["spec"], old["hashes"]["spec"])
+
     def test_invalid_dod_start_has_no_git_side_effects(self):
         self.issue.write_text(self.issue.read_text().replace("`python3 -I t.py`", "python3 -I t.py"))
-        with self.assertRaisesRegex(delivery.DeliveryError, "prevalidation"):
+        with self.assertRaisesRegex(delivery.DeliveryError, "plan check failed"):
             self.start()
         self.assertFalse(self.source.exists())
         missing = subprocess.run(["git", "-C", str(self.root), "rev-parse", "--verify", "-q", "feat/demo-issue-001"],

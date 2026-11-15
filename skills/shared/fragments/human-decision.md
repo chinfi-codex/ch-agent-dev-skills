@@ -40,7 +40,7 @@ dev/features/<feature-module>/<feature-slug>/decisions/<decision-id>.json
 | `action` | 允许的计划 | 允许的结果票状态 |
 | --- | --- | --- |
 | `continue` | `strategy=resume/redispatch`，受控 `role=development/review`、`tier=default/escalated`，以及自包含 `prompt` | `confirmed / in-progress / in-review / mr-submitted` |
-| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence` |
+| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence`；`redesign` 例外只能去 `proposed` |
 | `defer` | 无 prompt、无会话计划 | `deferred` |
 | `cancel` | 无 prompt、无会话计划 | `cancelled` |
 
@@ -95,7 +95,7 @@ pending / waiting / answered / expired --显式 cancel--> cancelled
 
 - `resume`：沿用原 `dispatch_id / session_id`，`attempts_after = attempts_before`，供主会话续接同一子会话；不新增一次派发。
 - `redispatch`：生成新 `dispatch_id`，`session_id=null` 等宿主分配，`attempts_after = attempts_before + 1`，供主会话新开独立子会话。重放 `route_begin` 返回原 route，不再次计数。
-- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。
+- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。`redesign` 是承重设计被证伪时的受控路由：ack 后票回 `proposed`，不增加 dispatch attempts；主会话局部重跑 `/how`、`/why` 和 tech-spec 候选，新 spec 经 supersedes 接管，受影响票重新过门②并冻结新 context 后才能转 `confirmed`。旧验证、评审、conformance 和 candidate 不得沿用。
 - `defer / cancel`：返回受控关闭计划，不增加派发次数。
 
 集成层在实际新派发前，按计划更新票的 `dispatch` 块并追加 `dispatch` 事件；模型 / effort 仍由 agents-config 和宿主原生角色解析，本模块不猜模型。续接不新增 `dispatch` 事件，重派新增。无论哪种路由，ack 前票都保持 `needs-human`。

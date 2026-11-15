@@ -47,7 +47,7 @@ allowed-tools:
 
 产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
-本 skill 可额外执行一次只读文档校验：`python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>`。它只验证功能验收计划，不属于实现或测试执行；其他实现导向命令限制不变。
+本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`architecture_graph.py check-design` 和 `ticket_context.py check-plan`。它们只验证功能验收计划、设计结构与整组票计划，不属于实现或测试执行；其他实现导向命令限制不变。
 
 ## 术语与数据口径（GLOSSARY）
 
@@ -166,6 +166,9 @@ options:
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+        <topic>-how-YYYY-MM-DD.md
+        <topic>-why-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
       impl/
@@ -211,10 +214,11 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
 - dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/architecture/*.json` 分片；`docs/ARCHITECTURE.md` 只能由 `architecture_graph.py render write` 确定性重生成并随对应分片提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
 
@@ -488,7 +492,7 @@ dev/features/<feature-module>/<feature-slug>/decisions/<decision-id>.json
 | `action` | 允许的计划 | 允许的结果票状态 |
 | --- | --- | --- |
 | `continue` | `strategy=resume/redispatch`，受控 `role=development/review`、`tier=default/escalated`，以及自包含 `prompt` | `confirmed / in-progress / in-review / mr-submitted` |
-| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence` |
+| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence`；`redesign` 例外只能去 `proposed` |
 | `defer` | 无 prompt、无会话计划 | `deferred` |
 | `cancel` | 无 prompt、无会话计划 | `cancelled` |
 
@@ -543,7 +547,7 @@ pending / waiting / answered / expired --显式 cancel--> cancelled
 
 - `resume`：沿用原 `dispatch_id / session_id`，`attempts_after = attempts_before`，供主会话续接同一子会话；不新增一次派发。
 - `redispatch`：生成新 `dispatch_id`，`session_id=null` 等宿主分配，`attempts_after = attempts_before + 1`，供主会话新开独立子会话。重放 `route_begin` 返回原 route，不再次计数。
-- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。
+- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。`redesign` 是承重设计被证伪时的受控路由：ack 后票回 `proposed`，不增加 dispatch attempts；主会话局部重跑 `/how`、`/why` 和 tech-spec 候选，新 spec 经 supersedes 接管，受影响票重新过门②并冻结新 context 后才能转 `confirmed`。旧验证、评审、conformance 和 candidate 不得沿用。
 - `defer / cancel`：返回受控关闭计划，不增加派发次数。
 
 集成层在实际新派发前，按计划更新票的 `dispatch` 块并追加 `dispatch` 事件；模型 / effort 仍由 agents-config 和宿主原生角色解析，本模块不猜模型。续接不新增 `dispatch` 事件，重派新增。无论哪种路由，ack 前票都保持 `needs-human`。
@@ -737,7 +741,19 @@ python3 human_decision.py reconcile --main-session --repo REPO [--feature M/S]
 
 **判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
 
+**本地 proposed 草稿**：按 `shared/templates/issue.md` 在 `issues/` 下形成每票一个文件，frontmatter 写 `status: proposed`、唯一 `blocked-by`、完整 `declared-scope` 和 `architecture-updates`。这只是门②前的本地文档草稿，不是 tracker 发布，也不得派发。每票备注必须引用同一 active tech-spec 和对应 How/Why 决策锚点；历史其他 spec 的票不得混入当前组。
+
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
+
+先运行三道只读检查，任一失败就回 Step 1 或 `/tech-spec`，不得把失败草稿交给用户批准：
+
+```bash
+python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>
+python3 ../shared/scripts/architecture_graph.py check-design --repo <项目根> --spec <tech-spec>
+python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一票> --repo <项目根>
+```
+
+`check-design` 不要求接口已 current；`check-plan` 检查组内 DAG、scope 重叠串行、DoD、架构 ID 唯一承接和 AC 计划。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
 
 向用户呈现编号清单，一次审全部：
 
@@ -754,8 +770,8 @@ python3 human_decision.py reconcile --main-session --repo REPO [--feature M/S]
 
 确认后按 `agents-config.tracker` 发布：
 
-- **local 模式**（默认）：按模板 `shared/templates/issue.md`（相对本 SKILL.md 为 `../shared/templates/issue.md`）在 `./dev/features/<feature-module>/<feature-slug>/issues/` 下每票一个文件，依赖序编号（issue-001 起），frontmatter `status: confirmed`
-- **gitlab 模式**：本地票文件照写（本地真源），另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
+- **local 模式**（默认）：把门②前已写入的本地 proposed 草稿置为 `status: confirmed`，不得借发布改写标题 / DoD / declared-scope / architecture-updates；若内容有变，重新运行 checker 并过门②
+- **gitlab 模式**：本地票文件同样先由 proposed 置 confirmed，另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
 - 修改父级 issue / tech-spec / PRD：禁止
 
 ### Step 4：收尾与派发协议（门②后由主会话自动执行）

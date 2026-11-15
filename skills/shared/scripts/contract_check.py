@@ -246,7 +246,17 @@ def spec_date(spec):
 def check_spec2(repo, results, specs, arch_text, head="HEAD"):
     baseline = arch_baseline(arch_text) if arch_text is not None else None
     import architecture_graph
+    active_by_dir = {}
     for spec in specs:
+        if spec.parent not in active_by_dir:
+            leaves, active_errors = architecture_graph.active_spec_leaves(
+                spec.parent.glob("*-tech-spec-*.md"))
+            active_by_dir[spec.parent] = leaves
+            for error in active_errors:
+                fail(results, "SPEC-2", error)
+        leaves = active_by_dir[spec.parent]
+        if spec.name not in leaves:
+            continue
         fm = parse_frontmatter(spec.read_text(encoding="utf-8"))
         if fm.get("status") != "已确认（待拆解）":
             continue

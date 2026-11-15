@@ -96,6 +96,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
 - 派生物只能由 `generated-refresh` 声明的唯一生成器产生。流程核对会在独立临时工作区重跑并比较 tree，不能靠“只改字段”的文字声明。
 - 每轮对照冻结 declared-scope 检查全部 changed paths。越界退回 `/issue-split` 重新确认并生成新 context；不能登记漂移后继续，也不能自行扩大 scope、排除规则或粒度上限。
 - 生产文件数 / LOC 超上限立即停止，创建重新拆票的 human-decision 请求；增加测试或升级模型不能替代拆票。
+- 同类 workaround、类型逃逸或跨模块偏移反复出现，或新运行证据证伪 tech-spec 3.6 的承重决策 / 4 的假设时，停止补丁式修补：返回 `operation=redesign`、`next_status=proposed` 的 human-decision 请求，绑定 DEC-ID、证据、影响票和当前 HEAD。不得原地改写 spec、继续复用旧证据或自行恢复实现。
 
 ## Step 3：TDD 实现
 

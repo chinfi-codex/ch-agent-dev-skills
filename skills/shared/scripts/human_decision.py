@@ -32,14 +32,13 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "human-dec
 ACTIVE_STATUSES = ("pending", "waiting", "answered", "routing", "expired")
 TERMINAL_STATUSES = ("resolved", "cancelled", "superseded")
 STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
-REGISTERED_OPERATIONS = ("reconcile-routing", "re-split", "request-review", "collect-evidence")
+REGISTERED_OPERATIONS = ("reconcile-routing", "re-split", "redesign", "request-review", "collect-evidence")
 CONTINUE_STATUSES = ("confirmed", "in-progress", "in-review", "mr-submitted")
 MAX_REQUEST_BYTES = 128 * 1024
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _OPTION_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
-_FEATURE = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_FEATURE = re.compile(r"^[^/\\\x00-\x1f]{1,64}/[^/\\\x00-\x1f]{1,64}$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ISSUE = re.compile(r"^issue-[0-9]+[a-z0-9]*$")
 _SECRET = re.compile(
@@ -52,7 +51,7 @@ _INTERNAL_VISIBLE = re.compile(
     r"(?:needs-human|in-progress|in-review|mr-submitted|pending|waiting|answered"
     r"|routing|resolved|expired|cancelled|superseded|dispatch_id|session_id"
     r"|parent_session_id|decision_id|route_id|issue_sha|head_commit|report_sha"
-    r"|sha256|frontier|worktree|redispatch|resume|supervisor|re-split|BLOCKER)", re.I)
+    r"|sha256|frontier|worktree|redispatch|resume|supervisor|re-split|redesign|BLOCKER)", re.I)
 _FORBIDDEN_KEYS = {
     "shell", "command", "cmd", "exec", "executable", "subprocess", "script",
     "args", "argv", "env", "raw_log", "raw_logs", "log", "logs", "token",
@@ -387,8 +386,11 @@ def _validate_routes(packet: Mapping[str, Any]) -> None:
                 raise ValidationError("supervisor uses an operation, never resume/redispatch or model routing")
             if route["operation"] not in REGISTERED_OPERATIONS or route["prompt"] is not None:
                 raise ValidationError("supervisor only accepts a registered operation and no free prompt")
-            if route["next_status"] not in CONTINUE_STATUSES:
+            allowed = CONTINUE_STATUSES + (("proposed",) if route["operation"] == "redesign" else ())
+            if route["next_status"] not in allowed:
                 raise ValidationError("supervisor next_status must be a non-terminal working status")
+            if route["operation"] == "redesign" and route["next_status"] != "proposed":
+                raise ValidationError("redesign must return the ticket to proposed for a new spec and gate-2")
         else:
             expected = "deferred" if action == "defer" else "cancelled"
             if (route["strategy"] != "none" or route["role"] is not None or route["tier"] is not None
@@ -622,7 +624,7 @@ def _set_issue_status(repo: Any, packet: Mapping[str, Any], target: str) -> Tupl
         raise ConflictError("human decisions never reopen or directly complete a done ticket")
     if current in ("deferred", "cancelled") and target == "needs-human":
         raise ConflictError("an active decision cannot silently reopen a closed ticket")
-    if target not in CONTINUE_STATUSES + ("needs-human", "deferred", "cancelled"):
+    if target not in CONTINUE_STATUSES + ("proposed", "needs-human", "deferred", "cancelled"):
         raise ValidationError("unsupported ticket status transition: %s" % target)
     text = path.read_text(encoding="utf-8")
     start, end = _metadata_span(text)

@@ -85,7 +85,7 @@ def human_case():
 
 
 def plan_text(cases):
-    lines = ["schema: agent-dev.feature-acceptance/v1", "prd: prd.md", "tech_spec: spec.md", "cases:"]
+    lines = ["schema: agent-dev.feature-acceptance/v1", "prd: prd.md", "tech_spec: demo-tech-spec-2026-11-14.md", "cases:"]
     for aid, case in cases.items():
         lines += [f"  {aid}:", f"    title: {json.dumps(case['title'], ensure_ascii=False)}",
                   f"    source: {case['source']}", f"    required: {'true' if case['required'] else 'false'}",
@@ -130,6 +130,7 @@ class FeatureCloseoutTest(unittest.TestCase):
         self.fdir = self.root / "dev" / "features" / "mod" / SLUG
         (self.fdir / "issues").mkdir(parents=True)
         (self.fdir / "impl" / "issue-001").mkdir(parents=True)
+        (self.fdir / "demo-tech-spec-2026-11-14.md").write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n")
         self.write_issue("done")
         self.write_conformance("conform")
         self.write_merged(self.merged_commit)
@@ -141,7 +142,7 @@ class FeatureCloseoutTest(unittest.TestCase):
 
     def write_issue(self, status):
         (self.fdir / "issues" / "issue-001-x.md").write_text(
-            f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: {status}\n---\n# x\n")
+            f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: {status}\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
 
     def write_conformance(self, verdict):
         tree = sh(self.wt, "rev-parse", "HEAD^{tree}")
@@ -319,6 +320,26 @@ class FeatureCloseoutTest(unittest.TestCase):
         self.assertEqual(self.candidate["issues"][0]["merged_commit"], self.merged_commit)
         self.assertEqual(self.candidate["candidate"], self.merged_commit)
         self.assertEqual(self.candidate["acceptance_plan"]["cases"], ["AC-1", "AC-2"])
+
+    def test_freeze_requires_feature_wide_architecture_completion(self):
+        spec = self.fdir / "demo-tech-spec-2026-11-14.md"
+        spec.write_text("""---
+status: 已确认（待拆解）
+---
+# Spec
+
+### 3.2 接口变更
+
+| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| demo.entry | new | entry | mod | src/a.py:run | — | t.py |
+""", encoding="utf-8")
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        issue.write_text(issue.read_text().replace("tech-spec:", "architecture-updates: [demo.entry]\ntech-spec:"), encoding="utf-8")
+        result = self.freeze()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("architecture-feature", result.stdout)
+        self.assertIn("demo.entry", result.stdout)
 
     def test_freeze_requires_done_full_ancestor_and_conform(self):
         self.write_issue("in-review")
