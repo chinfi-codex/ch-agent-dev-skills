@@ -125,6 +125,11 @@
           "uniqueItems": true
         },
         "source": {"$ref": "#/definitions/source"},
+        "sources": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/source"},
+          "uniqueItems": true
+        },
         "verification": {"type": "string", "minLength": 1},
         "evidence": {
           "type": "array",

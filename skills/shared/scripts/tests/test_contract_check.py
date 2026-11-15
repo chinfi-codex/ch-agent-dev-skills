@@ -134,16 +134,18 @@ SPEC_REL = "dev/features/判读配置/文档驱动模板配置/文档驱动模�
 ISSUE_REL = "dev/features/判读配置/文档驱动模板配置/issues/issue-001-x.md"
 
 
-def make_v2_flow_repo(root):
+def make_v2_flow_repo(root, include_aux=False):
     issue = ISSUE_NO_CONTRACT.replace(
         "status: confirmed", "status: confirmed\narchitecture-updates: [a1.load_config]")
+    code_files = [
+        ("src/config/loader.py", "def load_config(path):\n    return {}\n"),
+        ("tests/config.txt", "config contract passed\n"),
+    ]
+    if include_aux:
+        code_files.append(("src/config/helper.py", "def assist(path):\n    return path\n"))
     root = make_repo(
         root, glossary=None, specs=[(SPEC_REL, SPEC_WITH_32)],
-        issues=[(ISSUE_REL, issue)],
-        code_files=[
-            ("src/config/loader.py", "def load_config(path):\n    return {}\n"),
-            ("tests/config.txt", "config contract passed\n"),
-        ],
+        issues=[(ISSUE_REL, issue)], code_files=code_files,
     )
     sh(root, "git", "init", "-q")
     sh(root, "git", "config", "user.name", "T")
@@ -171,6 +173,11 @@ def make_v2_flow_repo(root):
         "last_verified": "2026-11-14", "last_verified_version": "v1",
         "verified_commit": commit, "relations": [], "supersedes": [],
     }
+    if include_aux:
+        record["sources"] = [{
+            "path": "src/config/helper.py", "symbol": "assist",
+            "sha256": hashlib.sha256((root / "src/config/helper.py").read_bytes()).hexdigest(),
+        }]
     graph_dir = root / "docs/architecture"
     graph_dir.mkdir()
     (graph_dir / "config.json").write_text(json.dumps({
@@ -338,6 +345,21 @@ class CheckTest(unittest.TestCase):
                     "--base", base, "--head", "HEAD")
             self.assertEqual(r.returncode, 1)
             self.assertIn("FLOW-1", r.stdout)
+            self.assertIn("without updating its graph shard", r.stdout)
+
+    def test_contract_check_wires_auxiliary_source_flow_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = make_v2_flow_repo(root, include_aux=True)
+            (root / "src/config/helper.py").write_text(
+                "def assist(path):\n    return str(path)\n", encoding="utf-8")
+            sh(root, "git", "add", "src/config/helper.py")
+            sh(root, "git", "commit", "-qm", "change auxiliary source without graph")
+            r = run("--check", "--repo", str(root), "--issue", ISSUE_REL,
+                    "--base", base, "--head", "HEAD")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("FLOW-1", r.stdout)
+            self.assertIn("a1.load_config", r.stdout)
             self.assertIn("without updating its graph shard", r.stdout)
 
     def test_contract_check_homepage_is_byte_checked(self):

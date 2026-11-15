@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -210,6 +211,46 @@ class DispatchConfigTest(unittest.TestCase):
             target = output / "agents/development.md"
             target.write_text("stale\n", encoding="utf-8")
             self.assertEqual(dc.check_rendered(files, output), ["agents/development.md"])
+    def test_direct_isolated_cli_validate_render_and_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "agents-config.md"
+            config.write_text("""```yaml
+dispatch:
+  schema-version: 1
+  executor: subagent
+  parallel-max: 1
+  hosts:
+    zcode:
+      supervisor-review: {model: provider/supervisor, effort: high}
+      development:
+        default: {model: provider/dev, effort: medium}
+        escalated: {model: provider/dev, effort: high}
+```
+""", encoding="utf-8")
+            catalog = root / "catalog.json"
+            catalog.write_text(json.dumps({"zcode": {
+                "provider/supervisor": ["high"],
+                "provider/dev": ["medium", "high"],
+            }}), encoding="utf-8")
+            script = Path(dc.__file__).resolve()
+
+            def cli(*args):
+                return subprocess.run([sys.executable, "-I", str(script), *args],
+                                      capture_output=True, text=True)
+
+            validated = cli("validate", "--config", str(config), "--catalog", str(catalog))
+            self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+            output = root / "native"
+            rendered = cli("render", "--config", str(config), "--host", "zcode", "--output", str(output))
+            self.assertEqual(rendered.returncode, 0, rendered.stdout + rendered.stderr)
+            checked = cli("render", "--check", "--config", str(config), "--host", "zcode", "--output", str(output))
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            role = output / "agents/development.md"
+            role.write_text("stale\n", encoding="utf-8")
+            stale = cli("render", "--check", "--config", str(config), "--host", "zcode", "--output", str(output))
+            self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
+            self.assertIn("agents/development.md", stale.stdout)
 
 
 if __name__ == "__main__":
