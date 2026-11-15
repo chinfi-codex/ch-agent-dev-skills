@@ -268,17 +268,37 @@ def start(issue_path, repo) -> dict:
     if fc.get("mode") == "local-human" and target == config.get("main-branch"):
         if not _legacy_local_human(fc, fm):
             raise DeliveryError("local-human ticket cannot target main, including explicit target-branch: main")
-    _oid(root, target)
+    if fc.get("mode") == "local-human" and not _legacy_local_human(fc, fm):
+        implicit = dict(fm)
+        implicit["target-branch"] = None
+        expected_target = tc.target_branch(config, implicit, feature_dir)
+        if target != expected_target:
+            raise DeliveryError("local-human ticket target must be the feature integration branch: %s != %s" % (
+                target, expected_target))
     branch = "feat/%s-%s" % (str(fm.get("feature-slug") or feature_dir.name), issue_id)
     worktree = root / ".worktrees" / issue_id
     output = root / context_relative(fm, issue, root) / "impl" / issue_id / "ticket-context.json"
+    branch_exists = _git(root, "rev-parse", "--verify", "-q", "refs/heads/" + branch, check=False).returncode == 0
+    status = str(fm.get("status") or "")
+    resume_state = worktree.exists() or branch_exists or output.is_file()
+    if status != "confirmed":
+        if status not in {"in-progress", "in-review", "mr-submitted"} or not resume_state:
+            raise DeliveryError("fresh start requires confirmed; active status requires matching existing delivery state")
+    plan = tc.check_plan(issue, root, primary_repo=root)
+    if not plan.get("ok"):
+        raise DeliveryError("start plan check failed; no worktree/branch was created: %s" % "; ".join(plan.get("errors") or []))
+    statuses = plan.get("all_statuses") or {}
+    blocked = fm.get("blocked-by") or []
+    for dependency in blocked:
+        if statuses.get(dependency) != "done":
+            raise DeliveryError("blocked-by dependency is not done: %s" % dependency)
+    _oid(root, target)
     # Validate DoD/spec/config/scope and all primary-repo inputs before any Git
     # mutation.  The provisional main-HEAD context is discarded, never reused.
     try:
         tc.create_context(issue, root, primary_repo=root)
     except (ValueError, OSError) as exc:
         raise DeliveryError("start prevalidation failed; no worktree/branch was created: %s" % exc) from exc
-    branch_exists = _git(root, "rev-parse", "--verify", "-q", "refs/heads/" + branch, check=False).returncode == 0
     if worktree.exists() and not (worktree / ".git").exists():
         try:
             worktree.rmdir()  # only an empty directory left by an interrupted add
@@ -308,8 +328,17 @@ def start(issue_path, repo) -> dict:
         raise DeliveryError("dev symlink does not resolve to the main worktree dev directory")
     if output.is_file():
         context, _, _, _ = _load_context(output)
-        if context["source_head"] != _oid(worktree, "HEAD") or context["target_branch"] != target:
-            raise DeliveryError("existing context does not match the interrupted start worktree")
+        try:
+            parameters = inspect.signature(tc.create_context).parameters
+            kwargs = {"primary_repo": root} if "primary_repo" in parameters else {}
+            fresh = tc.create_context(issue, worktree, **kwargs)
+        except (ValueError, OSError) as exc:
+            raise DeliveryError("ticket_context revalidation failed: %s" % exc) from exc
+        if fresh["gate2_context_digest"] != context["gate2_context_digest"]:
+            if status != "confirmed":
+                raise DeliveryError("existing context is stale; active resume cannot silently refreeze")
+            context = fresh
+            _module("state_store").atomic_json_write(output, context)
     else:
         try:
             parameters = inspect.signature(tc.create_context).parameters
@@ -318,10 +347,10 @@ def start(issue_path, repo) -> dict:
         except (ValueError, OSError) as exc:
             raise DeliveryError(
                 "ticket_context.create_context failed; worktree and dev symlink were preserved for idempotent resume: %s" % exc) from exc
-        if context["source_head"] != _oid(worktree, "HEAD") or context["target_commit"] != _oid(root, target):
-            raise DeliveryError("ticket_context froze the wrong source/target; refusing to amend it locally")
         output.parent.mkdir(parents=True, exist_ok=True)
         _module("state_store").atomic_json_write(output, context)
+    if context["source_head"] != _oid(worktree, "HEAD") or context["target_commit"] != _oid(root, target):
+        raise DeliveryError("ticket_context froze the wrong source/target; refusing to amend it locally")
     return {"schema": SCHEMA, "operation": "start", "context": str(output),
             "worktree": str(worktree), "branch": branch, "target": target,
             "source_head": context["source_head"]}

@@ -9,6 +9,7 @@
 - **tech-spec = flow-forward**：日期快照，不覆盖旧文件；整体取代关系由 frontmatter `supersedes` 显式声明。
 - **图谱分片 = 唯一写入源**：模块、接口、约束均写 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。`docs/ARCHITECTURE.md` 只是 `architecture_graph.py render write` 的确定性短首页，禁止手改。
 - **逐 ID 义务**：tech-spec 3.2 固定表的每个稳定 ID 必须恰好落入一张票的 `architecture-updates`，再对照分片动作、supersedes、代码和证据；正文出现 architecture 或“来源引用”不再构成放行。
+- **三级门禁**：`check-design` 只查设计结构、How/Why/承重决策/usage 章节和 active leaf，不要求票或 current；票级 `check-flow` 仍保持原 CLI，但只强制本票声明 ID 与 diff flow-back；`check-feature` / `feature_closeout freeze/check` 在 integration candidate 上强制整份 active spec 的全部 ID，防止后续票未完成阻塞首票或整需求漏检。
 - **flow-back**：实现 diff 命中接口记录绑定的源码而票未声明 ID 时，必须同分支补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。
 - **current**：完整 verified_commit 为候选 HEAD 祖先，候选上的源码 bytes / SHA256 / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则只能 needs_verification。release_only 不进入默认现行查询。
 

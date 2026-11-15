@@ -126,6 +126,9 @@ options:
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+        <topic>-how-YYYY-MM-DD.md
+        <topic>-why-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
       impl/
@@ -171,10 +174,11 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
 - dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/architecture/*.json` 分片；`docs/ARCHITECTURE.md` 只能由 `architecture_graph.py render write` 确定性重生成并随对应分片提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
 
@@ -448,7 +452,7 @@ dev/features/<feature-module>/<feature-slug>/decisions/<decision-id>.json
 | `action` | 允许的计划 | 允许的结果票状态 |
 | --- | --- | --- |
 | `continue` | `strategy=resume/redispatch`，受控 `role=development/review`、`tier=default/escalated`，以及自包含 `prompt` | `confirmed / in-progress / in-review / mr-submitted` |
-| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence` |
+| `supervisor` | 仅 `operation`，不得带自由 prompt 或模型路由 | 同上；operation 只可以是 `reconcile-routing / re-split / request-review / collect-evidence`；`redesign` 例外只能去 `proposed` |
 | `defer` | 无 prompt、无会话计划 | `deferred` |
 | `cancel` | 无 prompt、无会话计划 | `cancelled` |
 
@@ -503,7 +507,7 @@ pending / waiting / answered / expired --显式 cancel--> cancelled
 
 - `resume`：沿用原 `dispatch_id / session_id`，`attempts_after = attempts_before`，供主会话续接同一子会话；不新增一次派发。
 - `redispatch`：生成新 `dispatch_id`，`session_id=null` 等宿主分配，`attempts_after = attempts_before + 1`，供主会话新开独立子会话。重放 `route_begin` 返回原 route，不再次计数。
-- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。
+- `supervisor`：只返回已登记 operation，不生成模型 / 会话升级指令。`redesign` 是承重设计被证伪时的受控路由：ack 后票回 `proposed`，不增加 dispatch attempts；主会话局部重跑 `/how`、`/why` 和 tech-spec 候选，新 spec 经 supersedes 接管，受影响票重新过门②并冻结新 context 后才能转 `confirmed`。旧验证、评审、conformance 和 candidate 不得沿用。
 - `defer / cancel`：返回受控关闭计划，不增加派发次数。
 
 集成层在实际新派发前，按计划更新票的 `dispatch` 块并追加 `dispatch` 事件；模型 / effort 仍由 agents-config 和宿主原生角色解析，本模块不猜模型。续接不新增 `dispatch` 事件，重派新增。无论哪种路由，ack 前票都保持 `needs-human`。
@@ -641,6 +645,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
 - 派生物只能由 `generated-refresh` 声明的唯一生成器产生。流程核对会在独立临时工作区重跑并比较 tree，不能靠“只改字段”的文字声明。
 - 每轮对照冻结 declared-scope 检查全部 changed paths。越界退回 `/issue-split` 重新确认并生成新 context；不能登记漂移后继续，也不能自行扩大 scope、排除规则或粒度上限。
 - 生产文件数 / LOC 超上限立即停止，创建重新拆票的 human-decision 请求；增加测试或升级模型不能替代拆票。
+- 同类 workaround、类型逃逸或跨模块偏移反复出现，或新运行证据证伪 tech-spec 3.6 的承重决策 / 4 的假设时，停止补丁式修补：返回 `operation=redesign`、`next_status=proposed` 的 human-decision 请求，绑定 DEC-ID、证据、影响票和当前 HEAD。不得原地改写 spec、继续复用旧证据或自行恢复实现。
 
 ## Step 3：TDD 实现
 

@@ -484,6 +484,152 @@ def select_conformance(context: Dict[str, Any], rate: Any) -> bool:
     return position < fraction
 
 
+def _scope_root(pattern: str) -> str:
+    match = re.search(r"[*?\[]", pattern)
+    if not match:
+        return str(Path(pattern).parent).replace(".", "", 1).strip("/")
+    return pattern[:match.start()].rstrip("/")
+
+
+def _scopes_overlap(left: str, right: str) -> bool:
+    import fnmatch
+    if left == right:
+        return True
+    left_glob, right_glob = bool(re.search(r"[*?\[]", left)), bool(re.search(r"[*?\[]", right))
+    if not left_glob and not right_glob:
+        return False
+    if not left_glob:
+        return fnmatch.fnmatchcase(left, right)
+    if not right_glob:
+        return fnmatch.fnmatchcase(right, left)
+    first, second = _scope_root(left), _scope_root(right)
+    if not first or not second:
+        return True
+    return first == second or first.startswith(second + "/") or second.startswith(first + "/")
+
+
+def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[str, Any]:
+    """Read-only validation of the whole ticket group before any delivery mutation."""
+    root = _repo_root(primary_repo if primary_repo is not None else repo)
+    issue, _ = _inside(root, issue_path, "issue")
+    errors: List[str] = []
+    try:
+        spec = find_spec(issue, root)
+    except ContextError as exc:
+        return {"ok": False, "errors": [str(exc)], "issues": [], "all_statuses": {}}
+    feature = issue.parent.parent
+    records: Dict[str, Dict[str, Any]] = {}
+    all_statuses: Dict[str, str] = {}
+    for candidate in sorted((feature / "issues").glob("issue-*.md")):
+        try:
+            parsed = parse_issue(candidate)
+            fm = parsed["frontmatter"]
+            ident = str(fm.get("issue-id") or "")
+            if not re.fullmatch(r"issue-[0-9]+[a-z]?", ident):
+                raise ContextError("%s has invalid/missing issue-id" % candidate.name)
+            if ident in records:
+                raise ContextError("duplicate issue-id in feature: %s" % ident)
+            status = str(fm.get("status") or "")
+            all_statuses[ident] = status
+            candidate_spec = find_spec(candidate, root)
+            records[ident] = {"path": candidate, "frontmatter": fm, "dod": parsed["dod"],
+                              "spec": candidate_spec}
+        except (ContextError, agents_config.ConfigError, OSError, ValueError) as exc:
+            errors.append("%s: %s" % (candidate.name, exc))
+    group = {ident: item for ident, item in records.items() if item["spec"] == spec}
+    current_id = next((ident for ident, item in records.items() if item["path"] == issue), "")
+    if current_id not in group:
+        errors.append("%s: current ticket does not belong to its resolved tech-spec group" % issue.name)
+    try:
+        import architecture_graph
+        leaves, active_errors = architecture_graph.active_spec_leaves(feature.glob("*-tech-spec-*.md"))
+        errors.extend(active_errors)
+        if spec.name not in leaves:
+            errors.append("%s: not an active confirmed leaf tech-spec" % spec.name)
+        errors.extend(architecture_graph.check_flow_forward(
+            root, spec, [item["path"] for item in group.values()], implementation_ids=set()))
+    except (ImportError, ValueError, OSError, TypeError) as exc:
+        errors.append("architecture plan validation failed: %s" % exc)
+    dependencies: Dict[str, List[str]] = {}
+    scopes: Dict[str, List[str]] = {}
+    for ident, item in group.items():
+        fm = item["frontmatter"]
+        if not 1 <= len(item["dod"]) <= 3:
+            errors.append("%s: DoD must contain 1-3 commands" % ident)
+        text = item["path"].read_text(encoding="utf-8")
+        what = re.search(r"(?ms)^##\s+要做什么[^\n]*\n(.*?)(?=^##\s+|\Z)", text)
+        if not what or not what.group(1).strip():
+            errors.append("%s: 要做什么 must describe a demonstrable result" % ident)
+        try:
+            declared = _scope(fm, "declared-scope")
+            if not declared:
+                raise ContextError("declared-scope must not be empty")
+            for pattern in declared:
+                if pattern in {".", "./", "*", "**", "**/*", "./**"} or pattern.endswith("/**"):
+                    errors.append("%s: unbounded directory glob is not an enumerable scope: %s" % (ident, pattern))
+            scopes[ident] = declared
+        except ContextError as exc:
+            errors.append("%s: %s" % (ident, exc))
+        blocked = fm.get("blocked-by")
+        if blocked is None:
+            blocked = []
+        if not isinstance(blocked, list) or any(not isinstance(dep, str) or not dep.strip() for dep in blocked):
+            errors.append("%s: blocked-by must be a list of issue IDs" % ident)
+            blocked = []
+        blocked = [dep.strip() for dep in blocked]
+        if len(set(blocked)) != len(blocked):
+            errors.append("%s: blocked-by contains duplicates" % ident)
+        if ident in blocked:
+            errors.append("%s: cannot depend on itself" % ident)
+        for dep in blocked:
+            if dep not in all_statuses:
+                errors.append("%s: unknown blocked-by dependency %s" % (ident, dep))
+        dependencies[ident] = blocked
+    visiting, visited = set(), set()
+    def visit(ident):
+        if ident in visiting:
+            errors.append("blocked-by cycle includes %s" % ident)
+            return
+        if ident in visited:
+            return
+        visiting.add(ident)
+        for dep in dependencies.get(ident, []):
+            if dep in group:
+                visit(dep)
+        visiting.remove(ident)
+        visited.add(ident)
+    for ident in sorted(group):
+        visit(ident)
+    def reaches(start, target, seen=None):
+        if start == target:
+            return True
+        seen = set() if seen is None else seen
+        if start in seen or start not in group:
+            return False
+        seen.add(start)
+        return any(reaches(dep, target, seen) for dep in dependencies.get(start, []))
+    identifiers = sorted(group)
+    for index, left in enumerate(identifiers):
+        for right in identifiers[index + 1:]:
+            overlap = any(_scopes_overlap(a, b) for a in scopes.get(left, []) for b in scopes.get(right, []))
+            if overlap and not reaches(left, right) and not reaches(right, left):
+                errors.append("%s and %s have overlapping scope but no serial blocked-by path" % (left, right))
+    try:
+        import feature_closeout
+        plan = feature_closeout.read_plan(feature)
+        errors.extend(feature_closeout.validate_plan_data(plan))
+        if str(plan.get("tech_spec") or "") != spec.name:
+            errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
+    except (ImportError, ValueError, OSError, TypeError) as exc:
+        errors.append("acceptance plan validation failed: %s" % exc)
+    summary = [{"issue_id": ident, "status": all_statuses.get(ident),
+                "blocked_by": dependencies.get(ident, []), "declared_scope": scopes.get(ident, [])}
+               for ident in identifiers]
+    return {"ok": not errors, "errors": list(dict.fromkeys(errors)),
+            "spec_path": spec.relative_to(root).as_posix(), "issues": summary,
+            "all_statuses": all_statuses}
+
+
 def _print(context: Dict[str, Any]) -> None:
     print(json.dumps(context, ensure_ascii=False, indent=2, sort_keys=True))
 
@@ -500,11 +646,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub = subparsers.add_parser(name)
         sub.add_argument("context", nargs="?")
         sub.add_argument("--context", dest="context_option")
+    plan = subparsers.add_parser("check-plan")
+    plan.add_argument("--issue", required=True)
+    plan.add_argument("--repo", required=True)
+    plan.add_argument("--primary-repo")
     args = parser.parse_args(argv)
     try:
         if args.command == "create":
             context = create_context(args.issue, args.repo, args.output, primary_repo=args.primary_repo)
             _print(context)
+        elif args.command == "check-plan":
+            result = check_plan(args.issue, args.repo, primary_repo=args.primary_repo)
+            _print(result)
+            return 0 if result["ok"] else 1
         else:
             path = args.context_option or args.context
             if not path:

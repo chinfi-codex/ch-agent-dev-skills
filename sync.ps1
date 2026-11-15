@@ -17,7 +17,7 @@ if ($PythonCache) {
   exit 1
 }
 
-$FlatItems = @("ceo-office","pd-plan","issue","prd","pd-review","review","tech-spec","issue-split","implement","ai-review","setup-dev","prototype","handoff","shared")
+$FlatItems = @("ceo-office","pd-plan","issue","prd","pd-review","review","how","why","tech-spec","issue-split","implement","ai-review","setup-dev","prototype","handoff","shared")
 
 function Sync-Flat($TargetRoot) {
   New-Item -ItemType Directory -Force $TargetRoot | Out-Null

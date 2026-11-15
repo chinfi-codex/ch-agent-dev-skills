@@ -294,6 +294,46 @@ class FlowTest(unittest.TestCase):
         errors = graph.check_flow_back(self.root, self.issue, self.base, self.head)
         self.assertTrue(any("graph-only change" in error for error in errors), errors)
 
+    def test_ticket_scope_does_not_require_other_tickets_current_but_feature_does(self):
+        self.write_spec([self.spec_row(), self.spec_row(ident="a1.other", name="other", action="new")])
+        second_issue = self.issues / "issue-002-other.md"
+        second_issue.write_text("---\nissue-id: issue-002\narchitecture-updates: [a1.other]\n---\n", encoding="utf-8")
+        self.head = self.commit("two tickets, second not implemented")
+        ticket_errors = graph.check_flow_forward(
+            self.root, self.spec, [self.issue, second_issue], head=self.head,
+            implementation_ids={"a1.entry"})
+        self.assertEqual([], ticket_errors)
+        feature_errors = graph.check_flow_forward(
+            self.root, self.spec, [self.issue, second_issue], head=self.head)
+        self.assertTrue(any("a1.other" in error and "missing" in error for error in feature_errors), feature_errors)
+
+    def test_design_gate_and_active_leaf(self):
+        self.write_spec([self.spec_row(ident="a1.other", name="other", action="new")])
+        text = self.spec.read_text(encoding="utf-8")
+        text = text.replace("# Tech Spec\n", "# Tech Spec\n\n### 2.1 How / Why\n\nresearch/demo-how.md\n\n### 3.6 承重决策\n\nDEC-01 base+graft\n\n### 3.7 Usage\n\ncaller migration\n")
+        self.spec.write_text(text, encoding="utf-8")
+        self.assertEqual([], graph.check_design(self.root, self.spec))
+        successor = self.feature / "demo-tech-spec-2026-11-15.md"
+        successor.write_text(text.replace("---\ndoc_type: tech-spec", "---\ndoc_type: tech-spec\nsupersedes: " + self.spec.name), encoding="utf-8")
+        self.assertEqual([], graph.check_design(self.root, successor))
+        errors = graph.check_design(self.root, self.spec)
+        self.assertTrue(any("superseded" in error for error in errors), errors)
+
+    def test_plan_scope_still_requires_static_assignment_for_existing_ids(self):
+        self.write_issue([])
+        errors = graph.check_flow_forward(self.root, self.spec, [self.issue], implementation_ids=set())
+        self.assertTrue(any("a1.entry has no ticket" in error for error in errors), errors)
+
+    def test_process_accepts_complete_undeclared_flow_back(self):
+        import process_check
+        self.head = self.modify_code_and_graph(declared=False)
+        (self.root / "dev/agents-config.md").write_text("# test root marker\n", encoding="utf-8")
+        context = {"spec_path": self.spec.relative_to(self.root).as_posix(),
+                   "architecture_updates": []}
+        report = process_check.Report()
+        process_check._check_architecture(report, self.root, self.issue, context, [], self.base, self.head)
+        self.assertFalse(report.failed, report.items)
+
 
 if __name__ == "__main__":
     unittest.main()

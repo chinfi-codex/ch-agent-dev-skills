@@ -707,8 +707,6 @@ def _check_architecture(rep, repo, issue, context, files, base, head):
     paths = sorted({p for file in files for p in _all_paths(file)})
     architecture_changed = [p for p in paths if match_any(p, ARCHITECTURE_PATTERNS)]
     declared = context.get("architecture_updates") or []
-    if architecture_changed and not declared:
-        rep.add("architecture", "FAIL", "architecture files changed without ticket architecture-updates")
     if declared and not architecture_changed:
         rep.add("architecture", "FAIL", "ticket declares architecture-updates but no architecture artifact changed")
     try:
@@ -718,7 +716,9 @@ def _check_architecture(rep, repo, issue, context, files, base, head):
         root = _find_root(issue)
         spec_path = root / context["spec_path"]
         issue_paths = sorted((spec_path.parent / "issues").glob("*.md"))
-        errors = graph.check_flow_forward(repo, spec_path, issue_paths, head=head)
+        errors = graph.check_flow_forward(
+            repo, spec_path, issue_paths, head=head, implementation_ids=set(declared),
+            allow_flow_back=True)
         rep.extend("architecture-forward", [str(error) for error in errors])
         if (repo / "docs" / "architecture").is_dir() and list((repo / "docs" / "architecture").glob("*.json")):
             _, errors = graph.render_homepage(repo, write=False, head=head)

@@ -1,6 +1,6 @@
 ---
 name: tech-spec
-version: 0.4.0
+version: 0.5.0
 default-mode: DOC_MODE
 default-mode-strict: true
 implementation-mode: IMPLEMENT_MODE
@@ -20,7 +20,10 @@ allowed-tools:
   - Edit
   - Grep
   - Glob
+  - Bash
   - AskUserQuestion
+  - Task
+  - Skill
 ---
 <!-- AUTO-GENERATED from SKILL.md.tmpl -->
 <!-- do not edit directly -->
@@ -41,7 +44,7 @@ allowed-tools:
 
 产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
-本 skill 的文档产物有一个额外例外：允许写当前需求目录 `./dev/features/*/*/acceptance-plan.yaml`。它是结构化功能验收计划，不是运行配置；其他源码、测试与配置限制不变。
+本 skill 的文档产物有两个额外例外：允许写当前需求目录 `./dev/features/*/*/acceptance-plan.yaml`，以及执行一次只读设计校验 `python3 ../shared/scripts/architecture_graph.py check-design --repo <项目根> --spec <tech-spec>`。前者是结构化功能验收计划，后者只校验设计结构；其他源码、测试与配置限制不变。
 
 ## 术语与数据口径（GLOSSARY）
 
@@ -205,6 +208,9 @@ options:
       <feature-slug>/
       <feature-summary>-tech-spec-YYYY-MM-DD.md
       acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+        <topic>-how-YYYY-MM-DD.md
+        <topic>-why-YYYY-MM-DD.md
       issues/
         issue-001-<短名>.md
       impl/
@@ -250,10 +256,11 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
 - dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/architecture/*.json` 分片；`docs/ARCHITECTURE.md` 只能由 `architecture_graph.py render write` 确定性重生成并随对应分片提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
 
@@ -361,13 +368,29 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - 标准路径：总结 PRD 要交付什么、pd-review 留了哪些 concern，作为方案的输入边界。
 - 小变更路径：总结 change-request 的本次 delta（改什么 / 不改什么 / 影响面 / 验收口径），以及其依附功能的现状基线（原 PRD 与代码现状），作为方案的输入边界。
 
-### Step 1：代码库事实自查
+### Step 1：How 现状建模 + Why 历史约束
 
-按「拷打规则」的事实自查纪律：现有模块、接口、数据流、既有约定（AGENTS.md / CLAUDE.md / REVIEW.md）必须自己用 Read / Grep / Glob 查证，**不问用户**。查证结果逐条带代码位置，不把推断写成事实。
+先完成调查，再设计方案。调查不能由“读过几个文件”或主会话即兴摘要替代。
 
-### Step 2：方案设计
+1. **How 默认必做**：对每个受影响子系统调用 `/how`，形成组件、函数级主/失败流程、数据与控制流、边界、共享状态、文件覆盖和开放问题。真正 greenfield 且没有周边系统时才可豁免，并在 2.1 写明理由。只列文件名、只读旧 ARCHITECTURE 首页或只引用 agent 自述都不算 How。
+2. **Why 按承重问题触发**：改变 ownership / layering / 公共契约、删除或替代既有实现、处理防御性代码、采用数值阈值，或 How 留下 `why-lead` 时，必须调用 `/why`。它从共同 code anchor 出发，覆盖 Git、ticket、长文档、chat、infra、error、analytics 七类来源，保留空结果和不可用来源，按 Direct / Supported / Inferred / Speculative / Unknown 分级。
+3. 两份调查写入 `research/` 并作为 dated spec 的上游证据。How 复用要求同一问题、范围和 source HEAD；代码已变化就重查。Why 可复用同一 target/question 的历史报告，但必须核 Sources Consulted 和新增证据，覆盖不足就补查。
+4. 把 Why 的 **Preserve / Change / Avoid / Risk** 转成设计输入：Direct/Supported 可形成约束；Inferred 只能形成待验证假设；Speculative/Unknown 进入待确认或 Risk，不能写成既定事实。用户问题中的假设同样接受证据核验。
+5. 既有约定（AGENTS.md / CLAUDE.md / REVIEW.md）、图谱 current 记录和代码事实仍需自己查证，逐条带代码位置；能从代码和历史查到的**不问用户**。只有实验和历史无法回答的产品/偏好决策才进入提问。
 
-产出方案骨架：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。
+### Step 2：候选方案设计与综合
+
+先产出共同设计边界：模块、接口、数据与存储、主/失败流程、影响面、风险、约束和验收判据。然后识别**承重决策**：公共/跨模块接口、ownership/分层、持久化/迁移、并发共享状态、技术选型，以及一旦选错会迫使多票重做的决策。
+
+- 非承重决策可直接设计，但不得把承重决策拆小来规避候选比较。
+- 每个承重决策至少生成 **2 个结构上不同的候选**，不是同一方案的参数变体。候选收到相同 How/Why 证据、任务和约束；主会话另拟 3–6 条评分准则，候选不看权重。优先并行独立子代理；宿主不具备时顺序生成并披露，不得只剩一个候选。
+- 主会话先检查浅模块、信息泄漏、透传、分裂 ownership、双路径等红旗，再按统一准则评估。可请不同模型族独立 judge；不可用时主会话评估并披露，judge 不拥有最终决定。
+- 综合采用 **base + graft**：说明选中 base、复用的现有 `path:symbol` 或 architecture ID、从其他候选吸收的 1–2 个优点、拒绝项及理由。候选严重分化说明问题欠规格，回到 How/Why 或原型，不对分歧求平均。
+- 候选、评分和淘汰理由只写 dated tech-spec 的 3.6，不进入 current 架构图谱，不新增第二套 ADR/registry。需要运行证据时复用 `/prototype` verdict。
+
+**公共与跨模块接口必须 usage-first**：先写真实消费者和最小调用示例，再推导输入/输出/error/async/ownership 类型语义；列出现存 `path:symbol` 调用点的 keep/migrate/delete 和覆盖测试。无法穷举动态/外部调用时写清假设和探测方法。3.7 保存迁移清单，living graph 只保留已核实的稳定关系，不复制全部调用点。
+
+最终方案骨架仍包含：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。
 
 **约束与假设必须分栏**，不得混写：
 
@@ -389,11 +412,10 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 ### Step 4：共识确认与产出
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
-2. 确认后按模板 `shared/templates/tech-spec.md`（相对本 SKILL.md 为 `../shared/templates/tech-spec.md`）产出 tech-spec；写作前必须先读取该模板，不自行增删一级章节
-3. 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`；同时按 `shared/templates/acceptance-plan.yaml` 写入同目录 `acceptance-plan.yaml`，保证 PRD 的每个端到端 AC 恰好承接一次，AI 自动 / AI 执行人工复核 / 人工验收的分类理由可解释。计划是结构化文档，不是运行配置
+2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
+3. 运行 `architecture_graph.py check-design --repo <项目根> --spec <tech-spec>` 并修复全部结构问题；该校验不要求接口已 current 或票已存在
 4. 本轮确定的新术语立即回写 GLOSSARY
 5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」必须使用模板固定表逐条写 `稳定 ID / new|modify|retire / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，供 `/issue-split` 把每个 ID 写入承接票 `architecture-updates`。接口只有随代码合并且祖先、源码 hash 与证据齐备后才可标 current。不得直接编辑 `docs/ARCHITECTURE.md`；首页只能由 `architecture_graph.py render write` 生成，并经 `render check` 字节核对。
-6. frontmatter `status` 置 `已确认（待拆解）`，衔接 `/issue-split`；本方案整体取代某份旧 tech-spec 时，frontmatter `supersedes` 填该旧文件名（机器可读的取代链，巡检规则见 `shared/references/contract-check.md`）
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。
 
@@ -403,7 +425,8 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 
 - 标准路径下 PRD 未可交付不开工，小变更路径下无 change-request 不开工；范围以需求输入（PRD / change-request）为准，不自行扩大
 - 约束与假设不得混写；假设必须带调整触发条件
-- 不写实现细节与代码，唯一例外：`/prototype` verdict 中已裁决的决策性片段（状态机 / reducer / schema / type shape 等比散文更精确编码决策的片段），裁剪到决策相关部分后内联进「3.5 决策性片段」，并标注来源（原型路径 + verdict 日期）；不替 `/issue-split` 拆任务
+- 不写业务实现；允许两类决策性片段：`/prototype` verdict 中已裁决的状态机 / reducer / schema / type shape，以及架构师为 3.7 usage-first 写的最小调用与公共类型 shape。逐片标注来源、只保留契约表达，不得借片段提前写实现；不替 `/issue-split` 拆任务
+- 实现或评审证据证伪承重决策时，不原地补丁式绕过：通过 human-decision `redesign` 回到本 skill，局部重跑 How/Why 与相关候选；新 dated spec 通过 supersedes 取代旧方案，受影响票重新过门②并生成新 context，旧证据不得沿用
 - 用词遵循 GLOSSARY 标准术语
 - 不把推断写成事实
 

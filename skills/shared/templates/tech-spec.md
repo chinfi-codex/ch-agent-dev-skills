@@ -21,6 +21,15 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 现有模块、接口、数据流中与本次相关的部分。每条给出代码位置（文件 / 符号）。只写查证过的事实。
 
+### 2.1 How / Why 调查与证据边界
+
+| 类型 | 报告 / source HEAD 或目标提交 | 覆盖与主要结论 | 未决项 |
+| --- | --- | --- | --- |
+| How | `research/<topic>-how-YYYY-MM-DD.md` / `<SHA>` | 组件、流程、边界、共享状态 | Open Questions |
+| Why | `research/<topic>-why-YYYY-MM-DD.md` / `<目标SHA>` | Preserve / Change / Avoid / Risk 与置信度 | Sources gap / Unknown |
+
+真正 greenfield 豁免 How 时在此写明周边系统不存在的证据；Why 的 Direct / Supported 才能形成确定约束，Inferred 进入假设，Speculative / Unknown 进入待确认或风险。
+
 ## 3. 方案设计
 
 ### 3.1 模块拆解
@@ -36,9 +45,28 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 ### 3.3 数据与存储
 ### 3.4 关键流程（主路径 + 失败路径）
-### 3.5 决策性片段（可选，来自原型 verdict）
+### 3.5 决策性片段（可选）
 
-仅当 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 的 verdict 含有已裁决的决策性片段时填写：状态机 / reducer / schema / type shape 等比散文更精确编码决策的片段，裁剪到决策相关部分，逐片标注来源（原型路径 + verdict 日期）。无原型 verdict 时本节留空。
+仅放比散文更精确表达决策的状态机 / reducer / schema / 最小调用 / type shape，裁剪到契约部分，不写业务实现。逐片标注来源：原型路径 + verdict 日期，或本 spec 3.7 的架构决策。无决策性片段时本节留空。
+
+### 3.6 承重决策与候选综合
+
+每个承重决策使用一个稳定 DEC-ID；无承重决策时明确写“无实质替代，理由：……”。
+
+| DEC-ID | 问题与统一准则 | 结构不同候选 | Base + 现有复用锚点 | Graft / 拒绝项及理由 | 证伪触发 |
+| --- | --- | --- | --- | --- | --- |
+| DEC-01 | 决策、How/Why 证据、3–6 条准则 | A / B（必要时 C）及 judge / 降级披露 | 选中方案及 `path:symbol` 或 architecture ID | 吸收优点、拒绝方案与代价 | 哪些实现证据会触发 redesign |
+
+候选与淘汰理由属于本 dated spec，不写成 current 架构事实。
+
+### 3.7 公共接口 Usage 与调用点迁移
+
+新增 / 修改 / 退役公共或跨模块接口时逐项填写；纯内部变更可写不适用及理由。
+
+| 接口 / DEC-ID | 真实消费者与最小用法 | 输入 / 输出 / error / async / ownership | 现存调用点 → keep / migrate / delete → 覆盖测试 | 未穷举范围与探测方法 |
+| --- | --- | --- | --- | --- |
+
+最小调用和公共类型 shape 可在 3.5 引用；动态调用、反射和外部消费者无法穷举时必须显式说明，不得声称全量覆盖。
 
 ## 4. 约束与假设（分栏，不得混写）
 

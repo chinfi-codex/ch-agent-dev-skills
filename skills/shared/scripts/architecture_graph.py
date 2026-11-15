@@ -944,12 +944,95 @@ def _evidence_matches(reference, evidence):
     return False
 
 
-def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD"):
-    """Reconcile each 3.2 stable ID through tickets, shard, action and evidence."""
+def _spec_metadata(spec_path):
+    try:
+        frontmatter = _frontmatter(Path(spec_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        return {}
+    result = {}
+    for key in ("status", "supersedes"):
+        match = re.search(r"(?m)^%s:\s*(.*?)\s*$" % re.escape(key), frontmatter)
+        result[key] = _yaml_scalar(match.group(1).split("#", 1)[0].strip()) if match else ""
+    return result
+
+
+def active_spec_leaves(spec_paths):
+    """Return confirmed leaf specs, without letting drafts retire an active design."""
+    paths = [Path(path) for path in spec_paths]
+    metadata = {path.name: _spec_metadata(path) for path in paths}
+    confirmed = {name for name, item in metadata.items() if item.get("status") == "已确认（待拆解）"}
+    superseded = {item.get("supersedes") for name, item in metadata.items()
+                  if name in confirmed and item.get("supersedes")}
+    leaves = sorted(name for name in confirmed if name not in superseded)
+    errors = []
+    by_name = {path.name: path for path in paths}
+    roots = {}
+    for name in leaves:
+        current, seen = name, set()
+        while metadata.get(current, {}).get("supersedes"):
+            if current in seen:
+                errors.append("tech-spec supersedes cycle reaches %s" % name)
+                break
+            seen.add(current)
+            current = metadata[current]["supersedes"]
+            if current not in by_name:
+                break
+        roots.setdefault(current, []).append(name)
+    for root, names in sorted(roots.items()):
+        if len(names) > 1:
+            errors.append("ambiguous active tech-spec leaves for %s: %s" % (root, ", ".join(names)))
+    return leaves, _dedup(errors)
+
+
+def _heading_body(text, number):
+    match = re.search(r"(?ms)^###\s+%s\s+[^\n]*\n(.*?)(?=^###\s+|^##\s+|\Z)" % re.escape(number), text)
+    return match.group(1).strip() if match else ""
+
+
+def check_design(repo, spec_path):
+    """Validate design-time structure without requiring tickets or current records."""
+    repo, spec_path = Path(repo), Path(spec_path)
+    entries, errors = parse_spec_updates(spec_path)
+    try:
+        text = spec_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return ["cannot read tech-spec %s: %s" % (spec_path, exc)]
+    for section in ("2.1", "3.6", "3.7"):
+        if not _heading_body(text, section):
+            errors.append("%s: required design section %s is missing or empty" % (spec_path.name, section))
+    metadata = _spec_metadata(spec_path)
+    if metadata.get("status") == "已确认（待拆解）":
+        leaves, active_errors = active_spec_leaves(spec_path.parent.glob("*-tech-spec-*.md"))
+        errors.extend(active_errors)
+        if spec_path.name not in leaves:
+            errors.append("%s: superseded tech-spec cannot authorize a new ticket group" % spec_path.name)
+    records = load_graph_details(repo)["records"]
+    by_id = _records_by_id(records)
+    for entry in entries:
+        if entry["action"] in {"modify", "retire"} and entry["id"] not in by_id:
+            errors.append("%s: %s action %s requires an existing graph record at design time" % (
+                spec_path.name, entry["id"], entry["action"]))
+    return _dedup(errors)
+
+
+def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implementation_ids=None,
+                       allow_flow_back=False):
+    """Reconcile assignments for every ID and implementation for the selected IDs.
+
+    ``implementation_ids=None`` is the feature-level full check.  A ticket passes
+    its own declared IDs so unfinished work owned by later tickets cannot block it.
+    """
     repo, spec_path = Path(repo), Path(spec_path)
     entries, errors = parse_spec_updates(spec_path)
     if not entries:
-        return errors
+        if issue_paths is not None:
+            for issue_path in issue_paths:
+                identifiers, issue_errors = parse_architecture_updates(issue_path)
+                errors.extend(issue_errors)
+                for ident in identifiers:
+                    errors.append("%s: ticket declares %s but spec 3.2 is empty" % (
+                        spec_path.name, ident))
+        return _dedup(errors)
     if issue_paths is None:
         issue_dir = spec_path.parent / "issues"
         issue_paths = sorted(issue_dir.glob("*.md")) if issue_dir.is_dir() else []
@@ -960,8 +1043,17 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD"):
         for ident in identifiers:
             declarations.setdefault(ident, []).append(Path(issue_path))
     expected_ids = {entry["id"] for entry in entries}
+    entries_by_id = {entry["id"]: entry for entry in entries}
+    flow_back_existing = set()
+    if allow_flow_back:
+        flow_back_existing = {
+            ident for ident, record in _records_by_id(load_graph_details(repo)["records"]).items()
+            if entries_by_id.get(ident, {}).get("action") in {"modify", "retire"}
+        }
     for ident in sorted(expected_ids):
         tickets = declarations.get(ident, [])
+        if not tickets and implementation_ids is not None and ident in flow_back_existing:
+            continue
         if not tickets:
             errors.append("%s: %s has no ticket architecture-updates declaration" % (spec_path.name, ident))
         elif len(tickets) > 1:
@@ -974,8 +1066,11 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD"):
     errors.extend(graph_errors)
     details = load_graph_details(repo)
     by_id = _records_by_id(records)
+    selected = None if implementation_ids is None else set(implementation_ids)
     for entry in entries:
         ident = entry["id"]
+        if selected is not None and ident not in selected:
+            continue
         record = by_id.get(ident)
         if record is None:
             errors.append("%s: %s is missing from docs/architecture/*.json" % (spec_path.name, ident))
@@ -1196,13 +1291,15 @@ def _print_errors(errors):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Validate, query, migrate and render architecture graph v2")
-    parser.add_argument("command", nargs="?", choices=("check", "render", "migrate-legacy", "check-flow"))
+    parser.add_argument("command", nargs="?", choices=("check", "render", "migrate-legacy", "check-design", "check-flow", "check-feature"))
     parser.add_argument("action", nargs="?", choices=("write", "check"))
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--base")
     parser.add_argument("--issue", type=Path)
+    parser.add_argument("--spec", type=Path)
+    parser.add_argument("--feature-dir", type=Path)
     parser.add_argument("--module")
     parser.add_argument("--interface")
     parser.add_argument("--version")
@@ -1225,13 +1322,39 @@ def main(argv=None):
         if not errors:
             print("legacy migration complete; all records remain needs_verification")
         return 1 if errors else 0
+    if args.command == "check-design":
+        if args.spec is None:
+            parser.error("check-design requires --spec")
+        spec = args.spec if args.spec.is_absolute() else repo / args.spec
+        errors = check_design(repo, spec)
+        _print_errors(errors)
+        print("design errors=%d" % len(_dedup(errors)))
+        return 1 if errors else 0
+    if args.command == "check-feature":
+        if args.spec is None or args.feature_dir is None:
+            parser.error("check-feature requires --spec and --feature-dir")
+        spec = args.spec if args.spec.is_absolute() else repo / args.spec
+        feature = args.feature_dir if args.feature_dir.is_absolute() else repo / args.feature_dir
+        leaves, errors = active_spec_leaves(feature.glob("*-tech-spec-*.md"))
+        if spec.name not in leaves:
+            errors.append("%s: not an active confirmed leaf tech-spec" % spec.name)
+        issue_paths = sorted((feature / "issues").glob("issue-*.md"))
+        errors.extend(check_flow_forward(repo, spec, issue_paths, head=args.head))
+        _, homepage_errors = render_homepage(repo, write=False, head=args.head)
+        errors.extend(homepage_errors)
+        _print_errors(errors)
+        print("feature flow errors=%d" % len(_dedup(errors)))
+        return 1 if errors else 0
     if args.command == "check-flow":
         if args.issue is None or not args.base:
             parser.error("check-flow requires --issue and --base")
         issue = args.issue if args.issue.is_absolute() else repo / args.issue
         import ticket_context
         spec = ticket_context.find_spec(issue, repo)
-        errors = check_flow_forward(repo, spec, head=args.head)
+        declared, declaration_errors = parse_architecture_updates(issue)
+        errors = declaration_errors
+        errors.extend(check_flow_forward(
+            repo, spec, head=args.head, implementation_ids=set(declared), allow_flow_back=True))
         errors.extend(check_flow_back(repo, issue, args.base, args.head, spec_path=spec))
         _, homepage_errors = render_homepage(repo, write=False, head=args.head)
         errors.extend(homepage_errors)
