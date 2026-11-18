@@ -125,30 +125,29 @@ options:
       impl/
         issue-001/
           ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
-          impl-log-issue-001.md
-          conformance-issue-001.md
-          raw/<generation>/            # 每次验证独立代际；成功新代际使前代 superseded
+          impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
+          raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
             artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
-            verification-implementer.json 或 verification-supervisor.json
+            verification-implementer.json
             evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
             logs/                     # 原始命令输出与哈希索引
-          review-receipt.json          # 独立评审身份、报告与候选绑定
-          host-probes.json             # 原生评审绑定的写回执；validate 仍须实时重读，单独文件不构成证明
-      reviews/
-        <feature-summary>-review-issue-001-YYYY-MM-DD.md
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
       integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选与计划哈希（feature_closeout.py freeze 写）
+        candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
         acceptance-plan.json      #   冻结时的计划快照
+        feature-review.md         #   整需求独立评审报告（main_head..candidate）
+        feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
+        candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
         evidence.md               #   自动证据头
         business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
-        acceptance-report.md      #   合并前功能验收报告（feature_closeout.py report 生成）
+        acceptance-report.md      #   合并前功能验收报告（report 生成）
         confirmation.md           #   人确认原话 + 候选 tree
         conformance-feature.md    #   feature 级覆盖核对
         verify-log.md             #   候选变更与回修轨迹
         raw/<generation>/
           artifact-generation-manifest.json
+          <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
           logs/  screenshots/
       unattended.md               # 无人值守授权边界（人离场时才产生）
       decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
@@ -169,7 +168,7 @@ options:
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
 - dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/architecture/*.json` 分片；`docs/ARCHITECTURE.md` 只能由 `architecture_graph.py render write` 确定性重生成并随对应分片提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
-- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-review-issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
+- 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
 
@@ -179,7 +178,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 - **可重下载的缓存不进 dev/**：安装包 / wheelhouse / keyring / 依赖缓存等官网可重下的内容，临时存放用完即删；确需留存只记版本号与获取命令
 - **merge 中间物即合即删**：`*.ours` / `*.theirs` / `*.orig` / merge-* 工作目录在合并提交后删除——git 历史可取回
 - **删除只能走 `close-and-clean` 预检与确认**：可再下载、字节级相同或明确属于已失效代际的内容才可删除；删除前后核对 Markdown / JSON 引用，最终 evidence、评审、确认记录与被引用捕获物不得为了压体积删除
-- 票 `done` 后、总结前由 `close-and-clean` 清理本票 worktree、分支与失效过程产物；`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
+- 票合入集成分支后保留 worktree / branch，直到 feature `finalize` 统一 `merged → done` 并逐票 close-and-clean；历史 `done` 票可单独走 close-and-clean。`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
 
 ## Dev 配置（agents-config v2）
 
@@ -188,12 +187,12 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 必要配置与执行纪律：
 
 - `tracker / main-branch / repo-level`：本地或 GitLab 票、主分支与仓库等级。票的唯一目标分支由 `ticket_context.target_branch` 在 `delivery start` 时冻结：显式 target-branch > local-human 集成分支 > main-branch；目标不存在即停，不回退 main。
-- `quality-gate.fast`：票级唯一快速质量门。每个实现、回修、冲突和主会话复跑轮只执行本票 DoD + fast，统一由 `verify_issue.py` 实际运行并生成结构化证据；不得按文件数、LOC、影响面或风险改跑其他票级套件，也不设置票级 scoped / full。
+- `quality-gate.fast`：票级唯一快速质量门。每个实现、回修和冲突轮只执行本票 DoD + fast，统一由 `verify_issue.py` 实际运行并生成结构化证据；feature 冻结后由 `verify_issue.py run-candidate` 在候选上统一复跑一次。不得按文件数、LOC、影响面或风险改跑其他票级套件，也不设置票级 scoped / full。
 - `host-budget`：只用于 local-human 需求级关联选择集与单项失败归因；fast 不受槽位限制。机器级 `~/.cache/agent-dev/slots/budget.json` 是共享预算真源，本文件只是镜像；CI full 使用判读机自己的预算。
 - `verify-policy.ticket-max-files / ticket-max-loc`：拆票粒度上限，默认 10 个生产文件 / 400 LOC。预估超限必须再拆，实测超限必须 re-split 或创建 human-decision；不得用它选择测试范围或模型档位。
 - `verify-policy.scope: strict`：开工后 declared-scope 冻结。所有 changed paths（不只生产文件）都参与 scope / 红线 / 架构对账；越界必须退回重新确认票并生成新 context，登记漂移不再放行。生产集合只用于文件数与 LOC 统计。
 - `verify-policy.deny`：绝对禁止路径；新增、修改、删除、重命名任一命中即 FAIL，登记不能豁免。
-- `verify-policy.test-change`：TDD 新增测试必须有 runner 的断言见红记录；既有测试修改必须逐条映射真实 DoD / tech-spec 锚点、说明冲突与范围，并由独立评审回执闭合。删除测试默认拒绝，无映射或放宽无关断言均失败。
+- `verify-policy.test-change`：TDD 新增测试必须有 runner 的断言见红记录；既有测试修改必须逐条映射真实 DoD / tech-spec 锚点、说明冲突与范围，票级核对后在 feature 级评审统一复核。删除测试默认拒绝，无映射或放宽无关断言均失败。
 - `verify-policy.generated-refresh`：每条派生物有稳定 ID、输出 glob 和唯一生成命令。流程核对在独立临时工作区执行生成器并比较 tree；不能只登记“机械刷新”或额外改动其他字段。
 - `gate-scope`：功能类 DoD / fast 才进入交付通过分母；perf / display 在最终候选执行一次并列人工确认，不因噪声反复重跑。缺已声明外部依赖的用例显式 env skip，不算通过也不算失败。
 - `attribution`：`quarantine` 入册必须有 base 同签名稳定失败、owner、去向和首录日期；清单内显式 skip，清单外失败只对单项做 base 对照。`two-sided` 每条失败双侧同命令。未执行项不得记 quarantine 或通过；超期隔离项必须报告。
@@ -201,19 +200,20 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `feature-closeout.mode`：
   - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
   - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
-  - `local-human`：每需求独立集成分支；全部票合入后 freeze 候选与验收计划，执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main。push / Prod 始终另行授权。
+  - `local-human`：每需求独立集成分支；票只做内环并合入集成分支（状态 `merged`）。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理。push / Prod 始终另行授权。
 - `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
-- `conformance`：主会话或独立监督会话先反向枚举需求，再打开代码逐条核对。`always` 每票必核；`sampled` 由 gate2 context digest + issue ID 确定性抽样，不能自写 skipped；集成票始终必核。空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。
+- `conformance`：只在 feature 冻结候选上执行一次，不再每票必做。主会话或独立监督会话先反向枚举需求，再打开代码按 tech-spec 全节与全部票覆盖矩阵并集逐条核对；`integration/conformance-feature.md` 必须绑定 candidate/tree、精确覆盖本轮票与 spec hash，空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。票级覆盖矩阵保留在 impl-log 供 feature 核对。
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
 - `artifact-budget / retention`：限制 impl-log / evidence 行数及 impl / integration 体积；raw / OCR / 截图按 generation manifest 管理。当前、最后成功和被引用证据始终保留，失效代际与 salvage 只能经 `close-and-clean` 预检确认后清理。
 - `integration-runtime`：显式配置开发服务与 verify-instance 的启动、就绪、停止和租约；运行记录绑定 candidate。停止服务、释放租约失败时不得清集成 worktree。
-- `dispatch`：`supervisor-review` 用于主会话监督、符合性与独立评审；`development.default / escalated` 分别用于普通票和集成 / 高风险 / 评审预警后的续修。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
+- `dispatch`：`supervisor-review` 用于主会话监督、feature 独立评审与 feature conformance；`development.default / escalated` 分别用于普通票和集成 / 高风险 / feature 评审 BLOCKER 后的修复票。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
 - `enforcement`：声明评审信任级别与宿主 / 分支 / SHA 能力要求。宿主不能证明独立评审身份时不得冒充 host-verified；非 server-enforced 不得宣称具有服务端分支保护。
 - `ocr.mode`：默认 `delegate`，OCR 只筛文件与规则，由独立宿主对话评审；`local / ci` 为可选增强，必须配置对应端点和 CI。
 
 ## 测试位置
 
-- **票级验证在本票 worktree**：TDD 见红 / 变绿、每条 DoD、fast、单项失败归因、独立评审复测与主会话复跑。merge / close 仍只核 DoD + fast；fast 不经整机槽位包装。
+- **票级验证在本票 worktree**：TDD 见红 / 变绿、每条 DoD、fast 和单项失败归因；票级只跑内环，不跑独立评审、supervisor 复跑或 conformance。fast 不经整机槽位包装。
+- **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。
 - **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
 - **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。
 
@@ -221,7 +221,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
 
-默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），并监督执行直到完成合并。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 / 符合性核对 + 独立评审）与 `development`（独立实现，普通票 default，集成 / 高风险票及评审预警后的续修 escalated）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；票级质量门固定为 DoD + fast，不设 scoped / full 档；完整套件只由分支 / main 的 CI full 执行，本机不补跑。
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），票级内环通过后合入集成分支，全部票 merged/done 后由主会话在 feature candidate 上统一执行一次独立评审与候选复跑。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 + feature 独立评审 / 符合性核对）与 `development`（独立实现，普通票 default，集成 / 高风险票及 feature 评审 BLOCKER 后的修复票 escalated）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审整个 feature diff，无需 LLM 端点）；票级质量门固定为 DoD + fast，不设 scoped / full 档；完整套件只由分支 / main 的 CI full 执行，本机不补跑。
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
@@ -251,12 +251,12 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 4. **main-branch**：默认取探查结果
 5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
 6. **quality-gate**：只配置票级 `fast` 命令，从项目实际测试框架推导后请人确认。实现、自修复、评审回修与 merge / close 都只跑本票 DoD + fast，不设置票级 scoped / full 命令，也不按文件数、LOC 或风险增加票级测试范围
-7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限；`scope: strict` 冻结所有 changed paths，越界重新确认票，不能登记放行。`deny` 列绝对禁止路径；`test-change` 列允许 TDD 与需求驱动更新的测试路径，必须有 runner 见红 / DoD 映射和独立评审闭合；`generated-refresh` 每条声明稳定 ID、输出 glob 和唯一生成命令，流程核对重跑生成器比较 tree。`attribution` 默认 quarantine（入册须 base 同签名、owner / 去向 / 首录日期），可选 two-sided；`gate-scope` 默认 non-gating = perf + display，外部依赖用例显式 skip。**完整套件只有 CI full**，本机与任何 worktree 不补跑；每日回归只能由同一 CI workflow schedule / dispatch 触发
+7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限；`scope: strict` 冻结所有 changed paths，越界重新确认票，不能登记放行。`deny` 列绝对禁止路径；`test-change` 列允许 TDD 与需求驱动更新的测试路径，必须有 runner 见红 / DoD 映射，票级核对后在 feature 级评审统一复核；`generated-refresh` 每条声明稳定 ID、输出 glob 和唯一生成命令，流程核对重跑生成器比较 tree。`attribution` 默认 quarantine（入册须 base 同签名、owner / 去向 / 首录日期），可选 two-sided；`gate-scope` 默认 non-gating = perf + display，外部依赖用例显式 skip。**完整套件只有 CI full**，本机与任何 worktree 不补跑；每日回归只能由同一 CI workflow schedule / dispatch 触发
 8. **host-budget**：整机测试算力预算只用于 local-human 需求收口的关联选择集与单项归因——真源是机器级 `~/.cache/agent-dev/slots/budget.json`：已存在 → 把取值镜像进 agents-config 并用大白话告诉用户当前预算，不问人；不存在 → 推荐默认 `total = ncpu - 2`、`max-runs = 2`、`queue-timeout = 1200`，确认后用 `python3 ../shared/scripts/test_slots.py budget --total ... --max-runs ... --queue-timeout ...` 写入机器级文件并镜像进配置。必须提示人：这是整机预算，同机各仓 / 各会话共享一份，改动对全部项目生效。票级 fast 与 CI full 不使用这份本机预算
 9. **feature-closeout**：默认 `server-enforced`，只有 Step 0 已在线证明服务端能力才可选，并填写 `ci: {provider, base-url, repository, workflow, artifact, token-env}`；CI API 可用但无完整分支保护时可显式选 `cooperative-ci`，报告必须注明无服务端强制；选择 `local-human` 时确认独立集成分支、验收计划、runtime 与可选 Prod 配置，`ci` 必须为 null。main / 候选前进后一律重新 freeze，没有 main-drift-ignore。选择基建只用于需求集成候选，不是票级交付门
 10. **enforcement**：选择评审信任 `host-verified`（宿主真实回执）或 `operator-attested`（人工另开独立对话的协作证明）；宿主无法证明时不得选前者。server-enforced 必须 require-protected-branch + require-expected-sha，其他模式不得冒称这些保证
 11. **max-fix-rounds**：默认 99，可调
-12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督 / 符合性核对与独立评审；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及评审预警后的续修。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified
+12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督、feature 独立评审与符合性核对；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及 feature 评审 BLOCKER 后的修复票。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified
 13. **review-round-alert / base-freeze / generated-refresh / artifact-budget / retention**：默认 3 / true / 空清单 / 120 行 + 20MB / 保留两个代际；派生物按仓库实际生成器逐条确认，raw / OCR / 截图必须有 generation manifest，salvage 只按确认策略清理
 14. **conformance**：默认 `mode: always` + `checker: main-session`。人主动提出抽查时改 `sampled` 并设 `sample-rate`，是否抽中由 gate2 context digest + issue ID 确定性计算，不能由填写者自报 skipped；集成票始终实核。上下文紧张时可改 `dispatched`，仍需真实独立会话回执
 

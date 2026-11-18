@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 import delivery
 import feature_closeout as fc
 import human_decision as hd
+import review_receipt as rr
 import state_store
 
 SCRIPT = SCRIPTS / "feature_closeout.py"
@@ -48,7 +49,7 @@ dispatch:
       development:
         default: {model: provider/dev, effort: medium}
         escalated: {model: provider/dev, effort: high}
-enforcement: {review-trust: operator-attested}
+enforcement: {review-trust: operator-attested, require-host-capabilities: false}
 ```
 """
 
@@ -164,7 +165,9 @@ class FeatureCloseoutTest(unittest.TestCase):
 
     def write_issue(self, status):
         (self.fdir / "issues" / "issue-001-x.md").write_text(
-            f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: {status}\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
+            f"---\nissue-id: issue-001\nfeature-slug: {SLUG}\nstatus: {status}\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n  session_id: impl-1\n  agent: development\n"
+            "tech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
 
     def write_conformance(self, verdict, issue_id="issue-001"):
         tree = sh(self.wt, "rev-parse", "HEAD^{tree}")
@@ -277,10 +280,66 @@ class FeatureCloseoutTest(unittest.TestCase):
             "schema": "agent-dev.feature-business-results/v2", "candidate": self.head,
             "candidate_tree": self.tree, "plan_sha256": self.candidate["acceptance_plan"]["sha256"],
             "environment": {"name": "integration-test"}, "items": items}))
+        self.write_feature_gate()
+
+    def write_feature_gate(self):
+        integ = self.fdir / "integration"
+        report = integ / "feature-review.md"
+        report.write_text("# Feature review\n\nverdict: pass\n", encoding="utf-8")
+        payload = dict(self.candidate)
+        payload.update({
+            "review_round": 1,
+            "reviewer": {
+                "host": "zcode", "agent": "supervisor-review", "session": "review-1",
+                "model": "provider/supervisor", "effort": "high", "role": "review",
+            },
+            "findings": [], "verdict": "pass", "trust": "operator-attested",
+            "attestation": {
+                "operator": "user", "statement": "独立评审已完成，未发现阻断问题。",
+                "confirmed_at": "2026-11-16T00:00:00Z",
+            },
+        })
+        input_path = integ / "feature-review-input.json"
+        input_path.write_text(json.dumps(payload), encoding="utf-8")
+        receipt, errors = rr.create_feature_receipt(
+            self.fdir, self.wt, input_path, report=report,
+            output=integ / "feature-review-receipt.json")
+        if errors:
+            raise AssertionError(errors)
+        self.write_candidate_verification()
+
+    def write_candidate_verification(self):
+        integ = self.fdir / "integration"
+        generation = "candidate-fixture"
+        entries = []
+        for item in self.candidate["issues"]:
+            issue_id = item["id"]
+            directory = integ / "raw" / generation / issue_id
+            directory.mkdir(parents=True, exist_ok=True)
+            evidence = directory / "verification-supervisor.json"
+            evidence.write_text(json.dumps({
+                "issue": issue_id, "head": self.head, "tree": self.tree, "pass": True,
+                "records": [{"id": "DoD-1", "status": "pass"}],
+            }), encoding="utf-8")
+            entries.append({
+                "issue": issue_id, "pass": True,
+                "verification_path": evidence.relative_to(integ).as_posix(),
+                "verification_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                "head": self.head, "tree": self.tree,
+            })
+        (integ / "candidate-verification.json").write_text(json.dumps({
+            "schema": "agent-dev.candidate-verification/v1",
+            "candidate": self.head, "candidate_tree": self.tree,
+            "main_head": self.candidate["main_head"],
+            "plan_sha256": self.candidate["acceptance_plan"]["sha256"],
+            "issues": entries, "all-passed": True, "generated": generation,
+        }), encoding="utf-8")
 
     def add_second_leaf(self):
         (self.fdir / "issues" / "issue-002-y.md").write_text(
-            f"---\nissue-id: issue-002\nfeature-slug: {SLUG}\nstatus: done\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# y\n")
+            f"---\nissue-id: issue-002\nfeature-slug: {SLUG}\nstatus: done\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n  session_id: impl-2\n  agent: development\n"
+            "tech-spec: demo-tech-spec-2026-11-14.md\n---\n# y\n")
         (self.fdir / "impl" / "issue-002").mkdir(parents=True, exist_ok=True)
         (self.fdir / "impl" / "issue-002" / "verification-supervisor.json").write_text(
             json.dumps({"records": [{"id": "DoD-1"}]}), encoding="utf-8")
@@ -336,7 +395,8 @@ coverage:
             lines.append(f"{key}: {encoded}")
         (integ / "confirmation.md").write_text("```yaml\n" + "\n".join(lines) + "\n```\n")
 
-    def ready_local(self):
+    def ready_local(self, status="done"):
+        self.write_issue(status)
         self.assertEqual(self.freeze().returncode, 0)
         self.write_evidence([self.auto_result(), self.human_result(True)])
         self.confirm()
@@ -472,6 +532,20 @@ baseline_ac:
         self.assertEqual(self.candidate["candidate"], self.merged_commit)
         self.assertEqual(self.candidate["acceptance_plan"]["cases"], ["AC-1", "AC-2"])
 
+    def test_feature_gate_checks_graph_once_and_preserves_errors(self):
+        import architecture_graph
+
+        shards = self.wt / "docs" / "architecture"
+        shards.mkdir(parents=True)
+        (shards / "demo.json").write_text("{}", encoding="utf-8")
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        report = fc.Report()
+        with mock.patch.object(architecture_graph, "check", wraps=architecture_graph.check) as check:
+            fc._check_architecture_feature(report, self.wt, self.fdir, [issue], self.merged_commit)
+        check.assert_called_once_with(self.wt, head=self.merged_commit)
+        self.assertTrue(any(item["check"] == "architecture-feature" and item["level"] == "FAIL"
+                            for item in report.items))
+
     def test_freeze_requires_feature_wide_architecture_completion(self):
         spec = self.fdir / "demo-tech-spec-2026-11-14.md"
         spec.write_text("""---
@@ -492,7 +566,7 @@ status: 已确认（待拆解）
         self.assertIn("architecture-feature", result.stdout)
         self.assertIn("demo.entry", result.stdout)
 
-    def test_freeze_requires_done_full_ancestor_and_conform(self):
+    def test_freeze_accepts_merged_or_done_and_requires_full_ancestor(self):
         self.write_issue("in-review")
         self.assertEqual(self.freeze().returncode, 1)
         self.write_issue("done")
@@ -503,8 +577,9 @@ status: 已确认（待拆解）
         self.write_merged(self.merged_commit)
         self.write_conformance("skipped")
         result = self.freeze()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("每票均须 conform", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.candidate["issues"][0]["status"], "done")
+        self.assertNotIn("conformance", self.candidate["issues"][0])
 
     def test_freeze_rejects_non_ancestor_and_active_decision(self):
         sh(self.root, "checkout", "-qb", "other")
@@ -540,12 +615,12 @@ status: 已确认（待拆解）
         self.assertEqual(result.returncode, 1)
         self.assertTrue(any(text in result.stdout for text in ("全过滤", "未知", "deferred")), result.stdout)
 
-    def test_checker_projection_contains_only_required_facts(self):
+    def test_candidate_freezes_only_ticket_identity_and_merged_commit(self):
         self.assertEqual(self.freeze().returncode, 0)
-        projection = self.candidate["issues"][0]["conformance_context"]
-        self.assertEqual(set(projection), set(fc.CHECKER_FIELDS))
-        self.assertEqual(projection["checker"], "main-session")
-        self.assertEqual(set(projection["selection"]), {"algorithm", "rate", "selected"})
+        issue = self.candidate["issues"][0]
+        self.assertEqual(set(issue), {"id", "status", "merged_commit"})
+        self.assertEqual(issue["status"], "done")
+        self.assertEqual(issue["merged_commit"], self.merged_commit)
 
     def test_invalid_legacy_dates_are_not_compared_as_strings(self):
         config = self.root / "dev" / "agents-config.md"
@@ -927,6 +1002,121 @@ status: 已确认（待拆解）
         self.assertEqual(result["merge_commit"], merge_commit)
         events = [line for line in (self.fdir / "progress.jsonl").read_text().splitlines() if '"feature-merged"' in line]
         self.assertEqual(len(events), 1)
+
+    def test_merged_ticket_promotes_to_done_with_accepted_event(self):
+        self.ready_local("merged")
+        self.assertEqual(self.candidate["issues"][0]["status"], "merged")
+        result = self.promote()
+        self.assertTrue(result["finalized"])
+        self.assertTrue(result["cleanup_pending"])
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        self.assertEqual(fc.read_frontmatter(issue)["status"], "done")
+        accepted = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()
+                    if json.loads(line).get("event") == "accepted"]
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0]["issue"], "issue-001")
+        replay = self.run_cli("finalize", "--feature-dir", str(self.fdir), "--repo", str(self.root),
+                              "--no-cleanup")
+        self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+        accepted = [line for line in (self.fdir / "progress.jsonl").read_text().splitlines()
+                    if json.loads(line).get("event") == "accepted"]
+        self.assertEqual(len(accepted), 1)
+
+    def test_check_requires_feature_review_and_candidate_verification(self):
+        self.freeze()
+        self.write_evidence([self.auto_result(), self.human_result(True)])
+        self.report()
+        receipt = self.fdir / "integration" / "feature-review-receipt.json"
+        backup = receipt.read_bytes()
+        receipt.unlink()
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("feature-review", result.stdout)
+        receipt.write_bytes(backup)
+        verification = self.fdir / "integration" / "candidate-verification.json"
+        backup = verification.read_bytes()
+        verification.unlink()
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("candidate-verification", result.stdout)
+
+    def test_check_rejects_ticket_status_tamper_after_freeze(self):
+        self.ready_local()
+        self.write_issue("merged")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("status 在 freeze 后", result.stdout)
+
+    def test_candidate_verification_failure_and_evidence_tamper_block(self):
+        self.ready_local()
+        path = self.fdir / "integration" / "candidate-verification.json"
+        original = json.loads(path.read_text())
+        failed = dict(original, **{"all-passed": False})
+        failed["issues"] = [dict(item, **{"pass": False}) for item in original["issues"]]
+        path.write_text(json.dumps(failed), encoding="utf-8")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("并非全部通过", result.stdout)
+        path.write_text(json.dumps(original), encoding="utf-8")
+        evidence = self.fdir / "integration" / original["issues"][0]["verification_path"]
+        evidence.write_text("{}", encoding="utf-8")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("哈希不匹配", result.stdout)
+
+    def test_feature_review_blocked_verdict_blocks(self):
+        self.ready_local()
+        path = self.fdir / "integration" / "feature-review-receipt.json"
+        receipt = json.loads(path.read_text())
+        receipt["verdict"] = "blocked"
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+        result = self.check("verify", generate_report=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("verdict=blocked", result.stdout)
+
+    def test_finalize_cleanup_removes_ticket_and_feature_resources(self):
+        self.ready_local("merged")
+        ticket_wt = self.root / ".worktrees" / "issue-001"
+        sh(self.root, "branch", "feat/demo-issue-001", self.merged_commit)
+        sh(self.root, "worktree", "add", "-q", str(ticket_wt), "feat/demo-issue-001")
+        self.promote()
+        result = self.run_cli("finalize", "--feature-dir", str(self.fdir), "--repo", str(self.root))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(ticket_wt.exists())
+        branches = sh(self.root, "branch", "--format=%(refname:short)")
+        self.assertNotIn("feat/demo-issue-001", branches.splitlines())
+        self.assertNotIn("feat/demo", branches.splitlines())
+        self.assertFalse(self.wt.exists())
+
+    def test_candidate_verification_tamper_blocks_reauthorization(self):
+        self._crash_before_feature_merge()
+        path = self.fdir / "integration" / "candidate-verification.json"
+        value = json.loads(path.read_text())
+        value["all-passed"] = False
+        value["issues"] = [dict(item, **{"pass": False}) for item in value["issues"]]
+        path.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(delivery.DeliveryError, "并非全部通过"):
+            self.promote()
+        self.assertEqual(sh(self.root, "rev-parse", "HEAD"), self.candidate["main_head"])
+
+    def test_feature_operation_id_binds_review_and_candidate_evidence(self):
+        self.ready_local()
+        candidate = self.candidate
+        evidence = fc.feature_gate_evidence(self.fdir / "integration")
+        first = delivery._feature_operation_id(candidate, None, evidence)
+        changed = dict(evidence, confirmation_sha256="0" * 64)
+        self.assertNotEqual(first, delivery._feature_operation_id(candidate, None, changed))
+
+    def test_changed_confirmation_supersedes_pending_authorization(self):
+        self._crash_before_feature_merge()
+        path = self.fdir / "integration" / "confirmation.md"
+        path.write_text(path.read_text() + "\n", encoding="utf-8")
+        result = self.promote()
+        self.assertEqual(sh(self.root, "rev-parse", "HEAD"), result["merge_commit"])
+        events = [line for line in (self.fdir / "progress.jsonl").read_text().splitlines()
+                  if json.loads(line).get("event") == "feature-merged"]
+        self.assertEqual(len(events), 1)
+        self.assertTrue(list((self.fdir / "integration" / "superseded").glob("*.superseded.json")))
 
     def test_public_record_merge_cli_is_gone(self):
         result = self.run_cli("record-merge", "--feature-dir", str(self.fdir), "--repo", str(self.root), "--commit", "HEAD")

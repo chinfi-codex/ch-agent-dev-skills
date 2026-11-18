@@ -30,7 +30,7 @@ allowed-tools:
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。
 
-默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），并监督执行直到完成合并。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 / 符合性核对 + 独立评审）与 `development`（独立实现，普通票 default，集成 / 高风险票及评审预警后的续修 escalated）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审，无需 LLM 端点）；票级质量门固定为 DoD + fast，不设 scoped / full 档；完整套件只由分支 / main 的 CI full 执行，本机不补跑。
+默认形态（落进配置，不逐项问）：**执行与评审都在当前 agent 内完成**——issue 生成后由主会话通过宿主 agent 的「新开独立对话」能力自动派发实现（`dispatch.executor: subagent`），票级内环通过后合入集成分支，全部票 merged/done 后由主会话在 feature candidate 上统一执行一次独立评审与候选复跑。`dispatch.hosts` 按宿主分别配置 `supervisor-review`（主会话监督 + feature 独立评审 / 符合性核对）与 `development`（独立实现，普通票 default，集成 / 高风险票及 feature 评审 BLOCKER 后的修复票 escalated）的 `model + effort`；Step 1 逐宿主由人确认，原生角色文件由统一渲染器生成。评审默认 `ocr.mode: delegate`（ocr 只筛文件 / 解析规则，新开的独立对话评审整个 feature diff，无需 LLM 端点）；票级质量门固定为 DoD + fast，不设 scoped / full 档；完整套件只由分支 / main 的 CI full 执行，本机不补跑。
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
@@ -60,12 +60,12 @@ allowed-tools:
 4. **main-branch**：默认取探查结果
 5. **repo-level**：A（飞行软件 / 涉密，禁止 /implement）/ B（型号配套工具）/ C（内部效率工具）——按仓库定级，不由本 skill 推断默认
 6. **quality-gate**：只配置票级 `fast` 命令，从项目实际测试框架推导后请人确认。实现、自修复、评审回修与 merge / close 都只跑本票 DoD + fast，不设置票级 scoped / full 命令，也不按文件数、LOC 或风险增加票级测试范围
-7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限；`scope: strict` 冻结所有 changed paths，越界重新确认票，不能登记放行。`deny` 列绝对禁止路径；`test-change` 列允许 TDD 与需求驱动更新的测试路径，必须有 runner 见红 / DoD 映射和独立评审闭合；`generated-refresh` 每条声明稳定 ID、输出 glob 和唯一生成命令，流程核对重跑生成器比较 tree。`attribution` 默认 quarantine（入册须 base 同签名、owner / 去向 / 首录日期），可选 two-sided；`gate-scope` 默认 non-gating = perf + display，外部依赖用例显式 skip。**完整套件只有 CI full**，本机与任何 worktree 不补跑；每日回归只能由同一 CI workflow schedule / dispatch 触发
+7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限；`scope: strict` 冻结所有 changed paths，越界重新确认票，不能登记放行。`deny` 列绝对禁止路径；`test-change` 列允许 TDD 与需求驱动更新的测试路径，必须有 runner 见红 / DoD 映射，票级核对后在 feature 级评审统一复核；`generated-refresh` 每条声明稳定 ID、输出 glob 和唯一生成命令，流程核对重跑生成器比较 tree。`attribution` 默认 quarantine（入册须 base 同签名、owner / 去向 / 首录日期），可选 two-sided；`gate-scope` 默认 non-gating = perf + display，外部依赖用例显式 skip。**完整套件只有 CI full**，本机与任何 worktree 不补跑；每日回归只能由同一 CI workflow schedule / dispatch 触发
 8. **host-budget**：整机测试算力预算只用于 local-human 需求收口的关联选择集与单项归因——真源是机器级 `~/.cache/agent-dev/slots/budget.json`：已存在 → 把取值镜像进 agents-config 并用大白话告诉用户当前预算，不问人；不存在 → 推荐默认 `total = ncpu - 2`、`max-runs = 2`、`queue-timeout = 1200`，确认后用 `python3 ../shared/scripts/test_slots.py budget --total ... --max-runs ... --queue-timeout ...` 写入机器级文件并镜像进配置。必须提示人：这是整机预算，同机各仓 / 各会话共享一份，改动对全部项目生效。票级 fast 与 CI full 不使用这份本机预算
 9. **feature-closeout**：默认 `server-enforced`，只有 Step 0 已在线证明服务端能力才可选，并填写 `ci: {provider, base-url, repository, workflow, artifact, token-env}`；CI API 可用但无完整分支保护时可显式选 `cooperative-ci`，报告必须注明无服务端强制；选择 `local-human` 时确认独立集成分支、验收计划、runtime 与可选 Prod 配置，`ci` 必须为 null。main / 候选前进后一律重新 freeze，没有 main-drift-ignore。选择基建只用于需求集成候选，不是票级交付门
 10. **enforcement**：选择评审信任 `host-verified`（宿主真实回执）或 `operator-attested`（人工另开独立对话的协作证明）；宿主无法证明时不得选前者。server-enforced 必须 require-protected-branch + require-expected-sha，其他模式不得冒称这些保证
 11. **max-fix-rounds**：默认 99，可调
-12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督 / 符合性核对与独立评审；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及评审预警后的续修。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified
+12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督、feature 独立评审与符合性核对；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及 feature 评审 BLOCKER 后的修复票。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified
 13. **review-round-alert / base-freeze / generated-refresh / artifact-budget / retention**：默认 3 / true / 空清单 / 120 行 + 20MB / 保留两个代际；派生物按仓库实际生成器逐条确认，raw / OCR / 截图必须有 generation manifest，salvage 只按确认策略清理
 14. **conformance**：默认 `mode: always` + `checker: main-session`。人主动提出抽查时改 `sampled` 并设 `sample-rate`，是否抽中由 gate2 context digest + issue ID 确定性计算，不能由填写者自报 skipped；集成票始终实核。上下文紧张时可改 `dispatched`，仍需真实独立会话回执
 

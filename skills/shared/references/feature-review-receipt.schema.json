@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.feature-review-receipt/v1",
+  "title": "Independent feature review receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "feature", "integration_branch", "base", "head", "tree", "merge_base",
+    "diff_sha256", "plan_sha256", "report_sha256", "process_check_sha256", "verdict",
+    "findings", "total_files", "reviewed_files", "skipped_files", "coverage", "round",
+    "previous_receipt_sha256", "implementers", "reviewer", "trust", "attestation",
+    "host_verification", "artifacts", "created_at"
+  ],
+  "properties": {
+    "schema": {"const": "agent-dev.feature-review-receipt/v1"},
+    "feature": {"type": "string", "minLength": 1},
+    "integration_branch": {"type": "string", "minLength": 1},
+    "base": {"type": "string", "format": "git-sha"},
+    "head": {"type": "string", "format": "git-sha"},
+    "tree": {"type": "string", "format": "git-sha"},
+    "merge_base": {"type": "string", "format": "git-sha"},
+    "diff_sha256": {"type": "string", "format": "sha256"},
+    "plan_sha256": {"type": "string", "format": "sha256"},
+    "report_sha256": {"type": "string", "format": "sha256"},
+    "process_check_sha256": {
+      "anyOf": [{"type": "null"}, {"type": "string", "format": "sha256"}]
+    },
+    "verdict": {"enum": ["pass", "pass-with-notes", "blocked"]},
+    "findings": {"type": "array", "items": {"$ref": "#/definitions/finding"}},
+    "total_files": {"type": "integer", "minimum": 0},
+    "reviewed_files": {"type": "integer", "minimum": 0},
+    "skipped_files": {"type": "integer", "minimum": 0},
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preview", "files"],
+      "properties": {
+        "preview": {
+          "anyOf": [{"type": "null"}, {"$ref": "#/definitions/artifact"}]
+        },
+        "files": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/coverage_file"},
+          "uniqueItems": true
+        }
+      }
+    },
+    "round": {"type": "integer", "minimum": 1},
+    "previous_receipt_sha256": {
+      "anyOf": [{"type": "null"}, {"type": "string", "format": "sha256"}]
+    },
+    "previous_receipt": {
+      "anyOf": [{"type": "null"}, {"$ref": "#/definitions/artifact"}]
+    },
+    "implementers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/implementer"}
+    },
+    "reviewer": {"$ref": "#/definitions/identity"},
+    "trust": {"enum": ["host-verified", "operator-attested"]},
+    "attestation": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operator", "statement", "confirmed_at"],
+          "properties": {
+            "operator": {"type": "string", "minLength": 1},
+            "statement": {"type": "string", "minLength": 1},
+            "confirmed_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      ]
+    },
+    "host_verification": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["verified", "host", "session", "proof", "proof_sha256"],
+          "properties": {
+            "verified": {"const": true},
+            "host": {"type": "string", "minLength": 1},
+            "session": {"type": "string", "minLength": 1},
+            "proof": {"type": "string", "minLength": 1},
+            "proof_sha256": {"type": "string", "format": "sha256"},
+            "review_action": {"$ref": "#/definitions/review_action"}
+          }
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report", "process_check"],
+      "properties": {
+        "report": {"$ref": "#/definitions/artifact"},
+        "process_check": {
+          "anyOf": [{"type": "null"}, {"$ref": "#/definitions/artifact"}]
+        }
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "definitions": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "format": "sha256"}
+      }
+    },
+    "coverage_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status", "reason"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "status": {"enum": ["reviewed", "skipped"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "implementer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "agent", "session"],
+      "properties": {
+        "issue": {"type": "string", "minLength": 1},
+        "host": {"type": "string", "minLength": 1},
+        "agent": {"type": "string", "minLength": 1},
+        "session": {"type": "string", "minLength": 1}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "agent", "session", "model", "effort", "role"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "agent": {"type": "string", "minLength": 1},
+        "session": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "effort": {"type": "string", "minLength": 1},
+        "role": {"enum": ["development", "supervisor", "review"]},
+        "tier": {"enum": ["default", "escalated"]}
+      }
+    },
+    "review_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id", "round", "feature", "candidate", "head", "tree",
+        "main_head", "report_sha256", "context_digest"
+      ],
+      "properties": {
+        "review_id": {"type": "string", "minLength": 1},
+        "round": {"type": "integer", "minimum": 1},
+        "feature": {"type": "string", "minLength": 1},
+        "candidate": {"type": "string", "format": "git-sha"},
+        "head": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "main_head": {"type": "string", "format": "git-sha"},
+        "issue": {"type": "string", "minLength": 1},
+        "report_sha256": {"type": "string", "format": "sha256"},
+        "context_digest": {"type": "string", "format": "sha256"}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "status", "location", "message", "closure"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "status": {"enum": ["open", "closed"]},
+        "location": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "closure": {"type": "string"}
+      }
+    }
+  }
+}

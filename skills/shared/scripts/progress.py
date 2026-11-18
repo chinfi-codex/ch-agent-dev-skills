@@ -40,22 +40,26 @@ SKIP_DIRS = {
     "dist", "build", ".next", ".turbo", "coverage",
 }
 
-STATUS_ORDER = ["needs-human", "in-progress", "in-review", "mr-submitted", "confirmed", "proposed"]
+STATUS_ORDER = ["needs-human", "in-progress", "in-review", "mr-submitted", "merged", "confirmed", "proposed"]
 STATUS_LABEL = {
     "proposed": "待确认",
     "confirmed": "可派发",
     "in-progress": "在跑",
     "in-review": "评审中",
     "mr-submitted": "待合并",
+    "merged": "已合入待验收",
     "needs-human": "等人",
-    "done": "已合并",
+    "done": "已验收",
 }
 # 真实仓库的状态词变体 → 规范词（pandu 503 票实测）
 CLOSED_ALIASES = {"done-review", "done-human", "superseded", "cancelled", "deferred"}
 STATUS_ALIAS = {"implementing": "in-progress", "review-pending": "in-review", "analysis": "confirmed"}
 ISSUE_ID_RE = re.compile(r"issue-\d+[a-z0-9]*", re.I)
-# 开发中泳道：在制口径只看票状态；会话暂停 / 分支存在不参与需求级判定
-CANON_STATUSES = ("in-progress", "in-review", "mr-submitted", "needs-human")
+# 开发中泳道：在制口径只看票状态；会话暂停 / 分支存在不参与需求级判定。
+# merged 已合入集成分支但 feature candidate 尚未验收，故仍属于开发中。
+CANON_STATUSES = ("in-progress", "in-review", "mr-submitted", "merged", "needs-human")
+# blocked-by/frontier 的完成口径：merged 表示已进入集成分支，done 表示 feature 已验收。
+DEPENDENCY_SATISFIED = ("merged", "done")
 BRANCH_HOSTS = {"claude", "codex", "zcode", "deepseek"}
 EXTERNAL_BODY_RE = re.compile(
     r"(?:外部前置|外部依赖)\s*(?:[①②③④0-9]+\s*)?[：:]\s*"
@@ -326,7 +330,7 @@ def rel_age(minutes):
 
 def load_issues(repo, feature_dir, events, wt_index=None):
     issues = []
-    done_ids = set()
+    satisfied_ids = set()
     raw = []
     for f in sorted((feature_dir / "issues").glob("*.md")):
         fm = parse_frontmatter(f)
@@ -348,11 +352,13 @@ def load_issues(repo, feature_dir, events, wt_index=None):
             "verify_fails": fm.get("verify-fails", 0) or 0,
             "fm": fm,
         }
-        if it["status"] == "done" and not closed_as:
-            done_ids.add(it["id"])  # 退役/取消不等于完成，不解锁下游依赖
+        if it["status"] in DEPENDENCY_SATISFIED and not closed_as:
+            # merged 已合入集成分支、done 已通过 feature 验收；两者都解锁下游。
+            # 退役/取消（映射为 done 但带 closed_as）不等于完成，不解锁依赖。
+            satisfied_ids.add(it["id"])
         raw.append(it)
     for it in raw:
-        if it["status"] in ("in-progress", "in-review", "mr-submitted", "needs-human"):
+        if it["status"] in ("in-progress", "in-review", "mr-submitted", "merged", "needs-human"):
             ev = last_event(events, it["id"], "dispatch")
             it["dispatch"] = dispatch_desc(ev)
             it["dispatch_n"] = dispatch_count(events, it["id"])
@@ -372,8 +378,14 @@ def load_issues(repo, feature_dir, events, wt_index=None):
             ev = last_event(events, it["id"], "mr-submitted")
             it["mr"] = ev.get("note", "") if ev else ""
             it["mr_ts"] = ev.get("ts") if ev else None
+        if it["status"] == "merged":
+            # 票已合入目标集成分支；worktree/branch 保留到 feature finalize。
+            ev = last_event(events, it["id"], "merged")
+            it["merged_target"] = (ev or {}).get("target") or ""
+            it["merged_commit"] = (ev or {}).get("commit") or ""
+            it["merged_ts"] = (ev or {}).get("ts") if ev else None
         if it["status"] == "confirmed":
-            it["ready"] = all(b in done_ids for b in it["blocked_by"])
+            it["ready"] = all(b in satisfied_ids for b in it["blocked_by"])
         reviews = feature_dir / "reviews"
         if reviews.is_dir():
             it["review_rounds"] = len(list(reviews.glob(f"{it['id']}*/*.md")))
@@ -386,7 +398,8 @@ def load_issues(repo, feature_dir, events, wt_index=None):
 def issue_line(it, now, stall_min):
     st = it["status"]
     mark = {"needs-human": "●等人  ", "in-progress": "●在跑  ", "in-review": "●评审  ",
-            "mr-submitted": "●待合并", "confirmed": "●可派发", "proposed": "●待确认"}.get(st, "●?     ")
+            "mr-submitted": "●待合并", "merged": "●待验收", "confirmed": "●可派发",
+            "proposed": "●待确认"}.get(st, "●?     ")
     head = f"  {mark}  {it['id']}"
     bits = []
     if st == "in-progress":
@@ -415,6 +428,14 @@ def issue_line(it, now, stall_min):
             if t:
                 bits.append(f"{rel_age((now - t) / 60)}前进入合并队列")
         bits.append("等监督收口")
+    elif st == "merged":
+        target = it.get("merged_target") or "集成分支"
+        bits.append(f"已合入 {target}")
+        if it.get("merged_ts"):
+            t = parse_ts(it["merged_ts"])
+            if t:
+                bits.append(f"{rel_age((now - t) / 60)}前合入")
+        bits.append("等 feature 验收")
     elif st == "needs-human":
         if it.get("review_rounds"):
             bits.append(f"评审第 {it['review_rounds']} 轮")
@@ -445,7 +466,8 @@ def issue_line(it, now, stall_min):
 def status_command(args):
     projects = resolve_projects(args)
     now = time.time()
-    project_chunks, fleet = [], {"total": 0, "done": 0, "run": 0, "review": 0, "mr": 0, "human": 0, "ready": 0}
+    project_chunks, fleet = [], {"total": 0, "done": 0, "merged": 0, "run": 0,
+                                 "review": 0, "mr": 0, "human": 0, "ready": 0}
     for name, repo in projects:
         if args.project and name != args.project:
             continue
@@ -456,11 +478,14 @@ def status_command(args):
         for k in fleet:
             fleet[k] += c.get(k, 0)
     if len(project_chunks) > 1:
-        merged = fleet["done"] + fleet["run"] + fleet["review"] + fleet["mr"] + fleet["human"] + fleet["ready"]
-        other = fleet["total"] - merged
+        shown = (fleet["done"] + fleet["merged"] + fleet["run"] + fleet["review"]
+                 + fleet["mr"] + fleet["human"] + fleet["ready"])
+        other = fleet["total"] - shown
         bits = [f"{fleet['total']} 票"]
         if fleet["done"]:
-            bits.append(f"{fleet['done']} 已合并")
+            bits.append(f"{fleet['done']} 已验收")
+        if fleet["merged"]:
+            bits.append(f"{fleet['merged']} 待验收")
         if fleet["run"]:
             bits.append(f"{fleet['run']} 在跑")
         if fleet["review"]:
@@ -482,7 +507,8 @@ def render_project(name, repo, stall_min, now):
     if not feats:
         return None, {}
     out = [f"【{name}】"]
-    c = {"total": 0, "done": 0, "run": 0, "review": 0, "mr": 0, "human": 0, "ready": 0, "other": 0}
+    c = {"total": 0, "done": 0, "merged": 0, "run": 0, "review": 0, "mr": 0,
+         "human": 0, "ready": 0, "other": 0}
     wt_index = worktree_index(repo)
     for feat in feats:
         events = load_events(feat)
@@ -492,7 +518,7 @@ def render_project(name, repo, stall_min, now):
             cf["total"] += 1
             c["total"] += 1
             s = it["status"]
-            key = {"done": "done", "in-progress": "run", "in-review": "review",
+            key = {"done": "done", "merged": "merged", "in-progress": "run", "in-review": "review",
                    "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(s, "other")
             cf[key] += 1
             c[key] += 1
@@ -505,11 +531,13 @@ def render_project(name, repo, stall_min, now):
                 continue  # 大仓取舍：未就绪的待派发票只进计数，不占行
             lines.append(issue_line(it, now, stall_min)[0])
         if cf["total"] and cf["total"] == cf["done"]:
-            out.append(f"{slug} —— {cf['total']} 票全部合并，无遗留。整体正常，无需干预。")
+            out.append(f"{slug} —— {cf['total']} 票全部验收，无遗留。整体正常，无需干预。")
             continue
         parts = []
         if cf["done"]:
-            parts.append(f"{cf['done']} 已合并")
+            parts.append(f"{cf['done']} 已验收")
+        if cf["merged"]:
+            parts.append(f"{cf['merged']} 已合入待验收")
         if cf["mr"]:
             parts.append(f"{cf['mr']} 待合并")
         if cf["run"]:
@@ -739,6 +767,8 @@ def tree_command(args):
             return (3, row[0])
         if it["status"] == "done":
             return (2, row[0])
+        if it["status"] == "merged":
+            return (1, row[0])
         if it["status"] == "mr-submitted":
             return (1, row[0])
         return (0, row[0])
@@ -896,7 +926,9 @@ def fmt_event(ev, now):
             detail.append(f"（第 {ev['attempts']} 次）")
     elif name == "verify-fail":
         detail.append(f"第 {ev.get('n', '?')} 次")
-    elif name in ("merged", "feature-merged"):
+    elif name in ("merged", "feature-merged", "accepted"):
+        if ev.get("target"):
+            detail.append(str(ev["target"]))
         if ev.get("commit"):
             detail.append(ev["commit"])
     elif name in ("feature-verified", "feature-confirmed"):
@@ -1244,8 +1276,8 @@ def build_tree_payload(repo, stall_min, now=None):
     分支父子用 git 祖先链（最深祖先），票吃掉自己的在途分支元数据。"""
     from datetime import datetime
     now = now or time.time()
-    KEYS = ["total", "done", "run", "review", "mr", "human", "ready"]
-    CANON = ["in-progress", "in-review", "mr-submitted", "needs-human"]
+    KEYS = ["total", "done", "merged", "run", "review", "mr", "human", "ready"]
+    CANON = ["in-progress", "in-review", "mr-submitted", "merged", "needs-human"]
     CANON_S = set(CANON)
 
     main = detect_main_branch(repo)
@@ -1278,6 +1310,8 @@ def build_tree_payload(repo, stall_min, now=None):
             r["protected"] = True
         elif it and it["status"] == "done":
             r["hint"] = "done_residue"
+        elif it and it["status"] == "merged":
+            r["hint"] = "merged"
         elif not mt and r["worktree"]:
             r["hint"] = "integration"
             r["protected"] = True
@@ -1297,7 +1331,7 @@ def build_tree_payload(repo, stall_min, now=None):
             continue
         if r["hint"] == "residue":
             residue["backup" if r["name"].startswith("backup/") else "other"] += 1
-        elif r["worktree"] or r["hint"] == "integration":
+        elif r["worktree"] or r["hint"] in ("integration", "merged"):
             brows.append(r)
         elif r["hint"] == "done_residue":
             residue["done"] += 1
@@ -1311,7 +1345,8 @@ def build_tree_payload(repo, stall_min, now=None):
     inspect_branches(repo, main, active_records)
 
     def sev_of(s):
-        return {"needs-human": 0, "in-progress": 1, "mr-submitted": 2, "in-review": 3}.get(s, 9)
+        return {"needs-human": 0, "in-progress": 1, "mr-submitted": 2,
+                "in-review": 3, "merged": 4}.get(s, 9)
 
     fnodes = []
     for feat, events, issues in features:
@@ -1326,7 +1361,7 @@ def build_tree_payload(repo, stall_min, now=None):
             + [tk[it["key"]]["name"] for it in inflight if it["key"] in tk and tk[it["key"]]]))
         anc = {n: set() for n in rel}
         # 只需为在途/集成子节点找父；64 个 done 残留之间不做无意义的两两拓扑检查
-        active_children = ({r["name"] for r in fbrs if r["hint"] in ("live", "integration")}
+        active_children = ({r["name"] for r in fbrs if r["hint"] in ("live", "integration", "merged")}
                            | {tk[it["key"]]["name"] for it in inflight
                               if it["key"] in tk and tk[it["key"]]})
         pairs = [(a, b) for b in rel if b in active_children for a in rel if a != b]
@@ -1349,7 +1384,7 @@ def build_tree_payload(repo, stall_min, now=None):
         counts = dict.fromkeys(KEYS, 0)
         counts["total"] = len(issues)
         for it in issues:
-            k = {"done": "done", "in-progress": "run", "in-review": "review",
+            k = {"done": "done", "merged": "merged", "in-progress": "run", "in-review": "review",
                  "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(it["status"])
             if k:
                 counts[k] += 1
@@ -1382,7 +1417,7 @@ def build_tree_payload(repo, stall_min, now=None):
             nodes_by_name[r["name"]] = {"kind": "branch", "name": r["name"], "iid": r["iid"],
                                         "resolved_key": r.get("resolved_key"), "protected": bool(r.get("protected")),
                                         "feature": slug, "status": r["status"],
-                                        "hint": "集成" if r["hint"] == "integration" else "残留可删",
+                                        "hint": {"integration": "集成", "merged": "已合入保留"}.get(r["hint"], "残留可删"),
                                         "ahead": r["ahead"], "behind": r["behind"], "dirty": r["dirty"],
                                         "ts": r["ts"], "children": []}
         top = []
@@ -1411,7 +1446,7 @@ def build_tree_payload(repo, stall_min, now=None):
         if r["feature"] is None:
             fnodes.append({"kind": "branch", "name": r["name"], "iid": r["iid"], "status": r["status"],
                            "resolved_key": r.get("resolved_key"), "protected": bool(r.get("protected")),
-                           "hint": "集成" if r["hint"] == "integration" else "",
+                           "hint": {"integration": "集成", "merged": "已合入保留"}.get(r["hint"], ""),
                            "ahead": r["ahead"], "behind": r["behind"], "dirty": r["dirty"], "ts": r["ts"],
                            "children": []})
 
@@ -1471,17 +1506,30 @@ def _split_external_ref(ref):
     return ref, None
 
 
+def _event_ts(ev):
+    if not ev:
+        return None
+    ts = ev.get("_ts") or parse_ts(ev.get("ts"))
+    if not ts and ev.get("ts"):
+        try:
+            ts = datetime.fromisoformat(str(ev["ts"]).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            ts = None
+    return ts
+
+
 def _done_ts(events, issue_id, text):
-    """完结时间：merged 事件 ts 优先，回退票 status 行内注释日期（`done  # 2026-10-12 合并…`）。
-    两者都没有返回 None——由 UI 按「未知即过期」处理。"""
+    """完结时间：accepted（feature 验收）优先；历史 done 票回退 merged 事件；
+    再回退票 status 行内注释日期（`done  # 2026-10-12 合并…`）。
+    三者都没有返回 None——由 UI 按「未知即过期」处理。"""
+    ev = last_event(events, issue_id, "accepted")
+    if ev:
+        ts = _event_ts(ev)
+        if ts:
+            return ts
     ev = last_event(events, issue_id, "merged")
     if ev:
-        ts = ev.get("_ts") or parse_ts(ev.get("ts"))
-        if not ts and ev.get("ts"):
-            try:
-                ts = datetime.fromisoformat(str(ev["ts"]).replace("Z", "+00:00")).timestamp()
-            except ValueError:
-                ts = None
+        ts = _event_ts(ev)
         if ts:
             return ts
     m = re.search(r"^status:\s*done[^\n]*?(\d{4}-\d{2}-\d{2})", text or "", re.M)
@@ -1555,11 +1603,12 @@ def build_swim_payload(repo, now=None, sessions=None):
 
     features_out, issues_by_uid, it_by_uid = [], {}, {}
     for feature_id, feat, events, rows in meta:
-        counts = dict.fromkeys(("total", "done", "run", "review", "mr", "human", "ready", "other"), 0)
+        counts = dict.fromkeys(("total", "done", "merged", "run", "review", "mr",
+                                "human", "ready", "other"), 0)
         counts["total"] = len(rows)
         fissues = []
         for it in rows:
-            k = {"done": "done", "in-progress": "run", "in-review": "review",
+            k = {"done": "done", "merged": "merged", "in-progress": "run", "in-review": "review",
                  "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(it["status"], "other")
             counts[k] += 1
             agents, branch = agent_rows(it, events)
@@ -1575,6 +1624,10 @@ def build_swim_payload(repo, now=None, sessions=None):
                     "human_note": it.get("human_note", ""),
                     "decision": it.get("decision"), "contract_error": it.get("contract_error"),
                     "review_rounds": it.get("review_rounds", 0)}
+            if it["status"] == "merged":
+                node["merged_ts"] = _event_ts(last_event(events, it["id"], "merged"))
+                node["merged_target"] = it.get("merged_target") or ""
+                node["merged_commit"] = it.get("merged_commit") or ""
             if it["status"] == "done":
                 try:
                     txt = Path(it["issue_path"]).read_text(encoding="utf-8", errors="replace")
@@ -1714,7 +1767,10 @@ def _summary_facts(payload):
         if not f["active"]:
             continue
         c = f["counts"]
-        lines.append(f"需求 {f['slug']}（{f['module']}）：{c.get('done', 0)}/{c.get('total', 0)} 完结")
+        progress = f"{c.get('done', 0)}/{c.get('total', 0)} 已验收"
+        if c.get("merged"):
+            progress += f"，{c['merged']} 已合入待验收"
+        lines.append(f"需求 {f['slug']}（{f['module']}）：{progress}")
         for i in f["issues"]:
             if i["status"] not in CANON_STATUSES and i["status"] != "confirmed":
                 continue
@@ -1876,7 +1932,8 @@ def cleanup_plan(repo, branch=None, issue=None, feature_dir=None, intent="close"
             if not match:
                 continue
             child = resolve_ticket(tix_multi, match.group(0).lower(), other)
-            if not child or child["status"] not in {"in-progress", "in-review", "mr-submitted", "needs-human", "confirmed"}:
+            if not child or child["status"] not in {"in-progress", "in-review", "mr-submitted",
+                                                    "merged", "needs-human", "confirmed"}:
                 continue
             result = git_run(repo, "merge-base", "--is-ancestor", plan["branch"], other)
             if result and result.returncode == 0:

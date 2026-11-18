@@ -3,12 +3,12 @@ feature-slug: <feature-slug>
 issue-id: issue-001
 title: <一句话标题，动词开头>
 type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5
-status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / needs-human / done / deferred / cancelled
-blocked-by: []          # 例如 [issue-001]；只有 done 会解锁下游
+status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / merged / needs-human / done / deferred / cancelled
+blocked-by: []          # 例如 [issue-001]；merged（已合入集成分支）或 done（feature 已验收）解锁下游
 target-branch:          # 可空：由 delivery start 通过 ticket_context 解析并冻结；local-human 不得指向 main
 declared-scope: []      # 预计触碰的所有代码 / 测试 / 配置 / 架构分片路径；开工后不可自行扩大
 architecture-updates: [] # 本票承接的架构稳定 ID；须与 tech-spec 3.2 逐条对账，无契约变更为空
-verify-fails: 0         # 主会话验收复跑 / 符合性打回计数；达 2 创建 human-decision
+verify-fails: 0         # 票级门禁 / feature 候选门打回计数；达 2 创建 human-decision
 dispatch:               # 派发归属，主会话派发时写入（见 Progress Events 契约）；未派发票留空
   host:                 # 执行宿主
   model:                # 实际执行模型
@@ -33,7 +33,7 @@ created: YYYY-MM-DD
 - [ ] `<验收命令>` → 退出码 `<整数>`
 - [ ] `<验收命令>` → 退出码 `<整数>`；期望输出 `<关键输出子串>`
 
-（每条必须是可直接执行的命令 + 明确的期望退出码；期望输出可选，省略时不做输出断言，禁止「功能正常」「体验符合预期」类表述。契约更新条目同样可判定：本票 `architecture-updates` 非空时，承接票须含 `python3 ../shared/scripts/architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD` → 退出码 `0`；稳定 ID、分片、代码证据与生成首页必须一致。）
+（每条必须是可直接执行的命令 + 明确的期望退出码；期望输出可选，省略时不做输出断言，禁止「功能正常」「体验符合预期」类表述。实现后的 DoD 不要求架构、图谱或契约巡检。）
 
 ## 人工确认项（不阻塞交付）
 

@@ -235,7 +235,8 @@ class ProcessCheckV2Test(unittest.TestCase):
     def test_status_dispatch_and_verify_fail_phases_keep_context_valid_without_mocks(self):
         original = self.issue.read_text(encoding="utf-8")
         digest = self.context["gate2_context_digest"]
-        for index, phase in enumerate(("confirmed", "start", "in-progress", "in-review", "mr-submitted", "done")):
+        for index, phase in enumerate(("confirmed", "start", "in-progress", "in-review",
+                                       "mr-submitted", "merged", "done")):
             with self.subTest(phase=phase):
                 text = original.replace("status: in-progress", "status: " + phase)
                 text = text.replace("created: 2026-11-14",
@@ -333,6 +334,8 @@ class ProcessCheckV2Test(unittest.TestCase):
         self.assertEqual(result["production-loc"], 2)
 
     def test_merge_requires_supervisor_and_review_receipt(self):
+        # Legacy diagnostic path retained: delivery no longer calls merge, but
+        # the explicit compatibility phase still requires the full evidence set.
         (self.impl / "verification-supervisor.json").unlink()
         code, out = self.check("merge")
         self.assertEqual(code, 1)
@@ -342,6 +345,51 @@ class ProcessCheckV2Test(unittest.TestCase):
         code, out = self.check("merge")
         self.assertEqual(code, 1)
         self.assertIn("review receipt missing", out)
+
+    def test_ticket_phase_passes_without_supervisor_receipt_or_conformance(self):
+        (self.impl / "verification-supervisor.json").unlink()
+        self.receipt_path.unlink()
+        self.conformance.unlink()
+        # Re-run the implementer so its generation is current and the evidence
+        # rendering belongs to the only remaining runner.
+        self.run_verify("implementer")
+        code, out = self.check("ticket")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("verification-supervisor", out)
+        self.assertNotIn("review receipt", out)
+        self.assertNotIn("[FAIL] conformance", out)
+
+    def test_ticket_phase_requires_implementer_and_active_decision_blocks(self):
+        (self.impl / "verification-implementer.json").unlink()
+        code, out = self.check("ticket")
+        self.assertEqual(code, 1)
+        self.assertIn("verification JSON missing", out)
+        self.run_verify("implementer")
+        self.human.active_for_issue = lambda repo, feature, issue: [{"id": "D-1"}]
+        code, out = self.check("ticket", direct=False)
+        self.assertEqual(code, 1)
+        self.assertIn("active human decision", out)
+
+    def test_ticket_phase_runs_inner_checks_but_not_feature_conformance(self):
+        with mock.patch.object(pc, "_check_conformance", side_effect=AssertionError("must not run")), \
+                mock.patch.object(pc, "_load_receipt", side_effect=AssertionError("must not run")), \
+                mock.patch.object(pc, "_validate_verification", wraps=pc._validate_verification) as validate:
+            code, out = self.check("ticket", direct=False)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("architecture", out)
+        runners = [call.args[5] for call in validate.call_args_list]
+        self.assertEqual(["implementer"], runners)
+
+    def test_ticket_phase_existing_test_mapping_needs_no_receipt_closure(self):
+        self.prepare_existing_test_change()
+        mapping = self.existing_test_mapping()
+        self.log.write_text(LOG + "\n```json\n" + json.dumps({"test-changes": [mapping]}) + "\n```\n",
+                            encoding="utf-8")
+        # The receipt from setUp is now stale and must not be consulted.
+        code, out = self.check("ticket")
+        self.assertEqual(code, 0, out)
+        self.assertIn("[REVIEW] test-change", out)
+        self.assertNotIn("review-receipt", out)
 
     def test_added_test_requires_structured_red_record(self):
         (self.root / "tests/test_new.py").write_text("assert True\n", encoding="utf-8")
@@ -609,6 +657,10 @@ class ProcessCheckV2Test(unittest.TestCase):
         self.assertEqual(code, 0)
         self.run_verify("implementer")
         code, out = self.check("review")
+        self.assertEqual(code, 0, out)
+        # Ticket phase binds bug proof to the implementer only; supervisor
+        # binding and receipt closure remain feature-level diagnostics.
+        code, out = self.check("ticket")
         self.assertEqual(code, 0, out)
         self.run_verify("supervisor")
         self.assertEqual(self.make_receipt(), [])

@@ -11,6 +11,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -60,6 +61,26 @@ def _git(repo, *args, text=False):
         ["git", "-C", str(repo), *args], capture_output=True,
         text=text, timeout=30,
     )
+
+
+def _ticket_document_root(repo, issue):
+    """Read shared ticket documents at the registered primary checkout only."""
+    import ticket_context
+    repo = Path(repo).resolve()
+    shared = repo / "dev"
+    if not shared.is_symlink():
+        return repo
+    listing = _git(repo, "worktree", "list", "--porcelain", "-z", text=True)
+    first = listing.stdout.split("\0", 1)[0]
+    if listing.returncode or not first.startswith("worktree "):
+        raise ticket_context.ContextError("cannot determine primary worktree dev")
+    primary = Path(first[len("worktree "):]).resolve()
+    expected = primary / "dev"
+    if primary == repo or not expected.is_dir() or expected.resolve() != expected or shared.resolve() != expected:
+        raise ticket_context.ContextError("shared dev must point to primary worktree dev")
+    if not Path(issue).resolve().is_relative_to(expected):
+        raise ticket_context.ContextError("shared ticket must stay inside primary worktree dev")
+    return primary
 
 
 def _resolve_commit(repo, revision):
@@ -532,16 +553,8 @@ def _check_evidence(repo, record, head, verified_tree):
     return errors
 
 
-def check(repo, head="HEAD", base=None):
-    """Validate v2 shards and verify code/evidence against the candidate HEAD.
-
-    Historical ``release_only`` primary sources are checked only at
-    ``verified_commit``; auxiliary sources are also checked at candidate HEAD.
-    When *base* is supplied, stable IDs are also compared between *base* and
-    *head* graph revisions.
-    """
-    repo = Path(repo)
-    details = load_graph_details(repo)
+def _validate_graph(repo, details, head):
+    """Validate one graph revision's records and evidence against *head*."""
     records, errors = details["records"], list(details["errors"])
     ids, supersedes_by_id = {}, {}
     current_interfaces = {}
@@ -623,6 +636,20 @@ def check(repo, head="HEAD", base=None):
 
     for ident in ids:
         visit(ident)
+    return records, _dedup(errors)
+
+
+def check(repo, head="HEAD", base=None):
+    """Validate v2 shards and verify code/evidence against the candidate HEAD.
+
+    Historical ``release_only`` primary sources are checked only at
+    ``verified_commit``; auxiliary sources are also checked at candidate HEAD.
+    When *base* is supplied, stable IDs are also compared between *base* and
+    *head* graph revisions.
+    """
+    repo = Path(repo)
+    details = load_graph_details(repo)
+    records, errors = _validate_graph(repo, details, head)
     if base is not None:
         base_details = load_graph_details(repo, revision=base)
         errors.extend("base: " + error for error in base_details["errors"])
@@ -634,6 +661,27 @@ def check(repo, head="HEAD", base=None):
             comparison_head = records
         errors.extend(compare_record_ids(base_details["records"], comparison_head))
     return records, _dedup(errors)
+
+
+def check_candidate(repo, head="HEAD", base=None):
+    """Return head records plus only the errors introduced relative to *base*.
+
+    ``baseline_errors`` already exist at the frozen base and are reported
+    separately; a ticket-level gate must not fail for unrelated repository-wide
+    drift.  Ticket/spec mapping errors stay in the flow helpers and are not
+    subtracted.
+    """
+    repo = Path(repo)
+    details = load_graph_details(repo)
+    records, head_errors = _validate_graph(repo, details, head)
+    if base is None:
+        return records, head_errors, []
+    base_details = load_graph_details(repo, revision=base)
+    base_records, base_errors = _validate_graph(repo, base_details, base)
+    head_errors = _dedup(list(head_errors) + compare_record_ids(base_records, records))
+    baseline = set(base_errors)
+    new_errors = [error for error in head_errors if error not in baseline]
+    return records, _dedup(new_errors), _dedup(base_errors)
 
 
 def select(records, *, module=None, interface=None, version=None, status=None):
@@ -694,11 +742,15 @@ def _baseline_date(repo, details):
     return value if isinstance(value, str) and DATE_RE.fullmatch(value) else None
 
 
-def render_homepage(repo, write=False, head="HEAD"):
+def render_homepage(repo, write=False, head="HEAD", validated=None):
     """Write the homepage, or compare its exact bytes when *write* is false."""
     repo = Path(repo)
     details = load_graph_details(repo)
-    records, errors = check(repo, head=head)
+    if validated is None:
+        records, errors = check(repo, head=head)
+    else:
+        records = validated["records"]
+        errors = list(validated.get("errors", []))
     if not details["files"]:
         errors.append("no v2 graph shards are available for homepage rendering")
     if legacy_rows(repo):
@@ -888,8 +940,8 @@ def parse_spec_updates(spec_path):
         if ident in seen:
             errors.append("%s: duplicate stable ID in 3.2: %s" % (spec_path.name, ident))
         seen.add(ident)
-        if action not in {"new", "modify", "retire"}:
-            errors.append("%s: %s has unknown action %s (expected new/modify/retire)" % (
+        if action not in {"new", "modify", "retire", "describe"}:
+            errors.append("%s: %s has unknown action %s (expected new/modify/retire/describe)" % (
                 spec_path.name, ident, action))
         for label, value in (("name", name), ("module", module), ("source", source_cell)):
             if _placeholder(value):
@@ -898,7 +950,10 @@ def parse_spec_updates(spec_path):
         if _safe_repo_path(source.get("path")) is None:
             errors.append("%s: %s has unsafe source path" % (spec_path.name, ident))
         evidence = _split_references(evidence_cell)
-        if not evidence:
+        if action == "describe":
+            if evidence:
+                errors.append("%s: %s describe must leave verification evidence empty" % (spec_path.name, ident))
+        elif not evidence:
             errors.append("%s: %s is missing verification evidence" % (spec_path.name, ident))
         supersedes = _split_ids(supersedes_cell)
         for target in supersedes:
@@ -1070,14 +1125,47 @@ def check_design(repo, spec_path):
     records = load_graph_details(repo)["records"]
     by_id = _records_by_id(records)
     for entry in entries:
-        if entry["action"] in {"modify", "retire"} and entry["id"] not in by_id:
+        if entry["action"] in {"modify", "retire", "describe"} and entry["id"] not in by_id:
             errors.append("%s: %s action %s requires an existing graph record at design time" % (
                 spec_path.name, entry["id"], entry["action"]))
+        if entry["action"] == "describe" and entry["id"] in by_id:
+            errors.extend(_describe_identity_errors(spec_path, entry, by_id[entry["id"]]))
     return _dedup(errors)
 
 
+def _describe_identity_errors(spec, entry, record):
+    source = record.get("source")
+    source = source if isinstance(source, dict) else {}
+    mismatched = [field for field in ("name", "module") if entry[field] != record.get(field)]
+    mismatched.extend("source." + field for field in ("path", "symbol")
+                      if entry["source"].get(field) != source.get(field))
+    if set(entry["supersedes"]) != set(record.get("supersedes") or []):
+        mismatched.append("supersedes")
+    return ["%s: %s describe must preserve %s" % (spec.name, entry["id"], field)
+            for field in mismatched]
+
+
+def _spec_issue_paths(repo, spec):
+    """Keep independent confirmed specs in one feature in distinct ticket groups."""
+    import ticket_context
+
+    feature = spec.resolve().parent
+    issues = sorted((feature / "issues").glob("issue-*.md"))
+    leaves, errors = active_spec_leaves(feature.glob("*-tech-spec-*.md"))
+    if len(leaves) <= 1:
+        return issues, errors
+    selected = []
+    for issue in issues:
+        try:
+            if ticket_context.find_spec(issue, _ticket_document_root(repo, issue)) == spec.resolve():
+                selected.append(issue)
+        except ticket_context.ContextError as exc:
+            errors.append("%s: %s" % (issue.name, exc))
+    return selected, errors
+
+
 def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implementation_ids=None,
-                       allow_flow_back=False):
+                       allow_flow_back=False, validated=None, feature_issue_ids=None):
     """Reconcile assignments for every ID and implementation for the selected IDs.
 
     ``implementation_ids=None`` is the feature-level full check.  A ticket passes
@@ -1095,8 +1183,8 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implement
                         spec_path.name, ident))
         return _dedup(errors)
     if issue_paths is None:
-        issue_dir = spec_path.parent / "issues"
-        issue_paths = sorted(issue_dir.glob("*.md")) if issue_dir.is_dir() else []
+        issue_paths, group_errors = _spec_issue_paths(repo, spec_path)
+        errors.extend(group_errors)
     declarations = {}
     for issue_path in issue_paths:
         identifiers, issue_errors = parse_architecture_updates(issue_path)
@@ -1123,11 +1211,16 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implement
     for ident in sorted(set(declarations) - expected_ids):
         errors.append("%s: ticket declares wrong or out-of-spec architecture ID: %s" % (
             spec_path.name, ident))
-    records, graph_errors = check(repo, head=head)
+    if validated is None:
+        records, graph_errors = check(repo, head=head)
+    else:
+        records = validated["records"]
+        graph_errors = list(validated.get("errors", []))
     errors.extend(graph_errors)
     details = load_graph_details(repo)
     by_id = _records_by_id(records)
     selected = None if implementation_ids is None else set(implementation_ids)
+    describe_owners = {}
     for entry in entries:
         ident = entry["id"]
         if selected is not None and ident not in selected:
@@ -1138,6 +1231,12 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implement
             continue
         if not details["shards"].get(ident):
             errors.append("%s: %s has no owning graph shard" % (spec_path.name, ident))
+        if entry["action"] == "describe":
+            errors.extend(_describe_identity_errors(spec_path, entry, record))
+            owners = declarations.get(ident, [])
+            if selected is None and len(owners) == 1:
+                describe_owners.setdefault(owners[0], set()).add(ident)
+            continue
         for field in ("name", "module"):
             if record.get(field) != entry[field]:
                 errors.append("%s: %s %s does not match tech-spec" % (spec_path.name, ident, field))
@@ -1186,6 +1285,9 @@ def check_flow_forward(repo, spec_path, issue_paths=None, head="HEAD", implement
             ):
                 errors.append("%s: %s lacks code evidence for the implemented interface" % (
                     spec_path.name, ident))
+    for owner, describe_ids in describe_owners.items():
+        errors.extend(_describe_feature_errors(repo, spec_path, owner, describe_ids, head, by_id,
+                                               details["shards"], feature_issue_ids))
     return _dedup(errors)
 
 
@@ -1262,10 +1364,190 @@ def _impl_mapping_errors(issue_path, ident, source):
         ident, source_path, ":" + symbol if symbol else "")]
 
 
-def check_flow_back(repo, issue_path, base, head, spec_path=None):
+def _describe_blob(repo, revision, path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON member %s" % key)
+            result[key] = value
+        return result
+
+    tree = _git(repo, "ls-tree", revision, "--", path, text=True)
+    if tree.returncode or not tree.stdout.startswith("100644 blob "):
+        raise ValueError("describe requires a regular non-executable graph shard")
+    raw = _read_git_object(repo, revision, path)
+    if raw is None:
+        raise ValueError("missing graph shard")
+    return json.loads(raw, object_pairs_hook=unique)
+
+
+def _describe_delta_errors(repo, base, head, describe_ids):
+    """Compare complete committed shard values, masking only declared responsibility strings."""
+    entries, errors = _diff_name_status(repo, base, head)
+    changed = set()
+    for status, old, path in entries:
+        if status != "M" or old != path:
+            errors.append("describe cannot add, delete, rename or change file type: %s" % path)
+            continue
+        if path == HOMEPAGE_REL.as_posix():
+            for revision in (base, head):
+                tree = _git(repo, "ls-tree", revision, "--", path, text=True)
+                if tree.returncode or not tree.stdout.startswith("100644 blob "):
+                    errors.append("describe requires a regular non-executable generated homepage")
+            continue
+        graph_path = PurePosixPath(path)
+        if graph_path.parent != GRAPH_REL or graph_path.suffix != ".json":
+            errors.append("describe may only change graph shards and the generated homepage: %s" % path)
+            continue
+        try:
+            before = _describe_blob(repo, base, path)
+            after = _describe_blob(repo, head, path)
+            revised = set()
+            for left, right in zip(before["records"], after["records"]):
+                ident = left["id"]
+                if (ident not in describe_ids or right.get("id") != ident
+                        or left.get("responsibility") == right.get("responsibility")):
+                    continue
+                if not isinstance(right["responsibility"], str) or not right["responsibility"].strip():
+                    errors.append("describe requires nonempty responsibility text: %s" % ident)
+                revised.add(ident)
+                right["responsibility"] = left["responsibility"]
+            if json.dumps(before, sort_keys=True) != json.dumps(after, sort_keys=True):
+                errors.append("describe changed fields other than declared responsibility: %s" % path)
+            if not revised:
+                errors.append("describe shard contains no declared responsibility change: %s" % path)
+            changed.update(revised)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as exc:
+            errors.append("describe cannot compare %s: %s" % (path, exc))
+    for missing in sorted(describe_ids - changed):
+        errors.append("describe did not change declared responsibility: %s" % missing)
+    return _dedup(errors)
+
+
+def _verified_describe_merge(repo, spec, issue, describe_ids, head, merged):
+    """Bind a describe ticket to its frozen inputs and exact no-ff merge."""
+    import ticket_context
+
+    root = _ticket_document_root(repo, issue)
+    issue_id = ticket_context.parse_issue(issue)["frontmatter"]["issue-id"]
+    context = ticket_context.load_context(issue.parent.parent / "impl" / issue_id / "ticket-context.json")
+    declared, errors = parse_architecture_updates(issue)
+    if (errors or set(declared) != describe_ids or set(context["architecture_updates"]) != describe_ids
+            or context["issue_path"] != issue.relative_to(root).as_posix()
+            or context["spec_path"] != Path(spec).resolve().relative_to(root).as_posix()
+            or context["hashes"]["issue"] != ticket_context.issue_content_hash(issue)
+            or context["hashes"]["spec"] != _sha256(Path(spec).read_bytes())):
+        raise ValueError("describe-only ticket declaration or frozen inputs differ")
+    merge = merged.get(issue_id)
+    if not isinstance(merge, str) or not SHA_RE.fullmatch(merge):
+        raise ValueError("describe ticket has no recorded merge")
+    parents = _git(repo, "rev-list", "--parents", "-n", "1", merge, text=True)
+    if (parents.returncode
+            or parents.stdout.split() != [merge, context["target_commit"], context["source_head"]]
+            or _resolve_tree(repo, merge) != context["source_tree"]
+            or _is_ancestor(repo, merge, head) is not True):
+        raise ValueError("describe merge does not match the frozen ticket and feature head")
+    return merge, _describe_delta_errors(repo, context["target_commit"], merge, describe_ids)
+
+
+def _describe_successors(repo, feature, describe_ids, chain, merged, feature_issue_ids):
+    import ticket_context
+
+    successors = {}
+    leaves, errors = active_spec_leaves(feature.glob("*-tech-spec-*.md"))
+    if errors:
+        raise ValueError("; ".join(errors))
+    commits = set(chain)
+    for issue in sorted((feature / "issues").glob("issue-*.md")):
+        declared, declaration_errors = parse_architecture_updates(issue)
+        ids = set(declared)
+        if declaration_errors or not ids & describe_ids:
+            continue
+        issue_id = ticket_context.parse_issue(issue)["frontmatter"]["issue-id"]
+        claimed = merged.get(issue_id)
+        if claimed not in commits or (feature_issue_ids is not None and issue_id not in feature_issue_ids):
+            continue
+        spec = ticket_context.find_spec(issue, _ticket_document_root(repo, issue))
+        if spec.name not in leaves:
+            continue
+        entries, parse_errors = parse_spec_updates(spec)
+        spec_ids = {entry["id"] for entry in entries if entry["action"] == "describe"}
+        if parse_errors or not ids <= spec_ids:
+            continue
+        merge, errors = _verified_describe_merge(repo, spec, issue, ids, chain[-1], merged)
+        if errors:
+            raise ValueError("%s: %s" % (issue.name, "; ".join(errors)))
+        if merge in successors:
+            raise ValueError("multiple describe tickets claim the same merge: %s" % merge)
+        successors[merge] = ids
+    return successors
+
+
+def _describe_records(repo, commit, describe_ids):
+    details = load_graph_details(repo, revision=commit)
+    records = _records_by_id(details["records"])
+    return {ident: (json.dumps(records.get(ident), sort_keys=True), tuple(details["shards"].get(ident, [])))
+            for ident in describe_ids}
+
+
+def _describe_feature_errors(repo, spec, issue, describe_ids, head, final_records, final_shards,
+                             feature_issue_ids):
+    """Check every change between the owning merge and the final record."""
+    import feature_closeout
+
+    issue = Path(issue).resolve()
+    try:
+        merged = feature_closeout.last_merged(issue.parent.parent)
+        merge, errors = _verified_describe_merge(repo, spec, issue, describe_ids, head, merged)
+        if errors:
+            return errors
+        result = _git(repo, "rev-list", "--first-parent", "--reverse", merge + ".." + head, text=True)
+        if result.returncode:
+            raise ValueError("cannot read describe first-parent chain")
+        chain = result.stdout.split()
+        if ((chain and _resolve_commit(repo, chain[0] + "^1") != merge)
+                or (not chain and _resolve_commit(repo, head) != merge)):
+            raise ValueError("describe merge is not on the feature's first-parent chain")
+        successors = _describe_successors(repo, issue.parent.parent, describe_ids, chain, merged,
+                                         feature_issue_ids) if chain else {}
+        previous = merge
+        state = _describe_records(repo, merge, describe_ids)
+        verified = state.copy()
+        for commit in chain:
+            diff, diff_errors = _diff_name_status(repo, previous, commit)
+            errors.extend(diff_errors)
+            previous = commit
+            if not any(PurePosixPath(path).parent == GRAPH_REL for _, old, new in diff for path in (old, new)):
+                continue
+            actual = _describe_records(repo, commit, describe_ids)
+            allowed = successors.get(commit, ())
+            for ident in sorted(describe_ids):
+                if actual[ident] == state[ident]:
+                    continue
+                if ident in allowed:
+                    verified[ident] = actual[ident]
+                else:
+                    errors.append("describe record changed outside a verified describe merge: %s at %s" %
+                                  (ident, commit))
+            state = actual
+        for ident in sorted(describe_ids):
+            final = (json.dumps(final_records.get(ident), sort_keys=True), tuple(final_shards.get(ident, [])))
+            if verified[ident] != final:
+                errors.append("describe record differs from its verified wording merge: %s" % ident)
+        return errors
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError,
+            feature_closeout.InputError) as exc:
+        return ["%s: describe feature validation: %s" % (issue.name, exc)]
+
+def check_flow_back(repo, issue_path, base, head, spec_path=None, validated=None):
     """Check implementation diffs back to the issue's current spec and graph."""
     repo, issue_path = Path(repo), Path(issue_path)
-    records, errors = check(repo, head=head, base=base)
+    if validated is None:
+        records, errors = check(repo, head=head, base=base)
+    else:
+        records = validated["records"]
+        errors = list(validated.get("errors", []))
     base_details = load_graph_details(repo, revision=base)
     head_details = load_graph_details(repo, revision=head)
     if not head_details["files"] and load_graph_details(repo)["files"]:
@@ -1278,6 +1560,37 @@ def check_flow_back(repo, issue_path, base, head, spec_path=None):
     declared, issue_errors = parse_architecture_updates(issue_path)
     errors.extend(issue_errors)
     declared_set = set(declared)
+    if spec_path is None:
+        # The issue is the authority for its current dated spec.  Never union
+        # every *-tech-spec-*.md in the feature: an old spec can neither
+        # authorize nor block the current candidate.
+        import ticket_context
+        try:
+            document_root = _ticket_document_root(repo, issue_path)
+        except ticket_context.ContextError as exc:
+            return _dedup(errors + [str(exc)])
+        try:
+            spec_path = ticket_context.find_spec(issue_path, document_root)
+        except ticket_context.ContextError as exc:
+            if document_root != Path(repo).resolve():
+                return _dedup(errors + [str(exc)])
+            feature = issue_path.parent.parent if issue_path.parent.name == "issues" else issue_path.parent
+            candidates = sorted(feature.glob("*-tech-spec-*.md"))
+            if len(candidates) == 1:
+                spec_path = candidates[0]
+            else:
+                errors.append("issue must name exactly one current tech-spec; dated spec inference is forbidden")
+                return _dedup(errors)
+    spec_path = Path(spec_path)
+    entries, spec_errors = parse_spec_updates(spec_path)
+    errors.extend(spec_errors)
+    describe_ids = {entry["id"] for entry in entries
+                    if entry["action"] == "describe" and entry["id"] in declared_set}
+    if describe_ids:
+        if declared_set != describe_ids:
+            errors.append("describe declarations cannot be mixed with other actions in one ticket")
+        errors.extend(_describe_delta_errors(repo, base, head, describe_ids))
+        return _dedup(errors)
     impacted = {}
     for ident in sorted(set(base_by_id) | set(head_by_id)):
         before, after = base_by_id.get(ident), head_by_id.get(ident)
@@ -1287,6 +1600,9 @@ def check_flow_back(repo, issue_path, base, head, spec_path=None):
         sources = [source for record in (before, after) if record
                    for _, source in _record_sources(record)]
         paths = {source.get("path") for source in sources if source.get("path")}
+        # The generated index is verified byte-for-byte by render_homepage.
+        # Its migration-era citations do not bind implementation code.
+        paths.discard(HOMEPAGE_REL.as_posix())
         hits = [entry for entry in diff_entries
                 if entry[1] in paths or entry[2] in paths]
         if hits:
@@ -1311,26 +1627,7 @@ def check_flow_back(repo, issue_path, base, head, spec_path=None):
             selected = before or after
             source = selected.get("source", {}) if isinstance(selected.get("source"), dict) else {}
             errors.extend(_impl_mapping_errors(issue_path, ident, source))
-    if spec_path is None:
-        # The issue is the authority for its current dated spec.  Never union
-        # every *-tech-spec-*.md in the feature: an old spec can neither
-        # authorize nor block the current candidate.
-        import ticket_context
-        try:
-            spec_path = ticket_context.find_spec(issue_path, repo)
-        except ticket_context.ContextError:
-            feature = issue_path.parent.parent if issue_path.parent.name == "issues" else issue_path.parent
-            candidates = sorted(feature.glob("*-tech-spec-*.md"))
-            if len(candidates) == 1:
-                spec_path = candidates[0]
-            else:
-                errors.append("issue must name exactly one current tech-spec; dated spec inference is forbidden")
-                return _dedup(errors)
-    spec_path = Path(spec_path)
-    spec_ids = set()
-    entries, spec_errors = parse_spec_updates(spec_path)
-    errors.extend(spec_errors)
-    spec_ids.update(entry["id"] for entry in entries)
+    spec_ids = {entry["id"] for entry in entries}
     all_changed_ids = {
         ident for ident in set(base_by_id) | set(head_by_id)
         if base_by_id.get(ident) != head_by_id.get(ident)
@@ -1344,6 +1641,70 @@ def check_flow_back(repo, issue_path, base, head, spec_path=None):
     if graph_paths and not all_changed_ids and not declared_set and not spec_ids:
         errors.append("graph-only shard change has no ticket or tech-spec architecture obligation")
     return _dedup(errors)
+
+
+def _frozen_candidate_flow(repo, issue, base, head, raw):
+    """Authenticate the supervisor's final tree and this ticket's bounded merge."""
+    import feature_closeout
+    import ticket_context
+    import verify_issue
+
+    binding = json.loads(raw)
+    if not isinstance(binding, dict) or set(binding) != {
+            "candidate_path", "candidate_sha256", "issue_id"}:
+        raise ValueError("invalid candidate flow binding")
+    path = Path(binding["candidate_path"]).resolve()
+    primary = _ticket_document_root(repo, issue)
+    feature, _ = verify_issue._candidate_location(path)
+    if feature != issue.parent.parent or verify_issue._find_root(path) != primary:
+        raise ValueError("candidate and ticket are not in the same primary feature")
+    candidate_bytes = path.read_bytes()
+    if hashlib.sha256(candidate_bytes).hexdigest() != binding["candidate_sha256"]:
+        raise ValueError("frozen candidate digest mismatch")
+    candidate, _ = verify_issue._candidate_document(path, candidate_bytes)
+    requested_head = verify_issue._git(repo, "rev-parse", "--verify", head + "^{commit}").stdout.strip()
+    if requested_head != candidate["candidate"]:
+        raise ValueError("check-flow HEAD differs from frozen candidate")
+    repo_error = verify_issue._candidate_repo_error(repo, candidate)
+    if repo_error:
+        raise ValueError(repo_error)
+    issue_id = ticket_context.parse_issue(issue)["frontmatter"].get("issue-id")
+    ticket = next((item for item in candidate["issues"] if item["id"] == issue_id), None)
+    if issue_id != binding["issue_id"] or ticket is None:
+        raise ValueError("ticket is not the requested frozen candidate member")
+    context, _ = verify_issue._candidate_context(feature, primary, issue_id)
+    if context["issue_path"] != issue.relative_to(primary).as_posix() or context["base"] != base:
+        raise ValueError("check-flow ticket or base differs from frozen ticket context")
+    merged = ticket.get("merged_commit")
+    try:
+        recorded_merge = feature_closeout.last_merged(feature).get(issue_id)
+    except feature_closeout.InputError as exc:
+        raise ValueError("cannot authenticate ticket merge event: " + str(exc)) from exc
+    if not isinstance(merged, str) or not SHA_RE.fullmatch(merged) or recorded_merge != merged:
+        raise ValueError("ticket merge differs from the recorded merge event")
+    parents = verify_issue._git(repo, "rev-list", "--parents", "-n", "1", merged).stdout.split()
+    if parents != [merged, context["target_commit"], context["source_head"]]:
+        raise ValueError("ticket merge parents differ from the frozen target and source")
+    if (verify_issue._git(repo, "rev-parse", merged + "^{tree}").stdout.strip() != context["source_tree"]
+            or verify_issue._git(repo, "merge-base", "--is-ancestor", merged, candidate["candidate"],
+                                 check=False).returncode):
+        raise ValueError("ticket merge tree is stale or outside the frozen candidate")
+    return candidate["candidate"], (parents[1], merged), {item["id"] for item in candidate["issues"]}
+
+
+def _check_frozen_candidate_flow(repo, issue, spec, base, head, raw):
+    try:
+        candidate, (ticket_base, ticket_merge), issue_ids = _frozen_candidate_flow(repo, issue, base, head, raw)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return ["candidate flow: " + str(exc)]
+    records, errors = check(repo, head=candidate)
+    validated = {"records": records, "errors": []}
+    errors.extend(check_flow_forward(repo, spec, head=candidate, validated=validated,
+                                     feature_issue_ids=issue_ids))
+    errors.extend(check_flow_back(repo, issue, ticket_base, ticket_merge, spec_path=spec,
+                                  validated=validated))
+    _, homepage_errors = render_homepage(repo, write=False, head=candidate, validated=validated)
+    return _dedup(errors + homepage_errors)
 
 
 def _print_errors(errors):
@@ -1400,8 +1761,9 @@ def main(argv=None):
         leaves, errors = active_spec_leaves(feature.glob("*-tech-spec-*.md"))
         if spec.name not in leaves:
             errors.append("%s: not an active confirmed leaf tech-spec" % spec.name)
-        issue_paths = sorted((feature / "issues").glob("issue-*.md"))
-        errors.extend(check_flow_forward(repo, spec, issue_paths, head=args.head))
+        if spec.resolve().parent != feature.resolve():
+            errors.append("tech-spec must belong to the checked feature directory")
+        errors.extend(check_flow_forward(repo, spec, head=args.head))
         _, homepage_errors = render_homepage(repo, write=False, head=args.head)
         errors.extend(homepage_errors)
         _print_errors(errors)
@@ -1412,13 +1774,46 @@ def main(argv=None):
             parser.error("check-flow requires --issue and --base")
         issue = args.issue if args.issue.is_absolute() else repo / args.issue
         import ticket_context
-        spec = ticket_context.find_spec(issue, repo)
+        try:
+            spec = ticket_context.find_spec(issue, _ticket_document_root(repo, issue))
+        except ticket_context.ContextError as exc:
+            _print_errors([str(exc)])
+            return 1
+        import verify_issue
+        candidate_flow = os.environ.get(verify_issue.CANDIDATE_FLOW_ENV)
+        if candidate_flow is not None:
+            errors = _check_frozen_candidate_flow(repo, issue.resolve(), spec, args.base, args.head,
+                                                   candidate_flow)
+            _print_errors(errors)
+            print("flow errors=%d" % len(errors))
+            return 1 if errors else 0
         declared, declaration_errors = parse_architecture_updates(issue)
-        errors = declaration_errors
+        if not declared and not declaration_errors:
+            entries, diff_errors = _diff_name_status(repo, args.base, args.head)
+            if diff_errors:
+                _print_errors(diff_errors)
+                return 1
+            changed = {path for _, old, new in entries for path in (old, new)}
+            architecture_changed = any(path == HOMEPAGE_REL.as_posix() or
+                                       path.startswith(GRAPH_REL.as_posix() + "/") for path in changed)
+            bound_changed = any(source.get("path") in changed
+                                for record in load_graph_details(repo)["records"]
+                                if isinstance(record, dict) and record.get("kind") == "interface"
+                                for _, source in _record_sources(record))
+            if not architecture_changed and not bound_changed:
+                print("ticket-level architecture gate skipped (full check runs at feature candidate)")
+                return 0
+        records, candidate_errors, baseline_errors = check_candidate(repo, head=args.head, base=args.base)
+        if baseline_errors:
+            print("baseline graph errors=%d (reported separately)" % len(baseline_errors))
+        validated = {"records": records, "errors": []}
+        errors = declaration_errors + candidate_errors
         errors.extend(check_flow_forward(
-            repo, spec, head=args.head, implementation_ids=set(declared), allow_flow_back=True))
-        errors.extend(check_flow_back(repo, issue, args.base, args.head, spec_path=spec))
-        _, homepage_errors = render_homepage(repo, write=False, head=args.head)
+            repo, spec, head=args.head, implementation_ids=set(declared), allow_flow_back=True,
+            validated=validated))
+        errors.extend(check_flow_back(repo, issue, args.base, args.head, spec_path=spec,
+                                      validated=validated))
+        _, homepage_errors = render_homepage(repo, write=False, head=args.head, validated=validated)
         errors.extend(homepage_errors)
         _print_errors(errors)
         print("flow errors=%d" % len(_dedup(errors)))

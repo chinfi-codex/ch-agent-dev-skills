@@ -24,6 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 import ci_proof as cp
 import delivery
 import feature_closeout as fc
+import review_receipt as rr
 import state_store
 
 
@@ -368,8 +369,9 @@ class CIPromoteTest(unittest.TestCase):
 
     def configure(self, mode):
         enforcement = ("{review-trust: operator-attested, require-protected-branch: true, "
-                       "require-expected-sha: true}" if mode == "server-enforced"
-                       else "{review-trust: operator-attested}")
+                       "require-expected-sha: true, require-host-capabilities: false}"
+                       if mode == "server-enforced"
+                       else "{review-trust: operator-attested, require-host-capabilities: false}")
         config = """```yaml
 schema-version: 2
 tracker: local
@@ -428,7 +430,9 @@ enforcement: %s
         spec = self.fdir / "demo-tech-spec-2026-11-14.md"
         spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n")
         (self.fdir / "issues" / "issue-001-x.md").write_text(
-            "---\nissue-id: issue-001\nfeature-slug: demo\nstatus: done\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
+            "---\nissue-id: issue-001\nfeature-slug: demo\nstatus: done\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n  session_id: impl-1\n  agent: development\n"
+            "tech-spec: demo-tech-spec-2026-11-14.md\n---\n# x\n")
         (self.fdir / "impl" / "issue-001" / "verification-supervisor.json").write_text(
             json.dumps({"records": [{"id": "DoD-1"}]}))
         candidate = {
@@ -477,8 +481,51 @@ enforcement: %s
                         "assertions": [{"type": "exit", "expected": 0, "actual": 0, "status": "pass"}],
                         "artifacts": [artifact]}]}
         (self.integ / "business-results.json").write_text(json.dumps(results))
+        self.write_feature_gate(candidate)
         fc.report(SimpleNamespace(feature_dir=str(self.fdir), repo=str(self.integration), round=None))
         return candidate
+
+    def write_feature_gate(self, candidate):
+        report = self.integ / "feature-review.md"
+        report.write_text("# Feature review\n\nverdict: pass\n", encoding="utf-8")
+        payload = dict(candidate)
+        payload.update({
+            "review_round": 1,
+            "reviewer": {"host": "zcode", "agent": "supervisor-review", "session": "review-1",
+                         "model": "provider/supervisor", "effort": "high", "role": "review"},
+            "findings": [], "verdict": "pass", "trust": "operator-attested",
+            "attestation": {"operator": "user", "statement": "独立评审已完成。",
+                            "confirmed_at": "2026-11-16T00:00:00Z"},
+        })
+        input_path = self.integ / "feature-review-input.json"
+        input_path.write_text(json.dumps(payload), encoding="utf-8")
+        _, errors = rr.create_feature_receipt(
+            self.fdir, self.integration, input_path, report=report,
+            output=self.integ / "feature-review-receipt.json")
+        self.assertEqual(errors, [])
+        generation = "candidate-fixture"
+        entries = []
+        for item in candidate["issues"]:
+            issue_id = item["id"]
+            directory = self.integ / "raw" / generation / issue_id
+            directory.mkdir(parents=True, exist_ok=True)
+            evidence = directory / "verification-supervisor.json"
+            evidence.write_text(json.dumps({"issue": issue_id, "pass": True,
+                                            "head": candidate["candidate"],
+                                            "tree": candidate["candidate_tree"],
+                                            "records": [{"id": "DoD-1", "status": "pass"}]}),
+                                encoding="utf-8")
+            entries.append({"issue": issue_id, "pass": True,
+                            "verification_path": evidence.relative_to(self.integ).as_posix(),
+                            "verification_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                            "head": candidate["candidate"], "tree": candidate["candidate_tree"]})
+        (self.integ / "candidate-verification.json").write_text(json.dumps({
+            "schema": "agent-dev.candidate-verification/v1",
+            "candidate": candidate["candidate"], "candidate_tree": candidate["candidate_tree"],
+            "main_head": candidate["main_head"],
+            "plan_sha256": candidate["acceptance_plan"]["sha256"],
+            "issues": entries, "all-passed": True, "generated": generation,
+        }), encoding="utf-8")
 
     def promote(self, mode="cooperative-ci", run_id="42"):
         return delivery.promote(str(self.integ / "candidate.json"), self.integration, self.repo,
@@ -562,7 +609,7 @@ enforcement: %s
         result = self.promote(run_id="42")
         current = json.loads((self.integ / "candidate.json").read_text())
         with self.assertRaisesRegex(delivery.DeliveryError, "already merged"):
-            delivery._feature_journal(self.integ, "feature-" + "b" * 64, current, "no-ff")
+            delivery._feature_journal(self.integ, "feature-" + "b" * 64, current, "no-ff", {})
         self.assertFalse(list((self.integ / "superseded").glob("*.json")) if (self.integ / "superseded").exists() else [])
         replay = self.promote(run_id="43")
         self.assertEqual(replay["operation_id"], result["operation_id"])

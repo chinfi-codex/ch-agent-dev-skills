@@ -85,10 +85,11 @@ allowed-tools:
 
 ### Step 2：重建过程全景
 
-- **阶段时间线**：需求收敛 → PRD → pd-review → tech-spec → 拆票 → 实现与评审 → 合并；每段起止日期与时长，每段标注依据文件
-- **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、评审轮次（`reviews/` 下该票报告文件数）、BLOCKER 回修轮数（MR 文件记录）、是否进过 `needs-human`
-- **票级验证统计**：各票 DoD / fast 的执行与复跑结果、耗时、失败原因、skip 与隔离数；**逃逸缺陷**（合并后在 main 或 CI full 才发现的问题，来源 git log 修复提交 / CI 判决 / 人反馈；归因到对应票 DoD 或 fast 的覆盖缺口）。历史产物中的旧 scoped / full 档位字段只作当时事实读取，不要求新票继续生成，也不把缺失旧字段记为缺陷
-- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移记录 / 遗留」与各 review report 的 BLOCKER 清单
+- **阶段时间线**：需求收敛 → PRD → pd-review → tech-spec → 拆票 → 票级实现与合入 → feature 评审 / 候选门 → 合 main 与 finalize；每段起止日期与时长，每段标注依据文件
+- **issue 轮次**：每票的自修复轮次（impl-log「自修复轮次记录」表行数）、是否进过 `needs-human`、合并到集成分支的 commit；feature 级 BLOCKER 修复票单独计数
+- **feature 评审轮次**：`integration/feature-review-receipt.json` 的 round、历史 receipt 数、BLOCKER 闭合情况
+- **票级验证统计**：各票 DoD / fast 的 implementer 执行与候选 `run-candidate` 复跑结果、耗时、失败原因、skip 与隔离数；**逃逸缺陷**（合并后在 main 或 CI full 才发现的问题，来源 git log 修复提交 / CI 判决 / 人反馈；归因到对应票 DoD 或 fast 的覆盖缺口）。历史产物中的旧 scoped / full 档位字段只作当时事实读取，不要求新票继续生成，也不把缺失旧字段记为缺陷
+- **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移记录 / 遗留」与 feature 评审报告的 BLOCKER 清单
 - **契约漂移巡检**（图谱分片或旧项目 ARCHITECTURE.md 存在时；只读，不改图谱）：运行 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/contract-check.md`），FAIL 项逐条进问题清单并标注归因；图谱事实错漏交由对应责任阶段更新分片，复盘报告记录建议与证据
 - 统计口径随数字给出；取不到标「缺失」
 

@@ -130,7 +130,7 @@ allowed-tools:
 2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
 3. 运行 `architecture_graph.py check-design --repo <项目根> --spec <tech-spec>` 并修复全部结构问题；该校验不要求接口已 current 或票已存在
 4. 本轮确定的新术语立即回写 GLOSSARY
-5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」必须使用模板固定表逐条写 `稳定 ID / new|modify|retire / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，供 `/issue-split` 把每个 ID 写入承接票 `architecture-updates`。接口只有随代码合并且祖先、源码 hash 与证据齐备后才可标 current。不得直接编辑 `docs/ARCHITECTURE.md`；首页只能由 `architecture_graph.py render write` 生成，并经 `render check` 字节核对。
+5. 契约落图谱：约束栏含**跨 feature 级**约束时，在 `docs/architecture/constraints.json` 新增或更新稳定 ID 记录；「3.2 接口变更」必须使用模板固定表逐条写 `稳定 ID / new|modify|retire|describe / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，供 `/issue-split` 把每个 ID 写入承接票 `architecture-updates`。接口只有随代码合并且祖先、源码 hash 与证据齐备后才可标 current。不得直接编辑 `docs/ARCHITECTURE.md`；首页只能由 `architecture_graph.py render write` 生成，并经 `render check` 字节核对。
 
 用户推翻任一共识条目：回到对应分支继续拷打，不硬写。
 

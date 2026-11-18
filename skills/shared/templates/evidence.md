@@ -1,17 +1,17 @@
 # Evidence：<issue-id>
 
 > **本文件由 `verify_issue.py` 从结构化运行记录确定性生成，不得手工编写或修改通过结论。**
-> 唯一机器证据是 `raw/<generation>/verification-implementer.json` 与 `raw/<generation>/verification-supervisor.json` 及其引用的原始日志、完整 HEAD/tree、退出码和 SHA256。正文只保留结论与指针，超过 `artifact-budget.evidence-max-lines` 时流程核对失败。
+> 票级唯一机器证据是 `raw/<generation>/verification-implementer.json` 及其引用的原始日志、完整 HEAD/tree、退出码和 SHA256。候选级复跑另写 `integration/raw/<generation>/<issue>/verification-supervisor.json`，不覆盖本文件。正文只保留结论与指针，超过 `artifact-budget.evidence-max-lines` 时流程核对失败。
 
 ## 候选与执行身份
 
-| 项 | 实现会话 | 主会话复跑 |
-| --- | --- | --- |
-| verification 文件 | `verification-implementer.json` | `verification-supervisor.json` |
-| 完整 source HEAD | `<由 runner 写入>` | `<由 runner 写入>` |
-| source tree | `<由 runner 写入>` | `<由 runner 写入>` |
-| runner / 宿主回执 | `<实际执行身份>` | `<实际执行身份>` |
-| artifact generation | `<代际 ID>` | `<代际 ID>` |
+| 项 | 实现会话（本票） |
+| --- | --- |
+| verification 文件 | `verification-implementer.json` |
+| 完整 source HEAD | `<由 runner 写入>` |
+| source tree | `<由 runner 写入>` |
+| runner / 宿主回执 | `<实际执行身份>` |
+| artifact generation | `<代际 ID>` |
 
 ## TDD 见红记录
 
@@ -40,7 +40,7 @@
 - load-flake（如有）：超时单项、load-peak、串行重跑结果
 - env skip：用例、缺失依赖及分类清单来源；不算通过也不算失败
 
-> 本票不执行关联选择集或完整套件。分支 / main 晋级由 `delivery.py promote` 在线核对 CI run 与候选 tree，票级 evidence 不代表 CI full 已通过。
+> 本票不执行关联选择集或完整套件；feature 冻结后 `run-candidate` 会在集成分支上统一复跑冻结 DoD + fast。分支 / main 晋级由 `delivery.py promote` 在线核对 CI run 与候选 tree，票级 evidence 不代表 CI full 已通过。
 
 ## 回归有效性（仅 `type: bug`）
 

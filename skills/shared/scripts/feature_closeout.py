@@ -2,10 +2,11 @@
 """需求收口（feature-closeout: local-human）的确定性门禁。
 
   validate-plan  校验功能验收计划：执行方式与最终判定分离，人工原因可解释
-  freeze         全票 done + conformance + main 已同步 + 验收计划有效 → 冻结代码与计划
-  check verify   候选与计划未变 + 自动证据 + AC 完整对账 + 当前验收报告
+  freeze         全票 merged/done + main 已同步 + 验收计划有效 → 冻结代码、票组与计划
+  check verify   候选未变 + feature 评审 + 候选复跑 + conformance + 自动证据 + AC 对账 + 当前报告
   check merge    verify 全部项 + 人工结果 / 豁免 + 合并确认绑定同一候选
   report         从冻结计划与实际结果生成 acceptance-report.md，不接受手写摘要代替
+  finalize       feature-merged → accepted/done + 逐票/feature close-and-clean
   record_merge  内部 API：仅 delivery.promote 以同进程内存授权调用
   target         打印票的目标分支
 
@@ -33,6 +34,12 @@ from process_check import (  # noqa: E402  共享解析与 git 辅助，不另�
 )
 
 CANDIDATE_SCHEMA = "agent-dev.feature-candidate/v2"
+CANDIDATE_VERIFICATION_SCHEMA = "agent-dev.candidate-verification/v1"
+CANDIDATE_VERIFICATION_SCHEMA_PATH = (Path(__file__).resolve().parent.parent / "references"
+                                      / "candidate-verification.schema.json")
+FEATURE_REVIEW_RECEIPT = "feature-review-receipt.json"
+CANDIDATE_VERIFICATION = "candidate-verification.json"
+FEATURE_CONFORMANCE = "conformance-feature.md"
 PLAN_SCHEMA = "agent-dev.feature-acceptance/v2"
 RESULTS_SCHEMA = "agent-dev.feature-business-results/v2"
 EXECUTORS = ("command", "browser-agent", "human")
@@ -520,46 +527,6 @@ def check_plan_unchanged(rep: Report, feature_dir: Path, cand: dict):
         rep.add("plan-source", "FAIL", str(exc))
 
 
-CHECKER_FIELDS = ("issue", "context_digest", "commit", "tree", "verdict", "checker",
-                  "checker_session", "selection", "date")
-
-
-def checker_projection(issue_id, header, config):
-    """Project only the fields a main-session checker is required to attest."""
-    if not isinstance(header, dict):
-        raise InputError("conformance YAML 头必须是映射")
-    missing = [key for key in CHECKER_FIELDS if header.get(key) in (None, "")]
-    if missing:
-        raise InputError("conformance checker 缺字段：" + ", ".join(missing))
-    if header.get("issue") != issue_id:
-        raise InputError("conformance issue 与票号不一致")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(header.get("commit"))):
-        raise InputError("conformance commit 必须是完整 OID")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(header.get("tree"))):
-        raise InputError("conformance tree 必须是完整 OID")
-    if not re.fullmatch(r"[0-9a-f]{64}", str(header.get("context_digest"))):
-        raise InputError("conformance context_digest 必须是 SHA256")
-    expected_checker = (config.get("conformance") or {}).get("checker", "main-session")
-    if header.get("checker") != expected_checker:
-        raise InputError("conformance checker 与配置不一致")
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(header["date"])):
-        raise InputError("conformance date 必须是 YYYY-MM-DD")
-    try:
-        datetime.fromisoformat(str(header["date"])).date()
-    except ValueError as exc:
-        raise InputError("conformance date 必须是合法 YYYY-MM-DD：%s" % exc)
-    selection = header.get("selection")
-    if not isinstance(selection, dict) or any(key not in selection for key in ("algorithm", "rate", "selected")):
-        raise InputError("conformance selection 必须含 algorithm/rate/selected")
-    if not isinstance(selection.get("selected"), bool):
-        raise InputError("conformance selection.selected 必须是布尔值")
-    return {
-        "issue": issue_id, "context_digest": header["context_digest"],
-        "commit": header["commit"], "tree": header["tree"], "verdict": header["verdict"],
-        "checker": header["checker"], "checker_session": header["checker_session"],
-        "selection": {key: selection[key] for key in ("algorithm", "rate", "selected")},
-        "date": str(header["date"]),
-    }
 
 
 # ---------- freeze ----------
@@ -571,19 +538,26 @@ def _check_architecture_feature(rep: Report, repo: Path, fdir: Path, issue_files
         import architecture_graph
         import ticket_context
         primary = repo_root_of(fdir)
-        groups = {}
+        groups, feature_issue_ids = {}, set()
         for issue in issue_files:
             spec = ticket_context.find_spec(issue, primary)
+            feature_issue_ids.add(read_frontmatter(issue).get("issue-id"))
             groups.setdefault(spec, []).append(issue)
+        has_shards = any((repo / "docs" / "architecture").glob("*.json"))
+        validated = None
+        if has_shards:
+            records, errors = architecture_graph.check(repo, head=head)
+            rep.extend("architecture-feature", errors)
+            validated = {"records": records, "errors": []}
         for spec, issues in sorted(groups.items(), key=lambda item: str(item[0])):
             leaves, errors = architecture_graph.active_spec_leaves(spec.parent.glob("*-tech-spec-*.md"))
             if spec.name not in leaves:
                 errors.append(f"{spec.name}: not an active confirmed leaf tech-spec")
             errors.extend(architecture_graph.check_flow_forward(
-                repo, spec, issues, head=head))
+                repo, spec, issues, head=head, feature_issue_ids=feature_issue_ids, validated=validated))
             rep.extend("architecture-feature", [str(error) for error in errors])
-        if (repo / "docs" / "architecture").is_dir() and list((repo / "docs" / "architecture").glob("*.json")):
-            _, errors = architecture_graph.render_homepage(repo, write=False, head=head)
+        if has_shards:
+            _, errors = architecture_graph.render_homepage(repo, write=False, head=head, validated=validated)
             rep.extend("architecture-homepage", [str(error) for error in errors])
     except (ImportError, ValueError, OSError, TypeError) as exc:
         rep.add("architecture-feature", "FAIL", f"feature architecture validation failed: {exc}")
@@ -662,18 +636,11 @@ def freeze(args) -> Report:
         if status == "deferred" or (scope and iid not in scope):
             continue
         flow_files.append(f)
-        conf = yaml_head(fdir / "impl" / iid / f"conformance-{iid}.md")
-        verdict = str(conf.get("verdict") or "")
         merged_commit = merged.get(iid)
-        try:
-            projection = checker_projection(iid, conf, cfg)
-        except InputError as exc:
-            projection = None
-            rep.add("conformance", "FAIL", f"{iid} {exc}")
-        issues.append({"id": iid, "status": status, "merged_commit": merged_commit, "conformance": verdict or None,
-                       "conformance_context": projection})
-        if status != "done":
-            rep.add("issues", "FAIL", f"{iid} status={status or '<空>'}，未全部 done 不得冻结")
+        issues.append({"id": iid, "status": status, "merged_commit": merged_commit})
+        if status not in ("merged", "done"):
+            rep.add("issues", "FAIL", f"{iid} status={status or '<空>'}，须全部 merged（已入集成分支）或 done；"
+                                         "评审、复跑与符合性统一在 feature 候选门执行")
         if not isinstance(merged_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", merged_commit):
             rep.add("issues", "FAIL", f"{iid} 缺完整 40 位 merged commit；不得用占位或短哈希冻结")
         else:
@@ -684,8 +651,6 @@ def freeze(args) -> Report:
                     rep.add("issues", "FAIL", f"{iid} merged commit {merged_commit[:12]} 不是当前 candidate 的祖先")
             except InputError as exc:
                 rep.add("issues", "FAIL", f"{iid} merged commit 不可用：{exc}")
-        if verdict != "conform":
-            rep.add("conformance", "FAIL", f"{iid} conformance verdict={verdict or '<缺>'}，每票均须 conform；集成票绝不允许 skipped")
         check_no_active_decisions(rep, fdir, iid)
     check_no_active_decisions(rep, fdir)
     candidate_head, _ = head_info(repo)
@@ -1038,9 +1003,15 @@ def _result_map(results: dict):
     return out
 
 
-def _report_decision(plan: dict, results: dict, evidence: dict, conformance: dict, cand: dict, confirmation: dict, material_invalid: bool) -> str:
+def _report_decision(plan: dict, results: dict, evidence: dict, conformance: dict, cand: dict, confirmation: dict,
+                     material_invalid: bool, review: dict = None, candidate_verification: dict = None) -> str:
     items = _result_map(results)
-    blocking = material_invalid or evidence.get("all-passed") is not True or conformance.get("verdict") != "conform"
+    review = review or {}
+    candidate_verification = candidate_verification or {}
+    blocking = (material_invalid or evidence.get("all-passed") is not True
+                or conformance.get("verdict") != "conform"
+                or review.get("verdict") not in ("pass", "pass-with-notes")
+                or candidate_verification.get("all-passed") is not True)
     waiting_auto = waiting_human = waived = 0
     seen = set(items)
     if seen - set(plan.get("cases") or {}):
@@ -1109,6 +1080,8 @@ def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
     evidence = yaml_head(integ / "evidence.md")
     conformance = yaml_head(integ / "conformance-feature.md")
     confirmation = yaml_head(integ / "confirmation.md")
+    review = load_json(integ / FEATURE_REVIEW_RECEIPT)
+    candidate_verification = load_json(integ / CANDIDATE_VERIFICATION)
     items = _result_map(results)
     cases = plan.get("cases") or {}
     environment = results.get("environment") or {}
@@ -1138,6 +1111,12 @@ def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
         f"- Artifact generations：{_md(generation_text)}",
         f"- 关联自动检查：{'通过' if evidence.get('all-passed') is True else '未通过或未完成'}"
         f"（direct {ran.get('direct', '?')}、indirect {ran.get('indirect', '?')}、deferred {ran.get('deferred', '?')}、quarantined {ran.get('quarantined', '?')}）",
+        f"- 整需求独立评审：{_md(review.get('verdict') or '未完成')}"
+        f"（reviewer {_md((review.get('reviewer') or {}).get('host'))}/"
+        f"{_md((review.get('reviewer') or {}).get('session'))}，findings {len(review.get('findings') or [])}）",
+        f"- 候选 supervisor 复跑：{'全部通过' if candidate_verification.get('all-passed') is True else '未完成或有失败'}"
+        f"（{sum(1 for item in candidate_verification.get('issues') or [] if item.get('pass') is True)}/"
+        f"{len(candidate_verification.get('issues') or [])} 票）",
         f"- AI 完整验收：{len(passed)}/{len(full)} 通过，{len(failed)} 失败，{len([x for x in full if x[2].get('status') == 'unverified'])} 未验证",
         f"- AI 执行、人工复核：{len(assisted_done)}/{len(assisted)} 已处理",
         f"- 人工验收：{len(manual_done)}/{len(manual)} 已处理",
@@ -1188,7 +1167,8 @@ def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
         lines.append(f"- 延期兜底：{deferred}")
     lines += [
         "", "## 合并建议", "",
-        _report_decision(plan, results, evidence, conformance, cand, confirmation, material_invalid), "",
+        _report_decision(plan, results, evidence, conformance, cand, confirmation, material_invalid,
+                         review, candidate_verification), "",
         "本报告只说明验收事实与建议，不代替人的合并、发布或 push 授权。", "",
         "想细看：integration/evidence.md、business-results.json、acceptance-plan.json、artifacts/。", "",
     ]
@@ -1233,6 +1213,129 @@ def _check_main_unchanged(rep: Report, repo: Path, cfg: dict, cand: dict):
                                      "任何路径变化都须同步 main、重新 freeze 并重验，main-drift-ignore 不再放行")
 
 
+def _check_ticket_states(rep: Report, fdir: Path, repo: Path, cand: dict):
+    """Re-read ticket status and merged commits; candidate membership is not a claim."""
+    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
+    records = {}
+    for issue in sorted((fdir / "issues").glob("issue-*.md")):
+        fm = read_frontmatter(issue)
+        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+        if iid in wanted:
+            records[iid] = (issue, fm)
+    merged = last_merged(fdir)
+    candidate = str(cand.get("candidate") or "")
+    for item in cand.get("issues") or []:
+        iid = str(item.get("id"))
+        if iid not in records:
+            rep.add("ticket-state", "FAIL", f"{iid} 票文件已丢失，不得沿用冻结票组")
+            continue
+        _, fm = records[iid]
+        status = str(fm.get("status") or "")
+        if status not in ("merged", "done"):
+            rep.add("ticket-state", "FAIL", f"{iid} status={status or '<空>'}，须为 merged（待 feature 验收）或 done")
+        if item.get("status") is not None and status != item.get("status"):
+            rep.add("ticket-state", "FAIL", f"{iid} status 在 freeze 后由 {item.get('status')} 变为 {status}；"
+                                                 "候选票组已变化，重新 freeze")
+        commit = item.get("merged_commit")
+        if merged.get(iid) != commit:
+            rep.add("ticket-state", "FAIL", f"{iid} merged 事件与冻结 commit 不一致或已丢失")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            continue
+        try:
+            if git(repo, "rev-parse", "--verify", commit + "^{commit}").strip() != commit:
+                rep.add("ticket-state", "FAIL", f"{iid} merged commit {commit[:12]} 不是完整提交")
+            elif not subprocess_run_ancestor(repo, commit, candidate):
+                rep.add("ticket-state", "FAIL", f"{iid} merged commit {commit[:12]} 不是 candidate 的祖先")
+        except InputError as exc:
+            rep.add("ticket-state", "FAIL", f"{iid} merged commit 不可复核：{exc}")
+
+
+def _check_feature_review(rep: Report, fdir: Path, integ: Path, repo: Path, cand: dict):
+    path = integ / FEATURE_REVIEW_RECEIPT
+    if not path.is_file():
+        rep.add("feature-review", "FAIL", f"{path.name} 不存在：整需求独立评审须在 feature 候选上执行一次")
+        return
+    try:
+        rr = importlib.import_module("review_receipt")
+        errors = rr.validate_feature_receipt(fdir, repo, path, candidate=cand)
+    except (ImportError, ValueError, OSError, TypeError) as exc:
+        rep.add("feature-review", "FAIL", f"整需求评审 receipt 无法校验：{exc}")
+        return
+    rep.extend("feature-review", errors)
+    if errors:
+        return
+    receipt = load_json(path)
+    if receipt.get("verdict") not in ("pass", "pass-with-notes"):
+        rep.add("feature-review", "FAIL", f"整需求评审 verdict={receipt.get('verdict') or '<缺>'}，须 pass / pass-with-notes")
+    implementers = {str(item.get("session")) for item in receipt.get("implementers") or []}
+    reviewer = str((receipt.get("reviewer") or {}).get("session") or "")
+    if not reviewer or reviewer in implementers:
+        rep.add("feature-review", "FAIL", "reviewer session 必须独立于全部票 implementer")
+
+
+def _check_candidate_verification(rep: Report, integ: Path, cand: dict):
+    path = integ / CANDIDATE_VERIFICATION
+    if not path.is_file():
+        rep.add("candidate-verification", "FAIL",
+                f"{path.name} 不存在：feature 候选须对每票冻结 DoD+fast 复跑一次")
+        return
+    value = load_json(path)
+    if not value:
+        rep.add("candidate-verification", "FAIL", f"{path.name} 为空或不可读")
+        return
+    try:
+        js = importlib.import_module("json_schema")
+        errors = js.load_validate(CANDIDATE_VERIFICATION_SCHEMA_PATH, value)
+    except (ImportError, ValueError, OSError) as exc:
+        rep.add("candidate-verification", "FAIL", f"候选复跑 schema 不可用：{exc}")
+        return
+    for error in errors:
+        rep.add("candidate-verification", "FAIL", error)
+    if (value.get("candidate") != cand.get("candidate")
+            or value.get("candidate_tree") != cand.get("candidate_tree")
+            or value.get("main_head") != cand.get("main_head")
+            or value.get("plan_sha256") != (cand.get("acceptance_plan") or {}).get("sha256")):
+        rep.add("candidate-verification", "FAIL", "候选复跑绑定的 candidate/tree/main_head/plan 与冻结候选不一致")
+    if value.get("all-passed") is not True:
+        rep.add("candidate-verification", "FAIL", "候选复跑并非全部通过；任一失败不得进入合并")
+    expected = {str(item.get("id")) for item in cand.get("issues") or []}
+    entries = value.get("issues") if isinstance(value.get("issues"), list) else []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        iid = str(entry.get("issue") or "")
+        if iid in seen:
+            rep.add("candidate-verification", "FAIL", f"{iid} 候选复跑结果重复")
+        seen.add(iid)
+        if iid not in expected:
+            rep.add("candidate-verification", "FAIL", f"{iid} 不在冻结票组，不得混入候选复跑")
+            continue
+        if entry.get("pass") is not True:
+            rep.add("candidate-verification", "FAIL", f"{iid} 候选复跑未通过")
+        if entry.get("head") != cand.get("candidate") or entry.get("tree") != cand.get("candidate_tree"):
+            rep.add("candidate-verification", "FAIL", f"{iid} 复跑记录未绑定当前 candidate/tree")
+        relative = entry.get("verification_path")
+        digest = entry.get("verification_sha256")
+        if not isinstance(relative, str) or not relative or not isinstance(digest, str):
+            rep.add("candidate-verification", "FAIL", f"{iid} 缺原始 verification 路径或哈希")
+            continue
+        rel = Path(relative)
+        if rel.is_absolute() or ".." in rel.parts:
+            rep.add("candidate-verification", "FAIL", f"{iid} verification 路径必须相对候选目录且不得含 ..")
+            continue
+        evidence = path.parent / rel
+        if not evidence.is_file() or evidence.is_symlink():
+            rep.add("candidate-verification", "FAIL", f"{iid} verification 证据不存在或为软链：{relative}")
+            continue
+        if sha256_file(evidence) != digest:
+            rep.add("candidate-verification", "FAIL", f"{iid} verification 证据哈希不匹配：{relative}")
+    missing = sorted(expected - seen)
+    if missing:
+        rep.add("candidate-verification", "FAIL", "候选复跑漏票：" + ", ".join(missing))
+
+
 def _check_confirmation(rep: Report, integ: Path, cand: dict):
     c = yaml_head(integ / "confirmation.md")
     if not c:
@@ -1268,8 +1371,8 @@ def _check_confirmation(rep: Report, integ: Path, cand: dict):
             rep.add("confirmation", "FAIL", f"merge-main 不包含 {forbidden} 授权")
 
 
-def _check_feature_conformance(rep: Report, fdir: Path, repo: Path, cand: dict):
-    path = fdir / "integration" / "conformance-feature.md"
+def _check_feature_conformance(rep: Report, fdir: Path, integ: Path, repo: Path, cand: dict):
+    path = integ / FEATURE_CONFORMANCE
     conf = yaml_head(path)
     tree = cand.get("candidate_tree")
     if str(conf.get("verdict") or "") != "conform" or conf.get("candidate") != cand.get("candidate") or conf.get("candidate_tree") != tree:
@@ -1373,6 +1476,7 @@ def check(args) -> Report:
         rep.add("candidate", "FAIL", f"集成分支 HEAD/tree 与冻结候选不一致：冻结后有新提交或 tree 改写，重新 freeze")
     _check_main_unchanged(rep, repo, cfg, cand)
     check_plan_unchanged(rep, fdir, cand)
+    _check_ticket_states(rep, fdir, repo, cand)
     wanted = {str(item.get("id")) for item in cand.get("issues") or []}
     flow_files = []
     for issue in sorted((fdir / "issues").glob("issue-*.md")):
@@ -1393,7 +1497,9 @@ def check(args) -> Report:
         if ev.get("all-passed") is not True:
             rep.add("evidence", "FAIL", "evidence 头 all-passed 不是 true")
 
-    _check_feature_conformance(rep, fdir, repo, cand)
+    _check_feature_conformance(rep, fdir, integ, repo, cand)
+    _check_feature_review(rep, fdir, integ, repo, cand)
+    _check_candidate_verification(rep, integ, cand)
 
     results = load_json(integ / "business-results.json")
     _check_results(rep, fdir, results, plan, cand, args.phase)
@@ -1432,6 +1538,30 @@ def _canonical_sha(value) -> str:
                                      separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
 
 
+def feature_evidence_hashes(integ: Path) -> dict:
+    """Hashes that bind review, candidate re-run and feature conformance to merge."""
+    integ = Path(integ)
+    return {
+        "feature_review_sha256": sha256_file(integ / FEATURE_REVIEW_RECEIPT),
+        "candidate_verification_sha256": sha256_file(integ / CANDIDATE_VERIFICATION),
+        "feature_conformance_sha256": sha256_file(integ / FEATURE_CONFORMANCE),
+    }
+
+
+def feature_gate_evidence(integ: Path) -> dict:
+    """All candidate-gate bytes that must change the promote operation identity."""
+    integ = Path(integ)
+    evidence = feature_evidence_hashes(integ)
+    for key, filename in (
+        ("report_sha256", "acceptance-report.md"),
+        ("business_results_sha256", "business-results.json"),
+        ("confirmation_sha256", "confirmation.md"),
+    ):
+        path = integ / filename
+        evidence[key] = sha256_file(path) if path.is_file() else None
+    return evidence
+
+
 def authorize_merge(args, online_proof=None) -> dict:
     """Return an in-memory, single-scope authorization after all merge gates pass."""
     args.phase = "merge"
@@ -1460,6 +1590,7 @@ def authorize_merge(args, online_proof=None) -> dict:
         "main_head": cand["main_head"], "scope": "merge-main", "conditions": [],
         "report_sha256": sha256_file(integ / "acceptance-report.md"),
         "business_results_sha256": sha256_file(integ / "business-results.json"),
+        **feature_evidence_hashes(integ),
         "confirmation_sha256": sha256_file(confirmation_path) if mode == "local-human" else None,
         "online_proof_sha256": _canonical_sha(online_proof) if online_proof is not None else None,
         "online_proof": online_proof,
@@ -1473,7 +1604,9 @@ def restore_merge_authorization(payload) -> dict:
     if not isinstance(payload, dict) or payload.get("schema") != "agent-dev.feature-merge-authorization/v2":
         raise InputError("invalid persisted feature merge authorization")
     required = ("feature_dir", "repo", "mode", "candidate_sha256", "candidate", "candidate_tree",
-                "main_head", "scope", "conditions", "operation_id")
+                "main_head", "scope", "conditions", "operation_id", "report_sha256",
+                "business_results_sha256", "feature_review_sha256",
+                "candidate_verification_sha256", "feature_conformance_sha256")
     if any(key not in payload for key in required) or payload.get("scope") != "merge-main" or payload.get("conditions") != []:
         raise InputError("persisted feature merge authorization is incomplete or out of scope")
     restored = dict(payload)
@@ -1527,6 +1660,13 @@ def record_merge(authorization, merge_result) -> Report:
             rep.add("report", "FAIL", "验收报告在授权后变化")
         if sha256_file(integ / "business-results.json") != authorization["business_results_sha256"]:
             rep.add("business", "FAIL", "业务结果在授权后变化")
+        for key, filename in (
+            ("feature_review_sha256", FEATURE_REVIEW_RECEIPT),
+            ("candidate_verification_sha256", CANDIDATE_VERIFICATION),
+            ("feature_conformance_sha256", FEATURE_CONFORMANCE),
+        ):
+            if sha256_file(integ / filename) != authorization.get(key):
+                rep.add("evidence", "FAIL", f"{filename} 在授权后变化；评审/复跑/符合性须重新确认")
         if authorization.get("confirmation_sha256"):
             if sha256_file(integ / "confirmation.md") != authorization["confirmation_sha256"]:
                 rep.add("confirmation", "FAIL", "人工确认在授权后变化")
@@ -1583,6 +1723,160 @@ def record_merge(authorization, merge_result) -> Report:
     except (InputError, KeyError, TypeError, ValueError, OSError) as exc:
         rep.add("merge", "FAIL", f"合并登记失败，事务保持 pending：{exc}")
         return rep
+
+
+def _ticket_identity(fdir: Path, issue: Path, iid: str) -> dict:
+    fm = read_frontmatter(issue)
+    return {
+        "id": iid, "key": issue.stem, "title": str(fm.get("title") or iid), "status": "done",
+        "feature": f"{fdir.parent.name}/{fdir.name}", "feature_dir": str(fdir.resolve()),
+        "issue_path": str(issue.resolve()),
+    }
+
+
+def _cleanup_ticket(rep: Report, repo: Path, fdir: Path, iid: str, issue: Path):
+    try:
+        pc = importlib.import_module("progress_cleanup")
+        progress = importlib.import_module("progress")
+        ticket = progress.find_ticket(repo, iid) or _ticket_identity(fdir, issue, iid)
+        resources = pc.discover_resources(repo)
+        branch = next((name for name in resources["local_branches"]
+                       if pc._branch_matches(ticket, name)), None)
+        worktrees = [item for item in resources["worktrees"]
+                     if branch and item.get("branch_name") == branch]
+        impl_exists = (fdir / "impl" / iid).is_dir()
+        if not branch and not worktrees and not impl_exists:
+            rep.add("cleanup", "PASS", f"{iid} 已无 worktree/branch/dev 过程物，跳过重复清理")
+            return
+        plan = pc.make_plan(repo, ticket=ticket, intent="close")
+        if not plan.get("ok"):
+            rep.add("cleanup", "FAIL", f"{iid} 清理计划不可执行：{plan.get('reason') or plan.get('error')}")
+            return
+        result = pc.apply_operation(repo, plan["operation_id"], plan["confirm"])
+        if result.get("ok"):
+            rep.add("cleanup", "PASS", f"{iid} 已清理（journal {result.get('operation_id')}）")
+        else:
+            rep.add("cleanup", "FAIL", f"{iid} 清理未完成（{result.get('state')}）："
+                                         f"{'; '.join(result.get('warnings') or []) or result.get('error')}")
+    except (ImportError, ValueError, OSError, RuntimeError) as exc:
+        rep.add("cleanup", "FAIL", f"{iid} 清理失败：{exc}")
+
+
+def _cleanup_feature(rep: Report, repo: Path, fdir: Path, cand: dict):
+    try:
+        pc = importlib.import_module("progress_cleanup")
+        branch_oid = pc._full_oid(repo, cand["integration_branch"])
+        worktrees = [item for item in pc.discover_resources(repo)["worktrees"]
+                     if item.get("branch_name") == cand["integration_branch"]]
+        impl_exists = (fdir / "impl").is_dir() and any((fdir / "impl").iterdir())
+        if not branch_oid and not worktrees and not impl_exists:
+            rep.add("cleanup", "PASS", "集成分支/worktree/dev 过程物均已清理，跳过重复 feature 清理")
+            return
+        plan = pc.make_plan(repo, feature_dir=fdir, intent="close")
+        if not plan.get("ok"):
+            rep.add("cleanup", "FAIL", f"feature 清理计划不可执行：{plan.get('reason') or plan.get('error')}")
+            return
+        result = pc.apply_operation(repo, plan["operation_id"], plan["confirm"])
+        if result.get("ok"):
+            rep.add("cleanup", "PASS", f"集成分支与 dev 过程物已清理（journal {result.get('operation_id')}）")
+        else:
+            rep.add("cleanup", "FAIL", f"feature 清理未完成（{result.get('state')}）："
+                                         f"{'; '.join(result.get('warnings') or []) or result.get('error')}")
+    except (ImportError, ValueError, OSError, RuntimeError) as exc:
+        rep.add("cleanup", "FAIL", f"feature 清理失败：{exc}")
+
+
+def finalize(args) -> Report:
+    return finalize_tickets(Path(args.feature_dir), Path(args.repo), getattr(args, "round", None),
+                            cleanup=getattr(args, "cleanup", True))
+
+
+def finalize_tickets(fdir: Path, repo: Path, round_name=None, cleanup=True) -> Report:
+    """feature-merged → accepted/done, then close-and-clean ticket and feature resources."""
+    rep = Report()
+    fdir = Path(fdir)
+    repo = Path(repo)
+    integ = fdir / "integration" / round_name if round_name else fdir / "integration"
+    cand = load_json(integ / "candidate.json")
+    if not cand:
+        rep.add("candidate", "FAIL", "integration/candidate.json 不存在：先 freeze 并 promote")
+        return rep
+    merged_commit = str(cand.get("merged_commit") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", merged_commit):
+        rep.add("merge", "FAIL", "候选尚未登记 feature-merged commit；先完成 promote")
+        return rep
+    try:
+        head = git(repo, "rev-parse", "HEAD").strip()
+        branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    except InputError as exc:
+        rep.add("repo", "FAIL", str(exc))
+        return rep
+    if head != merged_commit or branch != cand.get("main_branch"):
+        rep.add("merge", "FAIL", f"主工作区须停在 {cand.get('main_branch')}@{merged_commit[:12]}；"
+                                      f"实际 {branch}@{head[:12]}")
+        return rep
+    events = load_progress_events(fdir)
+    matching = [event for event in events
+                if event.get("event") == "feature-merged"
+                and event.get("commit") == merged_commit
+                and event.get("event_id") == cand.get("merge_operation")]
+    if len(matching) != 1:
+        rep.add("merge", "FAIL", "缺少唯一且精确绑定候选的 feature-merged 事件")
+        return rep
+    config = load_config(fdir)
+    host = _event_host(config)
+    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
+    records = {}
+    for issue in sorted((fdir / "issues").glob("issue-*.md")):
+        fm = read_frontmatter(issue)
+        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+        if iid in wanted:
+            records[iid] = (issue, fm)
+    accepted = {event.get("event_id") for event in events if event.get("event") == "accepted"}
+    for item in cand.get("issues") or []:
+        iid = str(item.get("id"))
+        if iid not in records:
+            rep.add("finalize", "FAIL", f"{iid} 票文件丢失，不能写 accepted")
+            continue
+        issue, fm = records[iid]
+        status = str(fm.get("status") or "")
+        if status == "done":
+            rep.add("finalize", "PASS", f"{iid} 已是 done；历史完成票不重复写 accepted")
+            continue
+        if status != "merged":
+            rep.add("finalize", "FAIL", f"{iid} status={status or '<空>'}，只有 merged 票可 finalize")
+            continue
+        event_id = f"accepted:{iid}:{cand['candidate']}"
+        if event_id not in accepted:
+            append_event(fdir, "accepted", event_id=event_id, issue=iid,
+                         commit=merged_commit, candidate=cand["candidate"],
+                         candidate_tree=cand["candidate_tree"], target=cand.get("main_branch"),
+                         branch=cand.get("integration_branch"), host=host,
+                         note="feature candidate 通过评审/复跑/符合性并完成 merge-main")
+        text = issue.read_text(encoding="utf-8")
+        updated = re.sub(r"^status:\s*.*$", "status: done", text, count=1, flags=re.M)
+        _module_state_store().atomic_write(issue, updated, mode=0o644)
+        rep.add("finalize", "PASS", f"{iid} merged → done（accepted {event_id}）")
+    if rep.failed or not cleanup:
+        if not rep.failed:
+            rep.add("cleanup", "INFO", "已按 --no-cleanup 保留 worktree/branch 与过程物")
+        return rep
+    for item in cand.get("issues") or []:
+        iid = str(item.get("id"))
+        if str(item.get("status")) != "merged":
+            continue
+        if iid in records:
+            _cleanup_ticket(rep, repo, fdir, iid, records[iid][0])
+    _cleanup_feature(rep, repo, fdir, cand)
+    return rep
+
+
+def _module_state_store():
+    try:
+        return importlib.import_module("state_store")
+    except ImportError as exc:
+        raise InputError(f"state_store 不可用：{exc}")
 
 
 def run_command_ac(args) -> Report:
@@ -1775,7 +2069,16 @@ def main(argv=None) -> int:
         if name == "run-ac":
             p.add_argument("--ac", required=True, help="冻结计划中的 command AC 编号")
             p.add_argument("--timeout", type=float, default=120.0)
+    pf = sub.add_parser("finalize", help="feature-merged 后转 done 并清理票/feature 资源")
+    pf.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
+    pf.add_argument("--round", help="同一 feature 目录下的一轮需求名")
+    pf.add_argument("--repo", required=True, help="主工作区")
+    pf.add_argument("--no-cleanup", action="store_true", dest="no_cleanup",
+                    help="只写 accepted/done，保留 worktree/branch 与过程物")
+    pf.add_argument("--json", help="结果 JSON 写入路径")
     args = ap.parse_args(argv)
+    if args.cmd == "finalize":
+        args.cleanup = not args.no_cleanup
     try:
         if args.cmd == "target":
             return target(args)
@@ -1784,7 +2087,8 @@ def main(argv=None) -> int:
         elif args.cmd == "report":
             return report(args)
         else:
-            fn = {"freeze": freeze, "check": check, "run-ac": run_command_ac}[args.cmd]
+            fn = {"freeze": freeze, "check": check, "run-ac": run_command_ac,
+                  "finalize": finalize}[args.cmd]
             rep = fn(args)
     except InputError as e:
         print(f"feature-closeout: 输入错误：{e}", file=sys.stderr)

@@ -10,8 +10,12 @@ Expected lazy-loaded shared APIs (kept small so this module has no v1 fallback):
 Only ``run`` executes the parsed DoD and the configured fast command.  ``red``
 records a real first assertion failure for newly added tests. ``bug-regression``
 uses a disposable detached worktree for caller-supplied revert/restore commands;
-it never resets, restores, or stashes the ticket worktree.  Each run writes a
-self-contained generation under raw/<generation>/ with the shared
+it never resets, restores, or stashes the ticket worktree.  ``run-candidate``
+replays each frozen ticket-context DoD+fast in the integration worktree at the
+exact candidate commit/tree, writes per-ticket supervisor evidence under
+``output_dir/<issue>/`` (never into the ticket's ``impl/`` manifest chain), and
+aggregates ``candidate-verification.json``.  Each run writes a self-contained
+generation under raw/<generation>/ with the shared
 artifact-generation-manifest.json; only a passing full DoD+fast run advances the
 current/supersedes chain.
 """
@@ -36,6 +40,9 @@ from pathlib import Path
 
 SCHEMA = "agent-dev.verification/v2"
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "verification.schema.json"
+CANDIDATE_SCHEMA = "agent-dev.candidate-verification/v1"
+CANDIDATE_SCHEMA_PATH = (Path(__file__).resolve().parent.parent / "references"
+                         / "candidate-verification.schema.json")
 MANIFEST_NAME = "artifact-generation-manifest.json"
 SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",
@@ -399,8 +406,11 @@ def _quarantine_names(config, root: Path):
     return result
 
 
+CANDIDATE_FLOW_ENV = "AGENT_DEV_FROZEN_CANDIDATE_FLOW"
+
+
 def _execute(task, *, runner, repo, impl_dir, head, tree, timeout, config, root,
-             attempt=1, red=False, generation=None):
+             attempt=1, red=False, generation=None, candidate_flow=None):
     record = _base_record(task, runner, head, tree, repo, attempt, generation)
     policy = _get(config, "verify-policy", "verify_policy", default={}) or {}
     gate = _get(policy, "gate-scope", "gate_scope", default={}) or {}
@@ -425,9 +435,13 @@ def _execute(task, *, runner, repo, impl_dir, head, tree, timeout, config, root,
     started = time.monotonic()
     record["started_at"] = _utc_now()
     output = b""
+    environment = dict(os.environ)
+    environment.pop(CANDIDATE_FLOW_ENV, None)
+    if candidate_flow is not None:
+        environment[CANDIDATE_FLOW_ENV] = candidate_flow
     try:
         process = subprocess.Popen(
-            record["command"], cwd=record["cwd"], shell=True,
+            record["command"], cwd=record["cwd"], shell=True, env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=(os.name == "posix"),
         )
@@ -521,7 +535,11 @@ def _counts(document):
 def _identity(args, runner):
     source = {}
     if getattr(args, "identity_json", None):
-        source = json.loads(Path(args.identity_json).read_text(encoding="utf-8"))
+        value = args.identity_json
+        if isinstance(value, dict):
+            source = value
+        else:
+            source = json.loads(Path(value).read_text(encoding="utf-8"))
     role = "development" if runner == "implementer" else "supervisor"
     result = {
         "host": getattr(args, "host", None) or source.get("host") or os.environ.get("AGENT_HOST") or "unspecified",
@@ -586,37 +604,20 @@ def _load_bug(path: Path):
         return None
 
 
-def run_verification(args) -> dict:
-    issue = Path(args.issue).resolve()
-    repo = Path(args.repo).resolve()
-    parsed, context, config, root = _load_shared(issue, repo)
-    issue_id = _issue_id(parsed, context, issue)
-    impl_dir = Path(args.output_dir).resolve() if args.output_dir else _impl_dir(context, issue, issue_id)
-    tasks = verification_tasks(parsed, context, config, root)
+def _run_tasks(*, issue_id, runner, base, repo, impl_dir, tasks, timeout, config, root,
+               identity, prepare=None, candidate_flow=None) -> dict:
+    """Execute frozen tasks in *repo* and persist one self-contained generation."""
     before = _snapshot(repo)
-    document = _new_document(issue_id, args.runner, _base(context, repo), before, _identity(args, args.runner))
-    document["red_records"] = []
+    document = _new_document(issue_id, runner, base, before, identity)
     auxiliary_documents = {}
-    red_path = impl_dir / "verification-red.json"
-    if red_path.is_file():
-        red_document = _rehome_document(json.loads(red_path.read_text(encoding="utf-8")),
-                                        impl_dir, generation_of(document))
-        _write_json(red_path, red_document)
-        document["red_records"] = red_document.get("red_records", [])
-        auxiliary_documents["verification-red.json"] = red_document
-    bug_path = impl_dir / "bug-regression.json"
-    document["bug_regression"] = None
-    if bug_path.is_file():
-        bug_document = _rehome_document(json.loads(bug_path.read_text(encoding="utf-8")),
-                                        impl_dir, generation_of(document))
-        _write_json(bug_path, bug_document)
-        document["bug_regression"] = bug_document.get("bug_regression")
-        auxiliary_documents["bug-regression.json"] = bug_document
+    if prepare is not None:
+        prepare(document, auxiliary_documents)
     if before["tracked_clean"] and not before["untracked_source"]:
         for task in tasks:
-            record = _execute(task, runner=args.runner, repo=repo, impl_dir=impl_dir,
-                              head=before["head"], tree=before["tree"], timeout=args.timeout,
-                              config=config, root=root, generation=generation_of(document))
+            record = _execute(task, runner=runner, repo=repo, impl_dir=impl_dir,
+                              head=before["head"], tree=before["tree"], timeout=timeout,
+                              config=config, root=root, generation=generation_of(document),
+                              candidate_flow=candidate_flow)
             document["records"].append(record)
             if record["timed_out"] and record["kind"] in {"dod", "fast"}:
                 try:
@@ -625,10 +626,10 @@ def run_verification(args) -> dict:
                     loaded = False
                 if loaded:
                     retry_task = dict(task, id=task["id"] + ":load-flake-retry")
-                    retry = _execute(retry_task, runner=args.runner, repo=repo, impl_dir=impl_dir,
-                                     head=before["head"], tree=before["tree"], timeout=args.timeout,
+                    retry = _execute(retry_task, runner=runner, repo=repo, impl_dir=impl_dir,
+                                     head=before["head"], tree=before["tree"], timeout=timeout,
                                      config=config, root=root, attempt=2,
-                                     generation=generation_of(document))
+                                     generation=generation_of(document), candidate_flow=candidate_flow)
                     retry["retry_of"] = task["id"]
                     document["records"].append(retry)
                     if retry["pass"]:
@@ -636,7 +637,7 @@ def run_verification(args) -> dict:
                         record["gating"] = False
     else:
         for task in tasks:
-            record = _base_record(task, args.runner, before["head"], before["tree"], repo,
+            record = _base_record(task, runner, before["head"], before["tree"], repo,
                                   generation=generation_of(document))
             _finish_raw(record, impl_dir, b"VERIFY_NOT_STARTED: dirty worktree or untracked source\n")
             document["records"].append(record)
@@ -646,11 +647,42 @@ def run_verification(args) -> dict:
     document["counts"] = _counts(document)
     document["pass"] = _compute_pass(document)
     document["generated_at"] = _utc_now()
-    output = impl_dir / ("verification-%s.json" % args.runner)
+    output = impl_dir / ("verification-%s.json" % runner)
     _write_json(output, document)
     write_evidence_and_manifest(impl_dir, issue_id, primary=document,
                                 auxiliary_documents=auxiliary_documents)
     return document
+
+
+def run_verification(args) -> dict:
+    issue = Path(args.issue).resolve()
+    repo = Path(args.repo).resolve()
+    parsed, context, config, root = _load_shared(issue, repo)
+    issue_id = _issue_id(parsed, context, issue)
+    impl_dir = Path(args.output_dir).resolve() if args.output_dir else _impl_dir(context, issue, issue_id)
+    tasks = verification_tasks(parsed, context, config, root)
+
+    def prepare(document, auxiliary_documents):
+        red_path = impl_dir / "verification-red.json"
+        if red_path.is_file():
+            red_document = _rehome_document(json.loads(red_path.read_text(encoding="utf-8")),
+                                            impl_dir, generation_of(document))
+            _write_json(red_path, red_document)
+            document["red_records"] = red_document.get("red_records", [])
+            auxiliary_documents["verification-red.json"] = red_document
+        bug_path = impl_dir / "bug-regression.json"
+        document["bug_regression"] = None
+        if bug_path.is_file():
+            bug_document = _rehome_document(json.loads(bug_path.read_text(encoding="utf-8")),
+                                            impl_dir, generation_of(document))
+            _write_json(bug_path, bug_document)
+            document["bug_regression"] = bug_document.get("bug_regression")
+            auxiliary_documents["bug-regression.json"] = bug_document
+
+    return _run_tasks(issue_id=issue_id, runner=args.runner, base=_base(context, repo),
+                      repo=repo, impl_dir=impl_dir, tasks=tasks, timeout=args.timeout,
+                      config=config, root=root, identity=_identity(args, args.runner),
+                      prepare=prepare)
 
 
 def red_verification(args) -> dict:
@@ -853,15 +885,19 @@ def _rehome_document(document, impl_dir: Path, generation: str):
         source = _artifact_path(impl_dir, relative)
         if not source.is_file() or source.is_symlink():
             raise VerificationError("cannot rehome missing/symlink raw evidence: %s" % relative)
-        old_generation = _record_generation(record)
-        name = "%s-%s-%s" % (old_generation, record.get("runner", "runner"), source.name)
-        destination_relative = "raw/%s/history/%s" % (generation, name)
+        data = source.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != raw.get("sha256"):
+            raise VerificationError("historical raw evidence digest changed: %s" % relative)
+        destination_relative = "raw/%s/history/%s.log" % (generation, digest)
         destination = _artifact_path(impl_dir, destination_relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        data = source.read_bytes()
-        destination.write_bytes(data)
+        if destination.exists():
+            if _sha(destination) != digest:
+                raise VerificationError("historical archive digest mismatch: %s" % destination_relative)
+        else:
+            destination.write_bytes(data)
         raw["path"] = destination_relative
-        raw["sha256"] = hashlib.sha256(data).hexdigest()
     document["manifest"] = "raw/%s/%s" % (generation, MANIFEST_NAME)
     return document
 
@@ -1162,6 +1198,260 @@ def validate_verification(document, document_path: Path, repo: Path,
     return errors
 
 
+def _candidate_location(path: Path):
+    """Return (feature_dir, integration_dir) for integration/[round/]candidate.json."""
+    path = Path(path).resolve()
+    if path.name != "candidate.json":
+        raise VerificationError("--candidate must name candidate.json")
+    if path.parent.name == "integration":
+        return path.parent.parent, path.parent
+    if path.parent.parent.name == "integration":
+        return path.parent.parent.parent, path.parent
+    raise VerificationError("candidate must be under feature integration/[round]/candidate.json")
+
+
+def _candidate_document(path: Path, data=None):
+    """Load and structurally validate the frozen feature candidate."""
+    try:
+        value = json.loads(path.read_bytes() if data is None else data)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise VerificationError("cannot read candidate %s: %s" % (path, exc))
+    if not isinstance(value, dict):
+        raise VerificationError("candidate JSON root must be an object")
+    for key in ("candidate", "candidate_tree"):
+        if not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{40}", value[key]):
+            raise VerificationError("candidate.%s must be a full 40-character Git OID" % key)
+    if not isinstance(value.get("main_head"), str) or not re.fullmatch(r"[0-9a-f]{40}", value["main_head"]):
+        raise VerificationError("candidate.main_head must be a full 40-character Git OID")
+    plan = value.get("acceptance_plan")
+    plan_sha = value.get("plan_sha256") or (_get(plan, "sha256") if isinstance(plan, dict) else None)
+    if not isinstance(plan_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", plan_sha):
+        raise VerificationError("candidate.acceptance_plan.sha256 must be a SHA256")
+    issues = value.get("issues")
+    if not isinstance(issues, list) or not issues:
+        raise VerificationError("candidate.issues must be a non-empty array")
+    seen = set()
+    for index, item in enumerate(issues, 1):
+        if not isinstance(item, dict):
+            raise VerificationError("candidate.issues[%d] must be an object" % index)
+        ident = item.get("id")
+        if not isinstance(ident, str) or not re.fullmatch(r"issue-[0-9]+[a-z]?", ident):
+            raise VerificationError("candidate.issues[%d].id must be an issue id" % index)
+        if ident in seen:
+            raise VerificationError("candidate.issues contains duplicate id %s" % ident)
+        seen.add(ident)
+    return value, plan_sha
+
+
+def _candidate_repo_error(repo: Path, candidate) -> str:
+    """Require the integration worktree to sit exactly on the frozen clean candidate."""
+    try:
+        head, tree = _head_tree(repo)
+    except (VerificationError, OSError) as exc:
+        return "cannot inspect candidate repo: %s" % exc
+    if head != candidate["candidate"]:
+        return "candidate repo HEAD %s differs from frozen %s" % (head, candidate["candidate"])
+    if tree != candidate["candidate_tree"]:
+        return "candidate repo tree %s differs from frozen %s" % (tree, candidate["candidate_tree"])
+    try:
+        dirty = _git(repo, "status", "--porcelain=v1").stdout.strip()
+    except (VerificationError, OSError) as exc:
+        return "cannot inspect candidate repo status: %s" % exc
+    if dirty:
+        return "candidate repo is not clean"
+    return ""
+
+
+def _candidate_context(feature_dir: Path, root: Path, issue_id: str):
+    """Load the ticket's frozen context and the config whose hash it froze."""
+    path = feature_dir / "impl" / issue_id / "ticket-context.json"
+    if not path.is_file():
+        raise VerificationError("missing ticket-context: %s" % path)
+    tc = _sibling("ticket_context")
+    try:
+        context = tc.load_context(path)
+    except (ValueError, OSError) as exc:
+        raise VerificationError("cannot load ticket-context %s: %s" % (path, exc))
+    if str(context.get("issue_id")) != issue_id:
+        raise VerificationError("ticket-context issue_id %r does not match %s" %
+                                (context.get("issue_id"), issue_id))
+    if not isinstance(context.get("dod"), list) or not context["dod"]:
+        raise VerificationError("ticket-context %s has no frozen DoD" % issue_id)
+    config_path = (root / str(context["config_path"])).resolve()
+    try:
+        config_path.relative_to(root.resolve())
+    except ValueError:
+        raise VerificationError("ticket-context config_path escapes the main workspace")
+    if not config_path.is_file():
+        raise VerificationError("ticket-context config does not exist: %s" % context["config_path"])
+    config_bytes = config_path.read_bytes()
+    if hashlib.sha256(config_bytes).hexdigest() != context["hashes"]["config"]:
+        raise VerificationError("agents-config differs from frozen ticket-context for %s" % issue_id)
+    ac = _sibling("agents_config")
+    try:
+        config = ac.load(config_path)
+    except (ValueError, OSError) as exc:
+        raise VerificationError("cannot load frozen agents-config: %s" % exc)
+    return context, config
+
+
+def _candidate_output_dir(candidate_path: Path, candidate_oid: str, output_dir) -> Path:
+    if output_dir:
+        return Path(output_dir).resolve()
+    generation = "%s-candidate-%s" % (candidate_oid[:12], uuid.uuid4().hex[:16])
+    return (candidate_path.parent / "raw" / generation).resolve()
+
+
+def _candidate_relative(base: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return os.path.relpath(path.resolve(), base.resolve()).replace(os.sep, "/")
+
+
+def _candidate_entry(issue_id: str):
+    return {
+        "issue": issue_id, "pass": False, "verification_path": None,
+        "verification_sha256": None, "head": None, "tree": None,
+    }
+
+
+def _candidate_entry_from_evidence(issue_id, path, repo, candidate_oid, candidate_tree,
+                                   base_dir, tasks):
+    """Read back one real verification and trust it only after full validation."""
+    entry = _candidate_entry(issue_id)
+    if not path.is_file():
+        return entry, "verification JSON was not written"
+    data = path.read_bytes()
+    entry["verification_path"] = _candidate_relative(base_dir, path)
+    entry["verification_sha256"] = hashlib.sha256(data).hexdigest()
+    try:
+        document = json.loads(data)
+    except (UnicodeError, ValueError) as exc:
+        return entry, "verification JSON is unreadable: %s" % exc
+    if not isinstance(document, dict):
+        return entry, "verification JSON root is not an object"
+    entry["head"] = document.get("head") if isinstance(document.get("head"), str) else None
+    entry["tree"] = document.get("tree") if isinstance(document.get("tree"), str) else None
+    errors = validate_verification(document, path, repo, expected_runner="supervisor",
+                                   expected_issue=issue_id, expected_tasks=tasks)
+    if errors:
+        return entry, "; ".join(errors)
+    if document.get("pass") is not True:
+        return entry, "verification did not pass"
+    if entry["head"] != candidate_oid or entry["tree"] != candidate_tree:
+        return entry, "verification head/tree differs from the frozen candidate"
+    entry["pass"] = True
+    return entry, ""
+
+
+def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
+                  identity_json=None, host=None, agent=None, session=None,
+                  model=None, effort=None, tier=None, args=None) -> dict:
+    """Re-run every candidate ticket's frozen DoD+fast at the candidate HEAD.
+
+    Ticket ``ticket-context.json`` files stay in the main workspace ``impl/``
+    tree; per-ticket supervisor evidence and raw logs are written under
+    ``output_dir/<issue>/`` so ticket-level implementer manifests are untouched.
+    The aggregate ``candidate-verification.json`` is written next to candidate.
+    """
+    if isinstance(candidate, argparse.Namespace) and repo is None:
+        args, candidate = candidate, None
+    if args is not None:
+        candidate = getattr(args, "candidate", candidate)
+        repo = getattr(args, "repo", repo)
+        output_dir = output_dir if output_dir is not None else getattr(args, "output_dir", None)
+        if getattr(args, "timeout", None) is not None:
+            timeout = args.timeout
+        identity_json = identity_json if identity_json is not None else getattr(args, "identity_json", None)
+        host = host if host is not None else getattr(args, "host", None)
+        agent = agent if agent is not None else getattr(args, "agent", None)
+        session = session if session is not None else getattr(args, "session", None)
+        model = model if model is not None else getattr(args, "model", None)
+        effort = effort if effort is not None else getattr(args, "effort", None)
+        tier = tier if tier is not None else getattr(args, "tier", None)
+    if candidate is None or repo is None:
+        raise VerificationError("run_candidate requires candidate and repo")
+    candidate_path = Path(candidate).resolve()
+    repo = Path(repo).resolve()
+    feature_dir, _integration_dir = _candidate_location(candidate_path)
+    try:
+        candidate_bytes = candidate_path.read_bytes()
+    except OSError as exc:
+        raise VerificationError("cannot read candidate %s: %s" % (candidate_path, exc)) from exc
+    frozen, plan_sha = _candidate_document(candidate_path, candidate_bytes)
+    candidate_sha = hashlib.sha256(candidate_bytes).hexdigest()
+    output = _candidate_output_dir(candidate_path, frozen["candidate"], output_dir)
+    base_dir = candidate_path.parent
+    identity_args = argparse.Namespace(
+        identity_json=identity_json, host=host, agent=agent, session=session,
+        model=model, effort=effort, tier=tier)
+    identity = _identity(identity_args, "supervisor")
+    try:
+        root = _find_root(candidate_path)
+    except VerificationError as exc:
+        root = None
+        print("verify-issue run-candidate: %s" % exc, file=sys.stderr)
+    repo_error = _candidate_repo_error(repo, frozen)
+    if repo_error:
+        print("verify-issue run-candidate: %s" % repo_error, file=sys.stderr)
+    entries = []
+    for item in frozen["issues"]:
+        issue_id = item["id"]
+        entry = _candidate_entry(issue_id)
+        entries.append(entry)
+        if repo_error or root is None:
+            continue
+        try:
+            context, config = _candidate_context(feature_dir, root, issue_id)
+            tasks = verification_tasks({"frontmatter": {}, "dod": context["dod"]},
+                                       context, config, root)
+            if not tasks:
+                raise VerificationError("ticket %s has no verification tasks" % issue_id)
+            issue_dir = output / issue_id
+            candidate_flow = json.dumps({
+                "candidate_path": str(candidate_path), "candidate_sha256": candidate_sha,
+                "issue_id": issue_id,
+            })
+            _run_tasks(issue_id=issue_id, runner="supervisor", base=context["base"],
+                       repo=repo, impl_dir=issue_dir, tasks=tasks, timeout=timeout,
+                       config=config, root=root, identity=identity, candidate_flow=candidate_flow)
+            state_error = _candidate_repo_error(repo, frozen)
+            entry, error = _candidate_entry_from_evidence(
+                issue_id, issue_dir / "verification-supervisor.json", repo,
+                frozen["candidate"], frozen["candidate_tree"], base_dir, tasks)
+            if state_error:
+                entry["pass"] = False
+                error = state_error
+                repo_error = state_error
+            entries[-1] = entry
+            if error:
+                print("verify-issue run-candidate %s: %s" % (issue_id, error), file=sys.stderr)
+        except Exception as exc:
+            # A ticket that cannot execute must fail the aggregate, never abort
+            # evidence collection for the remaining candidate tickets.
+            print("verify-issue run-candidate %s: %s" % (issue_id, exc), file=sys.stderr)
+    aggregate = {
+        "schema": CANDIDATE_SCHEMA,
+        "candidate": frozen["candidate"],
+        "candidate_tree": frozen["candidate_tree"],
+        "main_head": frozen["main_head"],
+        "plan_sha256": plan_sha,
+        "issues": entries,
+        "all-passed": bool(entries) and all(item["pass"] is True for item in entries),
+        "generated": output.name or output.as_posix(),
+    }
+    try:
+        schema_errors = _sibling("json_schema").load_validate(CANDIDATE_SCHEMA_PATH, aggregate)
+    except (ImportError, ValueError, OSError) as exc:
+        raise VerificationError("candidate verification schema validation unavailable: %s" % exc)
+    if schema_errors:
+        raise VerificationError("candidate verification schema validation failed:\n  "
+                                + "\n  ".join(schema_errors))
+    _write_json(base_dir / "candidate-verification.json", aggregate)
+    return aggregate
+
+
 def _add_identity_arguments(parser):
     parser.add_argument("--identity-json")
     parser.add_argument("--host")
@@ -1185,6 +1475,13 @@ def main(argv=None) -> int:
     run_p = sub.add_parser("run", parents=[common])
     run_p.add_argument("runner", choices=("implementer", "supervisor"))
 
+    candidate_p = sub.add_parser("run-candidate")
+    candidate_p.add_argument("--candidate", required=True)
+    candidate_p.add_argument("--repo", required=True)
+    candidate_p.add_argument("--output-dir")
+    candidate_p.add_argument("--timeout", type=float, default=120.0)
+    _add_identity_arguments(candidate_p)
+
     red_p = sub.add_parser("red", parents=[common])
     red_p.add_argument("--id", required=True)
     red_p.add_argument("--command", required=True)
@@ -1207,6 +1504,11 @@ def main(argv=None) -> int:
     try:
         if args.command_name == "run":
             document = run_verification(args)
+        elif args.command_name == "run-candidate":
+            document = run_candidate(
+                args.candidate, args.repo, output_dir=args.output_dir, timeout=args.timeout,
+                identity_json=args.identity_json, host=args.host, agent=args.agent,
+                session=args.session, model=args.model, effort=args.effort, tier=args.tier)
         elif args.command_name == "red":
             document = red_verification(args)
         else:
@@ -1214,6 +1516,14 @@ def main(argv=None) -> int:
     except (VerificationError, ImportError, OSError, ValueError, subprocess.SubprocessError) as exc:
         print("verify-issue: %s" % exc, file=sys.stderr)
         return 2
+    if args.command_name == "run-candidate":
+        print("verify-issue run-candidate %s head=%s all-passed=%s" % (
+            document["candidate"], document["candidate"], str(document["all-passed"]).lower()))
+        for entry in document["issues"]:
+            print("  [%s] %s verification=%s" % (
+                "PASS" if entry["pass"] else "FAIL", entry["issue"],
+                entry["verification_path"] or "<not-executed>"))
+        return 0 if document["all-passed"] else 1
     print("verify-issue %s %s head=%s pass=%s" % (
         args.command_name, document["issue"], document["head"], str(document["pass"]).lower()))
     for record in document.get("records", []):

@@ -281,6 +281,12 @@ def start(issue_path, repo) -> dict:
     branch_exists = _git(root, "rev-parse", "--verify", "-q", "refs/heads/" + branch, check=False).returncode == 0
     status = str(fm.get("status") or "")
     resume_state = worktree.exists() or branch_exists or output.is_file()
+    if status == "merged":
+        # Minimal safe choice: a merged ticket has already landed on the target
+        # integration branch.  It must only move forward through feature finalize
+        # (merged -> accepted -> done), never by re-opening delivery/start.
+        raise DeliveryError("ticket is already merged into the integration branch; "
+                            "feature finalize must mark it done and delivery.start cannot re-open it")
     if status != "confirmed":
         if status not in {"in-progress", "in-review", "mr-submitted"} or not resume_state:
             raise DeliveryError("fresh start requires confirmed; active status requires matching existing delivery state")
@@ -290,8 +296,10 @@ def start(issue_path, repo) -> dict:
     statuses = plan.get("all_statuses") or {}
     blocked = fm.get("blocked-by") or []
     for dependency in blocked:
-        if statuses.get(dependency) != "done":
-            raise DeliveryError("blocked-by dependency is not done: %s" % dependency)
+        # merged is enough to unblock downstream: the dependency code is already
+        # on the target integration branch, even if the feature is not accepted yet.
+        if statuses.get(dependency) not in {"merged", "done"}:
+            raise DeliveryError("blocked-by dependency is neither merged nor done: %s" % dependency)
     _oid(root, target)
     # Validate DoD/spec/config/scope and all primary-repo inputs before any Git
     # mutation.  The provisional main-HEAD context is discarded, never reused.
@@ -524,60 +532,22 @@ def _load_json_strict(path: Path):
     return value
 
 
-def _run_close_gate(context, root, issue, source):
+def _run_ticket_gate(context, root, issue, source):
+    """Ticket-level inner loop only; supervisor/receipt/conformance stay at feature gate."""
     pc = _module("process_check")
     args = SimpleNamespace(
-        issue=str(issue), repo=str(source), phase="close", base=context["base"],
+        issue=str(issue), repo=str(source), phase="ticket", base=context["base"],
         head=context["source_head"], ci_verdict=None, ci_run_proof=None,
         impl_log=None, evidence=None, json=None,
     )
     try:
         report, meta = pc.run(args)
     except (ValueError, OSError) as exc:
-        raise DeliveryError("process_check close failed closed: %s" % exc) from exc
+        raise DeliveryError("process_check ticket failed closed: %s" % exc) from exc
     if report.failed or meta.get("head") != context["source_head"] or meta.get("base") != context["base"]:
         messages = "; ".join(i["msg"] for i in report.items if i["level"] == "FAIL")
-        raise DeliveryError("process_check close did not pass: " + messages)
+        raise DeliveryError("process_check ticket did not pass: " + messages)
     return meta
-
-
-def _run_verifications(context, root, issue, source):
-    vi = _module("verify_issue")
-    impl = root / context["feature_dir"] / "impl" / context["issue_id"]
-    for runner in ("implementer", "supervisor"):
-        path = impl / ("verification-%s.json" % runner)
-        document = _load_json_strict(path)
-        errors = vi.validate_verification(document, path, source, expected_runner=runner,
-                                         expected_issue=context["issue_id"], require_fast=True)
-        if errors:
-            raise DeliveryError("%s verification invalid/stale: %s" % (runner, "; ".join(errors)))
-        if document.get("base") != context["base"]:
-            raise DeliveryError("%s verification base differs from frozen context" % runner)
-
-
-def _run_review(context, root, issue, source):
-    rr = _module("review_receipt")
-    path = root / context["feature_dir"] / "impl" / context["issue_id"] / "review-receipt.json"
-    receipt = _load_json_strict(path)
-    errors = rr.validate_receipt(receipt, issue, source, path)
-    if errors or receipt.get("verdict") not in ("pass", "pass-with-notes"):
-        raise DeliveryError("independent review receipt invalid/stale: " + "; ".join(errors or [str(receipt.get("verdict"))]))
-    if receipt.get("base") != context["base"] or receipt.get("head") != context["source_head"] or receipt.get("tree") != context["source_tree"]:
-        raise DeliveryError("review receipt is not bound to the final rebased source")
-
-
-def _run_architecture(context, source):
-    ag = _module("architecture_graph")
-    records, errors = ag.check(source)
-    if errors:
-        raise DeliveryError("architecture graph invalid: " + "; ".join(errors))
-    by_id = {r.get("id"): r for r in records if isinstance(r, dict)}
-    for ident in context.get("architecture_updates", []):
-        record = by_id.get(ident)
-        if not record:
-            raise DeliveryError("declared architecture update is absent: %s" % ident)
-        if record.get("status") not in ("current", "release_only"):
-            raise DeliveryError("architecture update lacks verified current/release evidence: %s" % ident)
 
 
 def _run_decisions(context, root):
@@ -604,11 +574,12 @@ def _preflight(context, root, issue):
         raise DeliveryError("target advanced after context freeze; delivery.rebase is required before merge")
     if _git(source, "merge-base", "--is-ancestor", target_before, context["source_head"], check=False).returncode != 0:
         raise DeliveryError("target is not an ancestor of source; rebase is required")
-    _run_close_gate(context, root, issue, source)
-    _run_verifications(context, root, issue, source)
-    _run_review(context, root, issue, source)
-    _run_architecture(context, source)
+    # Ticket merge requires only the ticket-level inner loop.  Supervisor
+    # verification, review receipts and conformance are deferred to feature finalize.
+    _run_ticket_gate(context, root, issue, source)
     _run_decisions(context, root)
+    # Fail closed before the merge side effect if the journal is corrupt; the
+    # merged event append would otherwise fail only after code landed.
     _module("feature_closeout").load_progress_events(root / context["feature_dir"])
     return {"source": source, "target": target, "source_branch": source_branch, "target_before": target_before}
 
@@ -630,7 +601,16 @@ def _journal(context, context_path):
         "target_before": context["target_commit"], "source_head": context["source_head"],
         "source_tree": context["source_tree"], "issue_id": context["issue_id"], "strategy": "no-ff",
     }
-    journal = store.OperationJournal.create(path, operation_id, ["merge", "verify", "record", "cleanup"])
+    # No cleanup step: worktree/branch and the merged ticket are retained until
+    # feature finalize accepts the candidate.  Legacy journals may still carry a
+    # cleanup step; reuse their exact step IDs and treat that step as retention.
+    steps = ["merge", "verify", "record"]
+    if path.is_file():
+        existing = store.OperationJournal.load(path)
+        if existing.operation_id != operation_id:
+            raise DeliveryError("delivery journal belongs to another operation")
+        steps = [step["id"] for step in existing.steps]
+    journal = store.OperationJournal.create(path, operation_id, steps)
     _validate_operation_journal(journal.data)
     return journal, expected
 
@@ -667,8 +647,10 @@ def _record_ticket(context, root, issue, merge_commit):
                          context["target_commit"], merge_commit)
     text = issue.read_text(encoding="utf-8")
     if not re.search(r"^status:\s*.*$", text, re.M):
-        raise DeliveryError("issue frontmatter lacks status; cannot mark done")
-    updated = re.sub(r"^status:\s*.*$", "status: done", text, count=1, flags=re.M)
+        raise DeliveryError("issue frontmatter lacks status; cannot mark merged")
+    # merged is not acceptance: the worktree/branch stay until feature finalize
+    # emits accepted and moves the ticket to done.
+    updated = re.sub(r"^status:\s*.*$", "status: merged", text, count=1, flags=re.M)
     _module("state_store").atomic_write(issue, updated, mode=0o644)
     timestamp = _git(root, "show", "-s", "--format=%cd", "--date=format-local:%Y-%m-%d %H:%M", merge_commit).stdout.strip()
     config = _config(root, context)
@@ -684,56 +666,7 @@ def _record_ticket(context, root, issue, merge_commit):
     }
     _module("state_store").append_event_once(root / context["feature_dir"] / "progress.jsonl",
                                              event, event["event_id"])
-    return {"status": "done", "merged_event": event["event_id"], "commit": merge_commit}
-
-
-def _cleanup_ticket(context, root, issue, source_branch):
-    pc = _module("progress_cleanup")
-    progress = _module("progress")
-    ticket = progress.find_ticket(root, context["issue_id"], issue.stem)
-    if not ticket:
-        raise DeliveryError("close-and-clean cannot uniquely reload the done ticket")
-    operation_id = _operation_id(context) + "-cleanup"
-    journal_path = pc.operation_path(root, operation_id)
-    if journal_path.is_file():
-        # inspect_operation re-observes worktrees/refs/dev even when completed;
-        # a completed marker by itself is never accepted as proof.
-        inspected = pc.inspect_operation(root, operation_id)
-        if inspected.get("state") == "completed" and inspected.get("ok"):
-            result = inspected
-        else:
-            recovered = pc.reconcile_operations(root, operation_id, apply=True)
-            result = recovered["operations"][0]
-    else:
-        plan = pc.make_plan(root, ticket=ticket, intent="close", operation_id=operation_id)
-        if not plan.get("eligible"):
-            if not source_branch_exists(root, source_branch) and not any(
-                    entry["branch"] == "refs/heads/" + source_branch for entry in _worktrees(root)):
-                # A no-code-resources plan is valid only when there is truly no
-                # dev/runtime residue; all other refusals remain fail-closed.
-                fresh = pc.make_plan(root, ticket=ticket, intent="close", authorize=False)
-                if not fresh.get("eligible") and "没有代码、会话/runtime 或可清理 dev 资源" in str(fresh.get("reason")):
-                    return {"already_clean": True, "worktree_removed": True, "branch_deleted": True,
-                            "remaining_paths": [], "state": "completed", "ok": True}
-            raise DeliveryError("close-and-clean preflight refused exact merged ticket: %s" % plan.get("reason"))
-        result = pc.apply_operation(root, plan["operation_id"], plan["confirm"])
-    if result.get("state") != "completed" or not result.get("ok") or result.get("remaining_paths"):
-        raise DeliveryError("close-and-clean is pending/needs attention; merged state retained: %s" % result)
-    # Rebuild a read-only plan after completion to catch newly appearing dev or
-    # code resources that were not present in the original authorization.
-    fresh = pc.make_plan(root, ticket=ticket, intent="close", authorize=False)
-    if fresh.get("eligible"):
-        residue = bool(fresh.get("worktree") or (fresh.get("resources") or {}).get("local_ref")
-                       or (fresh.get("dev_cleanup") or {}).get("files")
-                       or fresh.get("remaining_paths"))
-        if residue:
-            raise DeliveryError("close-and-clean reobservation found residual resources: %s" % residue)
-    elif "没有代码、会话/runtime 或可清理 dev 资源" not in str(fresh.get("reason")):
-        raise DeliveryError("close-and-clean fresh observation failed: %s" % fresh.get("reason"))
-    result["remaining_paths"] = list(result.get("remaining_paths") or [])
-    result["worktree_removed"] = result.get("worktree_removed") is True
-    result["branch_deleted"] = result.get("branch_deleted") is True
-    return result
+    return {"status": "merged", "merged_event": event["event_id"], "commit": merge_commit}
 
 
 def source_branch_exists(root, branch):
@@ -788,25 +721,22 @@ def _remote_merge(context, root, preflight):
     return observed
 
 
-def _cleanup_summary(observed):
-    remaining = list(observed.get("remaining_paths") or [])
-    return {
-        "worktree_removed": observed.get("worktree_removed") is True and not any(
-            not str(path).startswith("ref:") for path in remaining),
-        "branch_deleted": observed.get("branch_deleted") is True and not any(
-            str(path).startswith("ref:") for path in remaining),
-        "remaining_paths": remaining,
-        "already_clean": bool(observed.get("already_clean", False)),
-    }
-
-
 def _resume_ticket(context, root, context_path, issue, journal, expected, preflight=None):
     if journal.state == "failed":
         raise DeliveryError("failed journal requires manual inspection; reconcile will not adopt arbitrary Git state")
     if journal.state == "completed":
-        _cleanup_ticket(context, root, issue, _source_branch(context, issue))
-        return {"schema": SCHEMA, "operation": "reconcile", "operation_id": journal.operation_id,
-                "state": "completed", "replayed": True, "reobserved_cleanup": True}
+        # The merge transaction is complete; worktree/branch stay for feature
+        # finalize.  Replay must not delete resources or rewrite the ticket.
+        status = str(_issue_frontmatter(issue).get("status") or "merged")
+        steps = {step["id"]: step for step in journal.steps}
+        merge_commit = (steps.get("merge", {}).get("observed") or {}).get("merge_commit")
+        result = {"schema": SCHEMA, "operation": "reconcile", "operation_id": journal.operation_id,
+                  "state": "completed", "replayed": True, "status": status,
+                  "retained": {"worktree": str(root / ".worktrees" / context["issue_id"]),
+                               "branch": _source_branch(context, issue)}}
+        if merge_commit:
+            result["merge_commit"] = merge_commit
+        return result
     steps = {step["id"]: step for step in journal.steps}
     if steps["merge"]["status"] != "done":
         target = preflight["target"] if preflight is not None else _worktree_for_branch(root, context["target_branch"])
@@ -835,7 +765,7 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
     steps = {step["id"]: step for step in journal.steps}
     merge_commit = steps["merge"]["observed"]["merge_commit"]
     if steps["merge"]["observed"].get("status") == "needs-human":
-        raise DeliveryError("needs-human: remote target advanced after the original merge; no duplicate merge or done/record was performed")
+        raise DeliveryError("needs-human: remote target advanced after the original merge; no duplicate merge or merged/record was performed")
     verify_expected = dict(expected, merge_commit=merge_commit)
     if steps["verify"]["status"] != "done":
         journal.advance("verify", expected=verify_expected)
@@ -846,19 +776,23 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
         journal.advance("record", expected=verify_expected)
         observed = _record_ticket(context, root, issue, merge_commit)
         journal.advance("record", expected=verify_expected, observed=observed)
-    if steps["cleanup"]["status"] != "done":
+    # Legacy journals may still have a cleanup step.  It is now a retention
+    # observation, never an authorization to remove the ticket worktree/branch.
+    if "cleanup" in steps and steps["cleanup"]["status"] != "done":
         cleanup_expected = dict(verify_expected, issue_id=context["issue_id"])
         journal.advance("cleanup", expected=cleanup_expected)
-        observed = _cleanup_ticket(context, root, issue, _source_branch(context, issue))
-        # OperationJournal observations must be finite JSON and not contain
-        # incidental absolute salvage manifests as authority; retain summary.
-        summary = _cleanup_summary(observed)
-        if summary["remaining_paths"] or not summary["worktree_removed"] or not summary["branch_deleted"]:
-            raise DeliveryError("cleanup residual resources prevent outer completion: %s" % summary)
-        journal.advance("cleanup", expected=cleanup_expected, observed=summary)
+        retained = {"retained": True, "worktree": str(root / ".worktrees" / context["issue_id"]),
+                    "branch": _source_branch(context, issue),
+                    "reason": "feature finalize owns acceptance cleanup"}
+        journal.advance("cleanup", expected=cleanup_expected, observed=retained)
     journal.complete()
+    status = str(_issue_frontmatter(issue).get("status") or "merged")
+    if status not in ("merged", "done"):
+        raise DeliveryError("ticket status after record is neither merged nor done: %r" % status)
     result = {"schema": SCHEMA, "operation": "merge", "operation_id": journal.operation_id,
-              "merge_commit": merge_commit, "status": "done", "state": "completed"}
+              "merge_commit": merge_commit, "status": status, "state": "completed",
+              "retained": {"worktree": str(root / ".worktrees" / context["issue_id"]),
+                           "branch": _source_branch(context, issue)}}
     if _config(root, context).get("tracker") == "gitlab":
         mode = (_config(root, context).get("feature-closeout") or {}).get("mode")
         result["target_cas_merge"] = "not-supported-by-official-provider-api"
@@ -885,7 +819,7 @@ def reconcile(context_path=None, *, candidate_path=None, candidate_repo=None, re
         if context_path is not None or candidate_repo is None or repo is None:
             raise DeliveryError("feature reconcile requires --candidate, --candidate-repo and --repo")
         candidate_file = Path(candidate_path).resolve()
-        fdir, _, integ = _candidate_location(candidate_file)
+        fdir, round_name, integ = _candidate_location(candidate_file)
         candidate = _load_json_strict(candidate_file)
         if not _feature_operation_path(integ).is_file():
             raise DeliveryError("no exact feature promote operation exists for this candidate")
@@ -893,7 +827,8 @@ def reconcile(context_path=None, *, candidate_path=None, candidate_repo=None, re
         if not _journalize_existing_feature_merge(candidate, Path(repo).resolve(), journal, strategy):
             raise DeliveryError("feature merge has not executed; use promote to repeat authorization and online gates before any merge")
         return _resume_feature(candidate, fdir, integ, Path(candidate_repo).resolve(),
-                               Path(repo).resolve(), strategy, journal=journal)
+                               Path(repo).resolve(), strategy, journal=journal,
+                               round_name=round_name)
     if context_path is None:
         raise DeliveryError("reconcile requires --context or --candidate")
     context, root, source_path, issue = _load_context(context_path)
@@ -946,10 +881,11 @@ def _without_volatile_proof_fields(value):
     return value
 
 
-def _feature_operation_id(candidate, proof):
+def _feature_operation_id(candidate, proof, evidence=None):
     return "feature-" + _digest({
         "kind": "feature-promote", "candidate": candidate,
         "proof": _without_volatile_proof_fields(proof),
+        "evidence": evidence or {},
     })
 
 
@@ -993,13 +929,14 @@ def _supersede_pending_feature_journal(integ, existing, new_operation_id):
     return store.OperationJournal.load(_feature_operation_path(integ))
 
 
-def _feature_journal(integ, operation_id, candidate, strategy):
+def _feature_journal(integ, operation_id, candidate, strategy, evidence):
     expected = {
         "operation_id": operation_id, "candidate_sha256": _digest(candidate),
         "main_before": candidate["main_head"], "main_branch": candidate["main_branch"],
         "integration_branch": candidate["integration_branch"], "mode": candidate["mode"],
         "candidate": candidate["candidate"],
         "candidate_tree": candidate["candidate_tree"], "strategy": strategy,
+        "evidence": evidence, "evidence_sha256": _digest(evidence),
     }
     path = _feature_operation_path(integ)
     if path.is_file():
@@ -1035,13 +972,23 @@ def _candidate_without_merge_record(candidate):
             if key not in ("merged_commit", "merged_at", "merge_operation", "merge_strategy", "ci_proof_sha256")}
 
 
-def _validate_feature_resume_identity(candidate, candidate_repo, main_repo, journal, strategy):
+def _feature_evidence(integ: Path) -> dict:
+    return _module("feature_closeout").feature_gate_evidence(integ)
+
+
+def _validate_feature_resume_identity(candidate, candidate_repo, main_repo, journal, strategy, integ,
+                                      allow_evidence_change=False):
     steps = {step["id"]: step for step in journal.steps}
     expected = steps["authorize"].get("expected") or {}
     if not expected:
         raise DeliveryError("feature journal has no frozen candidate identity")
     if _digest(_candidate_without_merge_record(candidate)) != expected.get("candidate_sha256"):
         raise DeliveryError("current candidate full hash differs from journaled candidate; refusing A→B resume")
+    evidence = _feature_evidence(integ)
+    if evidence != expected.get("evidence") or _digest(evidence) != expected.get("evidence_sha256"):
+        if not allow_evidence_change:
+            raise DeliveryError("feature review/verification/conformance evidence changed after authorization; "
+                                "refreeze and reauthorize before merge")
     if candidate.get("mode") not in ("local-human", "server-enforced", "cooperative-ci"):
         raise DeliveryError("current candidate mode is invalid")
     if candidate.get("main_branch") != expected.get("main_branch") or candidate.get("main_head") != expected.get("main_before"):
@@ -1066,7 +1013,8 @@ def _validate_feature_resume_identity(candidate, candidate_repo, main_repo, jour
         raise DeliveryError("main HEAD is neither frozen main_before nor this exact merge; refusing cross-operation resume")
     if steps["authorize"]["status"] == "done":
         payload = steps["authorize"]["observed"]["authorization"]
-        recomputed = _feature_operation_id(_candidate_without_merge_record(candidate), payload.get("online_proof"))
+        recomputed = _feature_operation_id(_candidate_without_merge_record(candidate), payload.get("online_proof"),
+                                           expected.get("evidence"))
         if recomputed != journal.operation_id:
             raise DeliveryError("feature journal operation ID does not match candidate/proof identity")
     return expected_strategy
@@ -1091,11 +1039,11 @@ def _journalize_existing_feature_merge(candidate, main_repo, journal, strategy):
 
 
 def _resume_feature(candidate, fdir, integ, candidate_repo, main_repo, strategy,
-                    journal=None, expected=None, authorization=None):
+                    journal=None, expected=None, authorization=None, round_name=None):
     if journal is None:
         journal = _module("state_store").OperationJournal.load(_feature_operation_path(integ))
         _validate_operation_journal(journal.data)
-    strategy = _validate_feature_resume_identity(candidate, candidate_repo, main_repo, journal, strategy)
+    strategy = _validate_feature_resume_identity(candidate, candidate_repo, main_repo, journal, strategy, integ)
     if expected is None:
         expected = {step["id"]: step for step in journal.steps}["authorize"]["expected"]
     if journal.state == "failed":
@@ -1138,11 +1086,18 @@ def _resume_feature(candidate, fdir, integ, candidate_repo, main_repo, strategy,
             raise DeliveryError("feature merged but recording failed; candidate remains pending: " + messages)
         journal.advance("record", expected=verify_expected,
                         observed={"merge_commit": merge_commit, "recorded": True})
+    finalize_report = _module("feature_closeout").finalize_tickets(
+        fdir, main_repo, round_name, cleanup=False)
+    if finalize_report.failed:
+        messages = "; ".join(i["msg"] for i in finalize_report.items if i["level"] == "FAIL")
+        raise DeliveryError("feature merged and recorded, but ticket finalize failed; "
+                            "run feature-closeout finalize after repair: " + messages)
     journal.complete()
     result = {"schema": SCHEMA, "operation": "promote", "operation_id": journal.operation_id,
               "merge_commit": merge_commit, "strategy": strategy,
               "mode": candidate["mode"], "scope": "merge-main",
-              "deploy_prod_authorized": False, "push_authorized": False}
+              "deploy_prod_authorized": False, "push_authorized": False,
+              "finalized": True, "cleanup_pending": True}
     if candidate["mode"] == "cooperative-ci":
         result["server_enforcement"] = "not-server-enforced"
         result["warning"] = "cooperative-ci validates online evidence but provides no server-side merge enforcement guarantee"
@@ -1194,7 +1149,8 @@ def promote(candidate_path, candidate_repo, repo, *, strategy=None, run_id=None,
             # Only a journaled/verified merge side effect can bypass reauthorization.
             return _resume_feature(candidate, fdir, integ, candidate_repo, main_repo, strategy,
                                    journal=existing)
-        _validate_feature_resume_identity(candidate, candidate_repo, main_repo, existing, strategy)
+        _validate_feature_resume_identity(candidate, candidate_repo, main_repo, existing, strategy, integ,
+                                          allow_evidence_change=True)
     strategy = strategy or "no-ff"
     mode = candidate.get("mode")
     if mode not in ("local-human", "server-enforced", "cooperative-ci"):
@@ -1252,11 +1208,13 @@ def promote(candidate_path, candidate_repo, repo, *, strategy=None, run_id=None,
         )
         authorization["online_proof"] = fresh
         authorization["online_proof_sha256"] = _digest(fresh)
-    operation_id = _feature_operation_id(candidate, authorization.get("online_proof"))
+    evidence = _feature_evidence(integ)
+    operation_id = _feature_operation_id(candidate, authorization.get("online_proof"), evidence)
     authorization["operation_id"] = operation_id
-    journal, expected = _feature_journal(integ, operation_id, candidate, strategy)
+    journal, expected = _feature_journal(integ, operation_id, candidate, strategy, evidence)
     return _resume_feature(candidate, fdir, integ, candidate_repo, main_repo, strategy,
-                           journal=journal, expected=expected, authorization=authorization)
+                           journal=journal, expected=expected, authorization=authorization,
+                           round_name=round_name)
 
 
 class MergeRequestAdapter:

@@ -93,7 +93,7 @@ allowed-tools:
 - **纵向切穿所有相关层**（数据 / 逻辑 / 界面 / 测试），不是按层横切
 - 独立可演示：完成后能演示一个完整的行为，不是半截基础设施
 - 一张票的上下文能装进一个实现会话；装不下就再拆
-- **粒度取向取少不取多**：每票有固定执行成本（独立实现对话 + 独立评审对话 + 监督收口），票数是成本乘数；无独立 DoD、与邻票同接缝同目录的切片合并为一票——粒度红线是上限，不是目标
+- **粒度取向取少不取多**：每票有固定执行成本（独立实现对话 + 监督收口），票数是成本乘数；独立评审与候选复跑只在 feature 级各做一次。无独立 DoD、与邻票同接缝同目录的切片合并为一票——粒度红线是上限，不是目标
 - **声明阻塞边**（blocked-by）：以 DAG 表达依赖，编号按依赖序
 - **标注上游节锚点**：备注节写明本票涉及的 tech-spec 节（如 `#3.2 接口变更`、`#5 测试策略`，可多个）与 PRD 相关节——`/implement` 按锚点选读，不全量读 spec
 - 首张票应是最细的端到端贯通（先打穿，再加厚）
@@ -104,14 +104,14 @@ allowed-tools:
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：标准路径覆盖 PRD 全部稳定 AC；小变更覆盖 change-request 全部 delta 与 retained baseline，replace / retire 不得混入。`acceptance-plan.yaml` 的 documents / source 由同一机器校验器核对真实文档、hash、锚点与集合；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
-**契约 DoD（tech-spec「3.2 接口变更」非空时强制）**：3.2 固定表的每个稳定 ID 必须恰好落入一张承接票 frontmatter `architecture-updates`，并在 DoD 写入 `architecture_graph.py check-flow --repo <项目根> --issue <票文件> --base <冻结base> --head HEAD`（期望退出码 0）。逐 ID 核 spec 动作、supersedes、分片、代码和证据，不能只引用 architecture 字样或旧首页表。无承接票的变更点必须补票；确属纯内部且不进入图谱的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
+**契约归属（拆票阶段；tech-spec「3.2 接口变更」非空时强制）**：3.2 固定表的每个稳定 ID 必须恰好落入一张承接票 frontmatter `architecture-updates`。实现后的 DoD、评审、合并与验收不再要求架构或图谱检查。无承接票的变更点必须补票；确属纯内部且不进入图谱的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
 
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
 - 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置和架构分片路径 / glob；生产子集用于粒度统计）
 - **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
-- **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与集成态核对；它仍只跑本票 DoD + fast。唯一叶子保留票级 feature 全量；多叶子各票仍 mandatory 完成本票 conformance、不得 skipped，但不提前重复 feature 全量，最终 candidate 统一核一次。所有票同样受上述粒度红线约束
+- **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与 feature 级核对；它仍只跑本票 DoD + fast，不做票级 conformance。全部票合入集成分支后，feature 级评审、候选复跑和 conformance 在 candidate 统一做一次；所有票同样受上述粒度红线约束
 
 **判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
 

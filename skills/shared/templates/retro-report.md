@@ -36,17 +36,17 @@
 
 ### issue 轮次
 
-| issue | 标题 | 自修复轮次 | 评审轮次 | BLOCKER 回修轮数 | 是否进过 needs-human | 结果 |
-|---|---|---|---|---|---|---|
+| issue | 标题 | 自修复轮次 | BLOCKER 修复票 | 是否进过 needs-human | 结果 |
+|---|---|---|---|---|---|
 
 - 自修复轮次：impl-log「自修复轮次记录」表行数
-- 评审轮次：`reviews/` 下该 issue 的报告文件数
-- BLOCKER 回修轮数：MR 文件记录的回修轮数
+- BLOCKER 修复票：feature 评审 BLOCKER 在同需求下新开的修复票数
+- feature 评审轮次：`integration/feature-review-receipt.json` 的 round / 历史 receipt 数
 - 表格上方给一句总述：哪张票最曲折、哪张票一次过
 
 ### 问题清单
 
-聚合各 impl-log（放弃了什么 / 假设了什么 / 红线接触 / 遗留）与各 review report（BLOCKER 清单）：
+聚合各 impl-log（放弃了什么 / 假设了什么 / 红线接触 / 遗留）与 feature 评审报告 / receipt（BLOCKER 清单、轮次与闭合记录）：
 
 | # | 来源（文件 / issue） | 类型（放弃路径 / 假设证伪 / 红线 / BLOCKER / 遗留） | 内容 | 处理结果 |
 |---|---|---|---|---|

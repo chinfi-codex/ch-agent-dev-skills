@@ -68,9 +68,9 @@ max-fix-rounds: 99
 review-round-alert: 3
 
 conformance:
-  mode: always
-  sample-rate: 1/3            # 仅 sampled 使用；是否抽中由 gate2 context digest + issue ID 确定性计算
-  checker: main-session
+  mode: always                # 仅旧 --phase merge/close 诊断路径使用；票级交付走 --phase ticket，不含 conformance
+  sample-rate: 1/3            # 同上；feature 级 conformance 始终全量，不抽样
+  checker: main-session       # feature conformance 的 checker 身份
 
 feature-closeout:
   # server-enforced：服务端保护 + CI API 证明；cooperative-ci：CI 可用但无完整服务端强制；local-human：人工确认合 main。

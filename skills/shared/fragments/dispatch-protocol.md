@@ -22,7 +22,7 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 - 派发 = 主会话启动独立对话执行 `/implement issue-NNN` 或 `/ai-review`；新对话不继承、也不依赖主会话上下文。
 - 提示词必须包含：票、tech-spec、agents-config、feature-module / slug、ticket context（开工后）、execution context（有人 / 无人值守）、dispatch_id、parent_session_id，以及必要的 worktree / 分支和报告路径。
 - 真实派发前，主会话按 Progress Events 在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts / dispatch_id / session_id / parent_session_id）并追加 `dispatch` 事件。session ID 尚未分配时可暂空，宿主返回后立即补齐。
-- 成功回报包含分支、worktree、MR、ticket context、verification、review receipt、报告和遗留；它只是线索，不是验收证据。
+- 成功回报包含分支、worktree、MR、ticket context、verification、process-check-ticket、impl-log 和遗留；它只是线索，不是验收证据。
 - 需要人裁决时，实现与评审子会话只返回未持久化 human-decision envelope，不直接问人、不写 returned / mr-submitted。主会话统一持久化、提问和路由。
 - resume 沿用 dispatch/session，attempts 不增；redispatch 新开独立对话，主会话更新 dispatch 块、attempts +1 并写新 dispatch 事件。路由没有真实 ack 前票保持 needs-human，结果不明不得重派。
 
@@ -38,7 +38,7 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
 - 宿主完全没有独立对话能力时，主会话只能产出自包含提示词与 resolve 结果，请人在对应模型的新对话启动；无法确认实际模型不得开工，也不得在主会话顺便实现。评审没有独立环境时同样停止，绝不自评。
-- 同票复审优先续接原评审对话，输入为回修 commit 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨票一律新开。
+- feature 复审优先续接原评审对话，输入为新 candidate 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨 feature 一律新开。票级不再发起独立评审。
 - 宿主能力由 `host_adapters.py` 区分 available / unavailable / unknown。配置里写了能力不等于实际可用；评审定稿先 `write_review_binding` 通过宿主原生接口附着本次 issue / round / head / tree / report 绑定，再 `verify_review_session` 实时重读。`host-probes.json` 只保存写回执供对账，单独文件或 capability bool 不构成证明。浏览器不可用时 AC 记 unverified 或转人工，session 活性 unknown 时禁止删除其 worktree。
 
 ### 清场触发与统一入口
@@ -69,4 +69,6 @@ python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind run
 - confirm 绑定票 / config、refs、完整 ignored 状态、软链、session / runtime 和 dev GC 项；apply 锁内重验，强制删除前再扫描。活跃会话、日志增长、错误软链或外部能力未知都停止。
 - `.logs/**`、未收录证据与报告默认 salvage；dev 软链只有解析后等于主工作区 dev 才不跟随打包。依赖和构建缓存可按计划删除，但最终证据、最后成功代际和被引用捕获物不得删除。
 - journal 逐步记录 expected / observed；崩溃后 `reconcile` 按真实状态幂等恢复。部分完成、prune 失败、远端 OID 变化或剩余路径非空都必须报告，不能显示“清理完成”。
-- local-human 的 integration worktree / 分支、开发服务与实例租约在 `feature-merged` 后走 feature 级 close-and-clean；先停服务 / 释放租约，再 salvage 和清 Git 资源。
+- 票合入集成分支后只写 `merged`，worktree / branch 保留；不在票级 close-and-clean。
+- local-human 的 integration worktree / 分支、逐票 worktree / branch 与 dev 过程物，统一在 feature-merged 后由 `feature_closeout.py finalize` 清理：逐票 close-and-clean，再停服务 / 释放租约，salvage 并清 Git 资源。finalize 失败保持 needs-attention，可重跑；不能用分支消失反推验收完成。
+- 单独处理已完成历史票时仍可用 `close-and-clean --issue`；它只接受真实 `done` 票，不把 `merged` 当作已验收。

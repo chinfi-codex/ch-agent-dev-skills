@@ -322,5 +322,377 @@ class ReviewReceiptTest(unittest.TestCase):
         self.assertTrue(any("head/tree is stale" in error for error in errors), errors)
 
 
+class FeatureReviewReceiptTest(unittest.TestCase):
+    """Whole-feature review receipts bound to integration/candidate.json."""
+
+    def linked_candidate(self):
+        candidate = self.root / ".linked-candidate"
+        sh(self.root, "git", "worktree", "add", "-q", "--detach", str(candidate), self.candidate)
+        config = candidate / "dev" / "agents-config.md"
+        config.parent.mkdir()
+        return candidate, config
+
+    def test_feature_config_uses_authoritative_feature_workspace(self):
+        candidate, candidate_config = self.linked_candidate()
+        candidate_config.write_text("obsolete candidate checkout config\n", encoding="utf-8")
+        self.assertEqual(rr._load_feature_config(candidate, self.feature)["enforcement"]["review-trust"],
+                         "host-verified")
+
+    def test_feature_config_rejects_invalid_authoritative_config(self):
+        candidate, candidate_config = self.linked_candidate()
+        candidate_config.write_text(CONFIG, encoding="utf-8")
+        self.config.write_text(CONFIG.replace("verify-policy:\n", "verify-policy:\n  known-failures: []\n"),
+                               encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unknown property 'known-failures'"):
+            rr._load_feature_config(candidate, self.feature)
+
+    def test_feature_config_does_not_fall_back_when_authoritative_config_missing(self):
+        candidate, candidate_config = self.linked_candidate()
+        candidate_config.write_text(CONFIG, encoding="utf-8")
+        self.config.unlink()
+        with self.assertRaises(ValueError):
+            rr._load_feature_config(candidate, self.feature)
+
+    def test_feature_config_rejects_unrelated_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            other_repo = Path(directory)
+            sh(other_repo, "git", "init", "-q", "-b", "main")
+            with self.assertRaisesRegex(rr.ReceiptError, "same Git repository"):
+                rr._load_feature_config(other_repo, self.feature)
+
+    def test_feature_config_rejects_noncanonical_feature_path(self):
+        outside = self.root / "outside" / "m" / "demo"
+        outside.mkdir(parents=True)
+        with self.assertRaisesRegex(rr.ReceiptError, "dev/features"):
+            rr._load_feature_config(self.root, outside)
+
+    def test_feature_config_rejects_symlinked_policy(self):
+        candidate, candidate_config = self.linked_candidate()
+        candidate_config.write_text(CONFIG, encoding="utf-8")
+        self.config.unlink()
+        self.config.symlink_to(candidate_config)
+        with self.assertRaisesRegex(rr.ReceiptError, "regular file"):
+            rr._load_feature_config(candidate, self.feature)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        sh(self.root, "git", "init", "-q", "-b", "main")
+        sh(self.root, "git", "config", "user.email", "test@example.com")
+        sh(self.root, "git", "config", "user.name", "Test")
+        (self.root / "src").mkdir()
+        (self.root / "tests").mkdir()
+        (self.root / "src/a.py").write_text("a = 1\n", encoding="utf-8")
+        (self.root / "tests/test_fast.py").write_text('print("fast-ok")\n', encoding="utf-8")
+        self.config = self.root / "dev/agents-config.md"
+        self.config.parent.mkdir(parents=True)
+        self.config.write_text(CONFIG.replace("review-trust: operator-attested",
+                                              "review-trust: host-verified"), encoding="utf-8")
+        sh(self.root, "git", "add", "src", "tests")
+        sh(self.root, "git", "commit", "-qm", "base")
+        self.main_head = sh(self.root, "git", "rev-parse", "HEAD")
+        self.main_tree = sh(self.root, "git", "rev-parse", "HEAD^{tree}")
+
+        sh(self.root, "git", "checkout", "-qb", "feat/demo")
+        (self.root / "src/a.py").write_text("a = 2\n", encoding="utf-8")
+        (self.root / "src/b.py").write_text("b = 1\n", encoding="utf-8")
+        sh(self.root, "git", "add", "src")
+        sh(self.root, "git", "commit", "-qm", "implement feature")
+        self.candidate = sh(self.root, "git", "rev-parse", "HEAD")
+        self.tree = sh(self.root, "git", "rev-parse", "HEAD^{tree}")
+
+        self.feature = self.root / "dev/features/m/demo"
+        (self.feature / "issues").mkdir(parents=True)
+        (self.feature / "integration").mkdir()
+        (self.feature / "issues/issue-001-demo.md").write_text(
+            "---\nfeature-slug: demo\nissue-id: issue-001\nstatus: done\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n"
+            "  session_id: impl-session-1\n  agent: development\n---\n# One\n",
+            encoding="utf-8")
+        (self.feature / "issues/issue-002-demo.md").write_text(
+            "---\nfeature-slug: demo\nissue-id: issue-002\nstatus: done\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n"
+            "  session_id: impl-session-2\n  agent: development\n---\n# Two\n",
+            encoding="utf-8")
+        self.plan = self.feature / "acceptance-plan.yaml"
+        self.plan.write_text("schema: agent-dev.feature-acceptance/v2\ncases: {}\n", encoding="utf-8")
+        self.plan_sha = hashlib.sha256(self.plan.read_bytes()).hexdigest()
+
+        self.reviewer = {
+            "host": "zcode", "agent": "supervisor-review", "session": "review-session",
+            "model": "provider/supervisor", "effort": "high", "role": "review",
+        }
+        self.report = self.feature / "integration/review-report.md"
+        self.report.write_text("# Feature review\n\npass\n", encoding="utf-8")
+        self.preview = self.feature / "integration/coverage-preview.json"
+        self.write_preview()
+        self.process = self.feature / "integration/process-check-review.json"
+        self.write_process()
+        self.proof = self.feature / "integration/feature-review-host-proof.json"
+        self.receipt_path = self.feature / "integration/review-receipt.json"
+        self.candidate_json = self.feature / "integration/candidate.json"
+        self.write_candidate()
+
+        command = [sys.executable, str(TESTS / "fake_host_server.py")]
+        self.native_env = mock.patch.dict(os.environ, {
+            "FAKE_HOST": "zcode",
+            "FAKE_HOST_LOG": str(self.feature / "integration/native-host.jsonl"),
+            "FAKE_HOST_STATE": str(self.feature / "integration/native-state.json"),
+            "FAKE_ROLE": "supervisor-review",
+            "SESSION_TITLE_ZCODE_COMMAND": shlex.join(command),
+        })
+        self.native_env.start()
+        self.assertNotIn("FAKE_REVIEW", os.environ)
+
+    def tearDown(self):
+        self.native_env.stop()
+        self.tmp.cleanup()
+
+    def write_preview(self, files=None):
+        self.preview.write_text(json.dumps({"files": files if files is not None else [
+            {"path": "src/a.py", "status": "reviewed", "reason": ""},
+            {"path": "src/b.py", "status": "reviewed", "reason": ""},
+        ]}), encoding="utf-8")
+
+    def write_process(self):
+        self.process.write_text(json.dumps({
+            "feature": "m/demo", "candidate": self.candidate, "candidate_tree": self.tree,
+            "main_head": self.main_head, "verdict": "PASS",
+        }), encoding="utf-8")
+
+    def payload(self, **overrides):
+        value = {
+            "schema": "agent-dev.feature-candidate/v2",
+            "feature": "m/demo",
+            "round": 1,
+            "integration_branch": "feat/demo",
+            "main_head": self.main_head,
+            "merge_base": self.main_head,
+            "candidate": self.candidate,
+            "candidate_tree": self.tree,
+            "frozen_at": "2026-11-16T00:00:00Z",
+            "issues": [{"id": "issue-001"}, {"id": "issue-002"}],
+            "acceptance_plan": {"path": "acceptance-plan.yaml", "sha256": self.plan_sha,
+                                "cases": ["AC-1"]},
+            "reviewer": copy.deepcopy(self.reviewer),
+            "findings": [],
+            "previous_receipt_sha256": None,
+            "trust": "host-verified",
+            "attestation": None,
+            "host_verification": {
+                "verified": True, "host": "zcode", "session": "review-session",
+                "proof": str(self.proof), "proof_sha256": "0" * 64,
+            },
+        }
+        value.update(overrides)
+        return value
+
+    def write_candidate(self, **overrides):
+        value = self.payload(**overrides)
+        self.candidate_json.write_text(json.dumps(value, indent=2), encoding="utf-8")
+        return value
+
+    def create(self, output=None, preview=None, **overrides):
+        if overrides:
+            self.write_candidate(**overrides)
+        return rr.create_feature_receipt(
+            self.feature, self.root, self.candidate_json, report=self.report,
+            coverage_preview=preview if preview is not None else self.preview,
+            output=output or self.receipt_path)
+
+    def validate(self, path=None):
+        return rr.validate_feature_receipt(self.feature, self.root, path or self.receipt_path)
+
+    def advance_feature(self):
+        (self.root / "src/b.py").write_text("b = 2\n", encoding="utf-8")
+        sh(self.root, "git", "commit", "-qam", "rework")
+        self.candidate = sh(self.root, "git", "rev-parse", "HEAD")
+        self.tree = sh(self.root, "git", "rev-parse", "HEAD^{tree}")
+
+    def test_pass_receipt_binds_whole_diff_and_native_feature_action(self):
+        receipt, errors = self.create()
+        self.assertEqual(errors, [])
+        self.assertTrue(self.receipt_path.is_file())
+        self.assertEqual(receipt["base"], self.main_head)
+        self.assertEqual(receipt["head"], self.candidate)
+        self.assertEqual(receipt["tree"], self.tree)
+        self.assertEqual(receipt["plan_sha256"], self.plan_sha)
+        self.assertEqual(receipt["diff_sha256"],
+                         rr._feature_diff_sha(self.root, self.main_head, self.candidate))
+        self.assertEqual((receipt["total_files"], receipt["reviewed_files"],
+                          receipt["skipped_files"]), (2, 2, 0))
+        self.assertEqual([item["issue"] for item in receipt["implementers"]],
+                         ["issue-001", "issue-002"])
+        self.assertEqual(receipt["reviewer"]["session"], "review-session")
+        probes = json.loads((self.feature / "integration/host-probes.json").read_text())
+        self.assertTrue(probes["written"])
+        self.assertEqual(probes["review"]["feature"], "m/demo")
+        self.assertEqual(probes["review"]["head"], self.candidate)
+        self.assertEqual(probes["review"]["tree"], self.tree)
+        proof = json.loads(self.proof.read_text())
+        action = proof["native_proof"]["review"]
+        self.assertEqual(action["feature"], "m/demo")
+        self.assertEqual(action["candidate"], self.candidate)
+        self.assertEqual(action["tree"], self.tree)
+        self.assertEqual(action["main_head"], self.main_head)
+        self.assertEqual(self.validate(), [])
+        methods = [json.loads(line).get("method") for line in
+                   (self.feature / "integration/native-host.jsonl").read_text().splitlines()]
+        self.assertIn("v4/command", methods)
+        self.assertIn("session/list", methods)
+
+    def test_coverage_must_exactly_match_feature_diff(self):
+        self.write_preview([{"path": "src/a.py", "status": "reviewed", "reason": ""}])
+        _, errors = self.create()
+        self.assertTrue(any("feature diff file set" in error for error in errors), errors)
+        self.assertFalse(self.receipt_path.exists())
+
+        self.write_preview([
+            {"path": "src/a.py", "status": "reviewed", "reason": ""},
+            {"path": "src/b.py", "status": "skipped", "reason": ""},
+        ])
+        _, errors = self.create()
+        self.assertTrue(any("skipped coverage lacks reason" in error for error in errors), errors)
+
+        self.write_preview([
+            {"path": "src/a.py", "status": "reviewed", "reason": ""},
+            {"path": "src/b.py", "status": "skipped", "reason": "generated fixture"},
+        ])
+        receipt, errors = self.create()
+        self.assertEqual(errors, [])
+        self.assertEqual(receipt["skipped_files"], 1)
+
+    def test_open_critical_or_high_cannot_get_pass_receipt(self):
+        for severity in ("critical", "high"):
+            with self.subTest(severity=severity):
+                finding = {
+                    "id": "F-1", "severity": severity, "status": "open",
+                    "location": "src/a.py:1", "message": "bad", "closure": "",
+                }
+                _, errors = self.create(findings=[finding])
+                self.assertTrue(any("not closed" in error for error in errors), errors)
+                self.assertFalse(self.receipt_path.exists())
+        _, errors = self.create(findings=[{
+            "id": "F-2", "severity": "critical", "status": "closed",
+            "location": "src/a.py:1", "message": "bad", "closure": "",
+        }])
+        self.assertTrue(any("not closed" in error for error in errors), errors)
+
+    def test_reviewer_must_differ_from_every_ticket_implementer(self):
+        reviewer = copy.deepcopy(self.reviewer)
+        reviewer["session"] = "impl-session-2"
+        _, errors = self.create(reviewer=reviewer)
+        self.assertTrue(any("reviewer session equals implementer session for issue-002" in error
+                            for error in errors), errors)
+        reviewer = copy.deepcopy(self.reviewer)
+        reviewer["agent"] = "development"
+        _, errors = self.create(reviewer=reviewer)
+        self.assertTrue(any("reviewer agent equals implementer agent for issue-001" in error
+                            for error in errors), errors)
+
+    def test_candidate_tree_or_branch_change_invalidates_receipt(self):
+        _, errors = self.create()
+        self.assertEqual(errors, [])
+        self.advance_feature()
+        errors = self.validate()
+        self.assertTrue(any("integration branch advanced" in error for error in errors), errors)
+
+        receipt = json.loads(self.receipt_path.read_text())
+        receipt["tree"] = self.main_tree
+        self.receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        errors = self.validate()
+        self.assertTrue(any("tree does not match" in error for error in errors), errors)
+
+        self.write_candidate(candidate=self.main_head, candidate_tree=self.main_tree)
+        errors = self.validate()
+        self.assertTrue(any("head differs from candidate.json" in error for error in errors), errors)
+
+    def test_report_coverage_and_process_check_tampering_fails(self):
+        receipt, errors = self.create()
+        self.assertEqual(errors, [])
+        original_receipt = self.receipt_path.read_bytes()
+        self.report.write_text("tampered report", encoding="utf-8")
+        errors = self.validate()
+        self.assertTrue(any("report is missing or tampered" in error for error in errors), errors)
+
+        self.receipt_path.write_bytes(original_receipt)
+        receipt = json.loads(self.receipt_path.read_text())
+        receipt["report_sha256"] = "0" * 64
+        self.receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        errors = self.validate()
+        self.assertTrue(any("report" in error for error in errors), errors)
+
+        self.receipt_path.write_bytes(original_receipt)
+        self.preview.write_text(json.dumps({"files": []}), encoding="utf-8")
+        errors = self.validate()
+        self.assertTrue(any("coverage preview is missing or tampered" in error for error in errors), errors)
+
+        self.receipt_path.write_bytes(original_receipt)
+        self.process.write_text(json.dumps({"verdict": "FAIL"}), encoding="utf-8")
+        errors = self.validate()
+        self.assertTrue(any("process_check is missing or tampered" in error for error in errors), errors)
+
+    def test_re_review_chain_and_stale_previous_round(self):
+        first = self.feature / "integration/review-receipt-r1.json"
+        receipt1, errors = self.create(output=first)
+        self.assertEqual(errors, [])
+        first_sha = hashlib.sha256(first.read_bytes()).hexdigest()
+
+        self.advance_feature()
+        self.write_process()
+        self.report.write_text("# Feature review round 2\n\npass\n", encoding="utf-8")
+        second = self.feature / "integration/review-receipt-r2.json"
+        receipt2, errors = self.create(
+            output=second, round=2, previous_receipt_sha256=first_sha)
+        self.assertEqual(errors, [])
+        self.assertEqual(receipt2["round"], 2)
+        self.assertEqual(receipt2["previous_receipt_sha256"], first_sha)
+        self.assertEqual(receipt2["previous_receipt"]["sha256"], first_sha)
+        self.assertEqual(self.validate(second), [])
+        self.assertTrue(self.validate(first))
+
+        receipt = json.loads(second.read_text())
+        receipt["previous_receipt_sha256"] = "0" * 64
+        second.write_text(json.dumps(receipt), encoding="utf-8")
+        errors = self.validate(second)
+        self.assertTrue(any("previous receipt" in error for error in errors), errors)
+
+    def test_direct_isolated_cli_create_and_validate_feature(self):
+        result = subprocess.run([
+            sys.executable, "-I", str(SCRIPT), "create-feature",
+            "--feature-dir", str(self.feature), "--repo", str(self.root),
+            "--input", str(self.candidate_json), "--report", str(self.report),
+            "--coverage-preview", str(self.preview), "--output", str(self.receipt_path),
+        ], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = subprocess.run([
+            sys.executable, "-I", str(SCRIPT), "validate-feature",
+            "--feature-dir", str(self.feature), "--repo", str(self.root),
+            "--receipt", str(self.receipt_path),
+        ], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.validate(), [])
+
+    def test_sibling_feature_review_metadata_is_accepted(self):
+        review = self.candidate_json.with_name("feature-review.json")
+        review.write_text(json.dumps({
+            "reviewer": copy.deepcopy(self.reviewer), "findings": [], "round": 1,
+            "trust": "host-verified",
+            "host_verification": {
+                "verified": True, "host": "zcode", "session": "review-session",
+                "proof": str(self.proof), "proof_sha256": "0" * 64,
+            },
+        }), encoding="utf-8")
+        pure = self.payload()
+        for key in ("reviewer", "findings", "round", "trust", "host_verification"):
+            pure.pop(key)
+        self.candidate_json.write_text(json.dumps(pure), encoding="utf-8")
+        receipt, errors = rr.create_feature_receipt(
+            self.feature, self.root, self.candidate_json, report=self.report,
+            coverage_preview=self.preview, output=self.receipt_path)
+        self.assertEqual(errors, [])
+        self.assertEqual(receipt["reviewer"]["session"], "review-session")
+
+
 if __name__ == "__main__":
     unittest.main()

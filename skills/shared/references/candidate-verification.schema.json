@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.candidate-verification/v1",
+  "title": "Candidate-level DoD and fast verification",
+  "description": "Aggregates per-ticket supervisor re-runs of frozen DoD+fast commands at one integration candidate HEAD/tree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "candidate", "candidate_tree", "main_head", "plan_sha256",
+    "issues", "all-passed", "generated"
+  ],
+  "properties": {
+    "schema": {"const": "agent-dev.candidate-verification/v1"},
+    "candidate": {"type": "string", "format": "git-sha"},
+    "candidate_tree": {"type": "string", "format": "git-sha"},
+    "main_head": {"type": "string", "format": "git-sha"},
+    "plan_sha256": {"type": "string", "format": "sha256"},
+    "issues": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/issue"}
+    },
+    "all-passed": {"type": "boolean"},
+    "generated": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Generation directory name under the candidate's raw/ evidence tree."
+    }
+  },
+  "definitions": {
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue", "pass", "verification_path", "verification_sha256", "head", "tree"
+      ],
+      "properties": {
+        "issue": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
+        "pass": {"type": "boolean"},
+        "verification_path": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Ticket verification-supervisor.json path relative to candidate-verification.json."
+        },
+        "verification_sha256": {
+          "anyOf": [{"type": "string", "format": "sha256"}, {"type": "null"}]
+        },
+        "head": {
+          "anyOf": [{"type": "string", "format": "git-sha"}, {"type": "null"}]
+        },
+        "tree": {
+          "anyOf": [{"type": "string", "format": "git-sha"}, {"type": "null"}]
+        }
+      }
+    }
+  }
+}

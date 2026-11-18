@@ -164,14 +164,14 @@ cases:
         return receipt
 
     def merge(self):
-        with mock.patch.object(delivery, "_run_close_gate", return_value={"head": self.context["source_head"]}):
-            with mock.patch("review_receipt.validate_receipt", return_value=[]):
-                return delivery.merge(self.context_path)
+        with mock.patch.object(delivery, "_run_ticket_gate",
+                               return_value={"head": self.context["source_head"]}):
+            return delivery.merge(self.context_path)
 
     def reconcile(self):
-        with mock.patch.object(delivery, "_run_close_gate", return_value={"head": self.context["source_head"]}):
-            with mock.patch("review_receipt.validate_receipt", return_value=[]):
-                return delivery.reconcile(self.context_path)
+        with mock.patch.object(delivery, "_run_ticket_gate",
+                               return_value={"head": self.context["source_head"]}):
+            return delivery.reconcile(self.context_path)
 
     def test_start_cli_isolated_freezes_context_and_main_dev_symlink(self):
         result = subprocess.run([sys.executable, "-I", str(SCRIPT), "start",
@@ -214,12 +214,24 @@ cases:
         second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
                           .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]"), encoding="utf-8")
         self.issue.write_text(self.issue.read_text().replace("blocked-by: []", "blocked-by: [issue-002]"), encoding="utf-8")
-        with self.assertRaisesRegex(delivery.DeliveryError, "dependency is not done"):
+        with self.assertRaisesRegex(delivery.DeliveryError, "neither merged nor done"):
             self.start()
         self.assertFalse(self.source.exists())
-        second.write_text(second.read_text().replace("status: confirmed", "status: done"), encoding="utf-8")
-        result = self.start()
-        self.assertEqual(result["target"], "feat/demo")
+
+    def test_start_accepts_merged_or_done_dependency(self):
+        for status in ("merged", "done"):
+            with self.subTest(status=status):
+                # Independent fixture per accepted dependency status.
+                self.tearDown()
+                self.setUp()
+                second = self.fdir / "issues" / "issue-002-y.md"
+                second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
+                                  .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]")
+                                  .replace("status: confirmed", "status: " + status), encoding="utf-8")
+                self.issue.write_text(self.issue.read_text().replace(
+                    "blocked-by: []", "blocked-by: [issue-002]"), encoding="utf-8")
+                result = self.start()
+                self.assertEqual(result["target"], "feat/demo")
 
     def test_confirmed_redesign_refreezes_context_but_active_resume_cannot(self):
         first = self.start()
@@ -280,28 +292,70 @@ cases:
             self.start()
         self.assertFalse(self.source.exists())
 
-    def test_green_merge_marks_done_once_and_close_cleans(self):
+    def test_green_merge_marks_merged_once_and_retains_worktree(self):
         self.prepare()
         result = self.merge()
-        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["status"], "merged")
         commit = result["merge_commit"]
         self.assertEqual(sh(self.integration, "rev-list", "--parents", "-n", "1", commit).split()[1:],
                          [self.context["target_commit"], self.context["source_head"]])
         self.assertEqual(sh(self.integration, "rev-parse", "HEAD^{tree}"), self.context["source_tree"])
-        self.assertIn("status: done", self.issue.read_text())
+        self.assertIn("status: merged", self.issue.read_text())
+        self.assertNotIn("status: done", self.issue.read_text())
         events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
         self.assertEqual(len([e for e in events if e.get("event") == "merged"]), 1)
+        self.assertFalse([e for e in events if e.get("event") == "accepted"])
         merged = [e for e in events if e.get("event") == "merged"][0]
         self.assertEqual(merged["host"], "zcode")
         self.assertEqual(merged["branch"], "feat/demo-issue-001")
         self.assertEqual(merged["target"], "feat/demo")
         self.assertRegex(merged["ts"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
-        self.assertFalse(self.source.exists())
-        missing = subprocess.run(["git", "-C", str(self.root), "rev-parse", "--verify", "-q", "feat/demo-issue-001"],
-                                 capture_output=True)
-        self.assertNotEqual(missing.returncode, 0)
+        # Worktree/branch are retained until feature finalize accepts the candidate.
+        self.assertTrue(self.source.exists())
+        self.assertEqual(sh(self.source, "rev-parse", "--abbrev-ref", "HEAD"), "feat/demo-issue-001")
         journal = state_store.OperationJournal.load(self.context_path.parent / "delivery-operation.json")
         self.assertEqual(journal.state, "completed")
+        # Repeated merge is idempotent: same commit, no second event, no cleanup.
+        replay = self.merge()
+        self.assertTrue(replay.get("replayed"))
+        self.assertEqual(replay["merge_commit"], commit)
+        self.assertEqual(replay["status"], "merged")
+        events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
+        self.assertEqual(len([e for e in events if e.get("event") == "merged"]), 1)
+        self.assertTrue(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
+
+    def test_merge_replay_after_accepted_finalize_is_idempotent(self):
+        self.prepare()
+        result = self.merge()
+        self.issue.write_text(self.issue.read_text().replace("status: merged", "status: done"),
+                              encoding="utf-8")
+        accepted = {"event_id": "accepted-issue-001", "event": "accepted",
+                    "issue": "issue-001", "target": "feat/demo",
+                    "commit": result["merge_commit"]}
+        state_store.append_event_once(self.fdir / "progress.jsonl", accepted, accepted["event_id"])
+        replay = self.merge()
+        self.assertTrue(replay.get("replayed"))
+        self.assertEqual(replay["status"], "done")
+        self.assertEqual(replay["merge_commit"], result["merge_commit"])
+        events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
+        self.assertEqual(sum(e.get("event") == "merged" for e in events), 1)
+        self.assertEqual(sum(e.get("event") == "accepted" for e in events), 1)
+        self.assertTrue(self.source.exists())
+
+    def test_merge_preflight_calls_process_check_ticket_phase(self):
+        self.prepare()
+        import process_check
+        with mock.patch.object(process_check, "run",
+                               return_value=(process_check.Report(), {
+                                   "head": self.context["source_head"],
+                                   "base": self.context["base"]})) as run:
+            result = delivery.merge(self.context_path)
+        self.assertEqual(result["status"], "merged")
+        called = run.call_args.args[0]
+        self.assertEqual(called.phase, "ticket")
+        self.assertEqual(called.base, self.context["base"])
+        self.assertEqual(called.head, self.context["source_head"])
 
     def test_dirty_source_or_target_blocks_before_merge(self):
         self.prepare()
@@ -327,8 +381,8 @@ cases:
         self.assertEqual((self.fdir / "impl" / "issue-001" / "verification-supervisor.json").read_bytes(), verification)
         invalidations = (self.fdir / "impl" / "issue-001" / "delivery-invalidations.jsonl").read_text()
         self.assertIn("rebase-invalidation", invalidations)
-        with self.assertRaisesRegex(delivery.DeliveryError, "verification invalid/stale|review receipt"):
-            self.merge()
+        with self.assertRaisesRegex(delivery.DeliveryError, "verification.*(?:HEAD|head|tree|base)"):
+            delivery.merge(self.context_path)
 
     def test_rebase_conflict_preserves_live_conflict_and_invalidation(self):
         self.start()
@@ -344,21 +398,24 @@ cases:
         marker = json.loads((self.context_path.parent / "latest-invalidation.json").read_text())
         self.assertEqual(marker["status"], "conflict")
 
-    def test_missing_runner_review_conformance_and_decision_block(self):
+    def test_ticket_merge_does_not_require_supervisor_receipt_or_conformance(self):
         self.prepare()
-        (self.fdir / "impl" / "issue-001" / "verification-supervisor.json").unlink()
-        with self.assertRaisesRegex(delivery.DeliveryError, "cannot load JSON|verification"):
-            self.merge()
-        self.verify("supervisor")
-        (self.fdir / "impl" / "issue-001" / "review-receipt.json").unlink()
-        with self.assertRaisesRegex(delivery.DeliveryError, "review-receipt"):
-            self.merge()
-        (self.fdir / "impl" / "issue-001" / "review-receipt.json").write_text(json.dumps({
-            "verdict": "pass", "base": self.context["base"], "head": self.context["source_head"],
-            "tree": self.context["source_tree"]}))
-        with mock.patch.object(delivery, "_run_close_gate", side_effect=delivery.DeliveryError("conformance missing")):
-            with self.assertRaisesRegex(delivery.DeliveryError, "conformance missing"):
-                delivery.merge(self.context_path)
+        impl = self.fdir / "impl" / "issue-001"
+        (impl / "verification-supervisor.json").unlink()
+        (impl / "review-receipt.json").unlink()
+        (impl / "conformance-issue-001.md").unlink(missing_ok=True)
+        result = self.merge()
+        self.assertEqual(result["status"], "merged")
+        self.assertIn("status: merged", self.issue.read_text())
+        self.assertTrue(self.source.exists())
+
+    def test_implementer_verification_is_still_required_and_decision_blocks(self):
+        self.prepare()
+        impl = self.fdir / "impl" / "issue-001"
+        (impl / "verification-implementer.json").unlink()
+        with self.assertRaisesRegex(delivery.DeliveryError, "verification JSON missing: verification-implementer"):
+            delivery.merge(self.context_path)
+        self.verify("implementer")
         (self.fdir / "decisions").mkdir()
         # Bypass packet creation only to simulate an unreadable/foreign active
         # record; the production reader still fails closed on it.
@@ -372,13 +429,17 @@ cases:
             with self.assertRaisesRegex(delivery.DeliveryError, "simulated record crash"):
                 self.merge()
         merge_commit = sh(self.integration, "rev-parse", "HEAD")
-        self.assertNotIn("status: done", self.issue.read_text())
+        self.assertNotIn("status: merged", self.issue.read_text())
         journal = state_store.OperationJournal.load(self.context_path.parent / "delivery-operation.json")
         self.assertEqual(journal.current_step, "record")
         result = self.reconcile()
         self.assertEqual(result["merge_commit"], merge_commit)
-        self.assertIn("status: done", self.issue.read_text())
-        self.assertFalse(self.source.exists())
+        self.assertIn("status: merged", self.issue.read_text())
+        self.assertTrue(self.source.exists())
+        # Repeated reconcile after completion stays an idempotent replay.
+        replay = self.reconcile()
+        self.assertTrue(replay.get("replayed"))
+        self.assertEqual(replay["merge_commit"], merge_commit)
 
     def test_corrupt_or_legacy_progress_fails_before_merge(self):
         self.prepare()
@@ -395,7 +456,7 @@ cases:
                 with self.assertRaises(Exception):
                     self.merge()
                 self.assertEqual(sh(self.integration, "rev-parse", "HEAD"), target_before)
-                self.assertNotIn("status: done", self.issue.read_text())
+                self.assertNotIn("status: merged", self.issue.read_text())
 
     def test_local_target_mutation_before_update_ref_is_a_real_cas_failure(self):
         self.prepare()
@@ -409,7 +470,7 @@ cases:
             with self.assertRaisesRegex(delivery.DeliveryError, "target CAS failed"):
                 self.merge()
         self.assertNotEqual(sh(self.integration, "rev-parse", "HEAD"), self.context["source_head"])
-        self.assertNotIn("status: done", self.issue.read_text())
+        self.assertNotIn("status: merged", self.issue.read_text())
         progress = self.fdir / "progress.jsonl"
         self.assertFalse(progress.exists() and '"event": "merged"' in progress.read_text())
 
@@ -444,7 +505,7 @@ cases:
                 self.merge()
         self.assertEqual(sh(self.root, "rev-parse", "HEAD"), self.context["target_commit"])
         self.assertFalse(any(call[0] == "PUT" for call in api.calls))
-        self.assertNotIn("status: done", self.issue.read_text())
+        self.assertNotIn("status: merged", self.issue.read_text())
         journal = state_store.OperationJournal.load(self.context_path.parent / "delivery-operation.json")
         observed = journal.steps[0]["observed"]
         self.assertEqual(observed["status"], "needs-human")
@@ -478,19 +539,23 @@ cases:
         self.assertEqual(routed["state"], "needs-attention")
         self.assertEqual(routed["unknown_routes"][0]["route_id"], "r")
 
-    def test_completed_cleanup_reobserves_dev_after_source_is_gone(self):
+    def test_completed_merge_retains_resources_and_rejects_merged_start(self):
         self.prepare()
         self.merge()
-        self.assertFalse(self.source.exists())
+        self.assertTrue(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
         residual = self.fdir / "impl" / "issue-001" / "old.orig"
-        residual.write_text("must not disappear into completed cleanup\n")
-        with self.assertRaisesRegex(delivery.DeliveryError, "residual|needs-attention"):
-            delivery.reconcile(self.context_path)
+        residual.write_text("kept until feature finalize\n")
+        replay = delivery.reconcile(self.context_path)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(replay["status"], "merged")
         self.assertTrue(residual.is_file())
-        summary = delivery._cleanup_summary({"worktree_removed": True, "branch_deleted": False,
-                                             "remaining_paths": ["ref:refs/heads/feat/demo-issue-001"]})
-        self.assertFalse(summary["branch_deleted"])
-        self.assertEqual(summary["remaining_paths"], ["ref:refs/heads/feat/demo-issue-001"])
+        # A merged ticket cannot be re-opened by delivery.start; feature finalize
+        # owns merged -> accepted -> done.
+        with self.assertRaisesRegex(delivery.DeliveryError, "already merged|feature finalize"):
+            self.start()
+        self.assertIn("status: merged", self.issue.read_text())
+        self.assertTrue(self.source.exists())
 
     def test_crash_after_cas_before_materialize_recovers_without_new_merge(self):
         self.prepare()
@@ -532,7 +597,7 @@ cases:
         sh(self.integration, "commit", "--amend", "-qm", "tree forgery")
         with self.assertRaisesRegex(delivery.DeliveryError, "tree"):
             self.reconcile()
-        self.assertNotIn("status: done", self.issue.read_text())
+        self.assertNotIn("status: merged", self.issue.read_text())
 
     def test_reconcile_without_journal_or_arbitrary_commit_is_not_an_api(self):
         self.prepare()

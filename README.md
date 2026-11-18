@@ -12,7 +12,7 @@
 
 **横切**：/prototype 不可拷打问题出一次性原型 · /review 发布后复盘沉淀两级经验 · /handoff 会话交接提示词
 
-**主线**：/prd → /pd-review → /setup-dev → /how + /why → /tech-spec → /issue-split → 门②人审 → 逐票派发 /implement → /ai-review → 合并 → /review；小变更从 /issue 直达 /tech-spec。门②是唯一例行人工确认；异常通过 human-decision 单点处理。How 复杂调查使用 2–4 个 explorer + explainer，Why 保留七类来源覆盖和 Direct / Supported / Inferred / Speculative / Unknown 分级；实现证伪承重决策时走 redesign 重新调查与确认。测试由 `verify_issue.py` 真实执行，评审由独立实例生成回执，合并只走 `delivery.py`，清场只走 `close-and-clean / reconcile`。产物归档在 ./docs/features/<feature-module>/<feature-slug>/ 与 ./dev/features/<feature-module>/<feature-slug>/。
+**主线**：/prd → /pd-review → /setup-dev → /how + /why → /tech-spec → /issue-split → 门②人审 → 逐票派发 /implement → 票级内环 → merged → feature freeze → /ai-review（整需求一次）→ 候选复跑 + conformance → promote + finalize → /review；小变更从 /issue 直达 /tech-spec。门②是唯一例行人工确认；异常通过 human-decision 单点处理。How 复杂调查使用 2–4 个 explorer + explainer，Why 保留七类来源覆盖和 Direct / Supported / Inferred / Speculative / Unknown 分级；实现证伪承重决策时走 redesign 重新调查与确认。测试由 `verify_issue.py` 真实执行，feature 评审由独立实例生成候选回执，票级只做内环、不在每票做评审 / 复跑 / conformance；合并只走 `delivery.py`，清场只走 `finalize / close-and-clean / reconcile`。产物归档在 ./docs/features/<feature-module>/<feature-slug>/ 与 ./dev/features/<feature-module>/<feature-slug>/。
 
 **v2 硬约束**：票开工冻结 base / target / scope / 输入哈希；不接受手写测试通过、commit 前缀复用、同会话自评或本地 CI 自证。服务端强制、协作式 CI 与本地人工模式明确分离，能力未知即停止或保留资源。需要人裁决时由主会话统一问人，子会话只提交决策请求，无人值守只记录并继续其他票。
 

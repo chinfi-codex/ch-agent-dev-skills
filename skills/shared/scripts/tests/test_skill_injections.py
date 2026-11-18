@@ -24,8 +24,9 @@ class SkillInjectionTest(unittest.TestCase):
     def test_implement_uses_focused_execution_contracts(self):
         template = (SKILLS / "implement" / "SKILL.md.tmpl").read_text(encoding="utf-8")
         self.assertNotIn("{{SUPERVISION_LOOP}}", template)
-        self.assertIn("{{PROGRESS_EVENTS}}", template)
-        self.assertIn("{{HUMAN_DECISION}}", template)
+        for fragment in ("PROGRESS_EVENTS", "HUMAN_DECISION", "DISPATCH_PROTOCOL", "DEV_CONFIG"):
+            self.assertNotIn("{{" + fragment + "}}", template)
+        self.assertIn("../shared/fragments/human-decision.md", template)
 
     def test_generated_documents_match_templates_and_fragments(self):
         result = subprocess.run(

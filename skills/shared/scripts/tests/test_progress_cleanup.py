@@ -200,6 +200,13 @@ enforcement: {review-trust: operator-attested}
         plan = self.plan(status="in-progress")
         self.assertFalse(plan["eligible"])
 
+    def test_merged_ticket_is_not_cleanup_done(self):
+        _, wt, _, _ = self.merged_worktree()
+        plan = self.plan(status="merged")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("真实 done", plan["reason"])
+        self.assertTrue(wt.exists())
+
     def test_discard_saves_patch_then_defers_without_unlocking(self):
         branch, wt, _, _ = self.merged_worktree()
         self.add_unmerged_commit(branch, wt)

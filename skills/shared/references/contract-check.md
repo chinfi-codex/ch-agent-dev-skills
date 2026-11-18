@@ -2,14 +2,14 @@
 
 > 配套脚本：`shared/scripts/contract_check.py`；图谱与首页：`shared/scripts/architecture_graph.py`；严格 schema：`shared/references/architecture-graph.schema.json`。
 > 原则：**只报告、不改文件**；唯一写入例外是 `--init` 初始化盘点草稿、`architecture_graph.py migrate-legacy` 一次性迁移和 `render write` 确定性首页生成。
-> v2 同时接入 `/review` 复盘与 `process_check review / merge / close`；FAIL 会阻止对应交付，不再只是事后报告。
+> v2 接入 `/review` 复盘与显式 `--check`；feature `freeze / check` 的架构门由 `architecture_graph.py` 执行，contract_check 不再挂到票级 merge / close。
 
 ## 术语与模型
 
 - **tech-spec = flow-forward**：日期快照，不覆盖旧文件；整体取代关系由 frontmatter `supersedes` 显式声明。
 - **图谱分片 = 唯一写入源**：模块、接口、约束均写 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。`docs/ARCHITECTURE.md` 只是 `architecture_graph.py render write` 的确定性短首页，禁止手改。
 - **逐 ID 义务**：tech-spec 3.2 固定表的每个稳定 ID 必须恰好落入一张票的 `architecture-updates`，再对照分片动作、supersedes、代码和证据；正文出现 architecture 或“来源引用”不再构成放行。
-- **三级门禁**：`check-design` 只查设计结构、How/Why/承重决策/usage 章节和 active leaf，不要求票或 current；票级 `check-flow` 仍保持原 CLI，但只强制本票声明 ID 与 diff flow-back；`check-feature` / `feature_closeout freeze/check` 在 integration candidate 上强制整份 active spec 的全部 ID，防止后续票未完成阻塞首票或整需求漏检。
+- **检查范围**：设计阶段保留 `check-design` 与拆票静态校验；票级 `process_check --phase ticket` 只在相关时执行架构 A/B/D 门，不跑 contract_check；feature `freeze / check` 在 candidate 上执行全量 architecture_graph 门；`contract_check --check` 用于复盘与显式诊断。
 - **flow-back**：实现 diff 命中接口记录绑定的主 source 或任一辅助 sources 而票未声明 ID 时，必须同分支补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名主源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。
 - **多源码绑定**：`source` 是唯一主绑定和主代码证据绑定；可选 `sources` 是辅助源码数组，对象沿用 source 的 `path / symbol / sha256` 约束；同一 path+symbol+sha256 不得重复，同文件不同符号可共存，同一路径 hash 不一致即拒绝。`current / release_only` 对辅助源码逐个核对 verified_commit 与候选 HEAD 的文件存在、bytes SHA256、symbol 及区间无漂移，verified_commit 必须为 HEAD 祖先；release_only 主 source 保持仅历史提交核验。
 - **current**：完整 verified_commit 为候选 HEAD 祖先，候选上的源码 bytes / SHA256 / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则只能 needs_verification。release_only 不进入默认现行查询；needs_verification 不因配置多源码或填入 hash 自动提升。
@@ -50,5 +50,5 @@ python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>
 ## 巡检输出纪律
 
 - 报告列出 FIND / FAIL 及通过计数，不改任何业务文件；事实更正由责任阶段按分片写权限处理。
-- `process_check` 聚合架构结果时保持只读；生成器验证只能在独立临时工作区运行，不能借检查改写票 worktree。
+- `process_check --phase ticket` 的架构聚合保持只读并复用单次校验；feature `freeze / check` 的全量架构门只读；生成器验证只能在独立临时工作区运行，不能借检查改写票 worktree。
 - 模块、接口或约束语义有争议时进入 human-decision，不以复盘或文本合并覆盖另一票已确认的契约。

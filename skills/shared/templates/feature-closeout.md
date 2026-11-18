@@ -1,6 +1,16 @@
 # 需求收口产物模板（feature-closeout: local-human）
 
-功能验收计划的唯一真源是需求目录 `acceptance-plan.yaml`，结构见 `shared/templates/acceptance-plan.yaml`。其余产物写**主工作区** `./dev/features/<feature-module>/<feature-slug>/integration/`，不写集成 worktree、不提交到集成分支。`feature_closeout.py freeze` 冻结代码候选、计划哈希与计划快照；`check` 对计划、实际结果、人工确认和报告逐条对账。
+功能验收计划的唯一真源是需求目录 `acceptance-plan.yaml`，结构见 `shared/templates/acceptance-plan.yaml`。其余产物写**主工作区** `./dev/features/<feature-module>/<feature-slug>/integration/[round/]`，不写集成 worktree、不提交到集成分支。`feature_closeout.py freeze` 冻结代码候选、票组、merged commit 与计划哈希；票只须 `merged` 或 `done`，不再要求每票 conformance。`check` 对候选评审、候选复跑、feature conformance、计划、实际结果、人工确认和报告逐条对账；`finalize` 在 feature-merged 后写 accepted/done 并清理。
+
+## 0. 候选级门（freeze 之后、report 之前各做一次）
+
+| 产物 | 产生方式 | 必须绑定 | 阻塞条件 |
+| --- | --- | --- | --- |
+| `integration/feature-review.md` + `integration/feature-review-receipt.json` | 独立 `/ai-review` 一次审 `main_head..candidate`；`review_receipt.py create-feature` 生成回执 | candidate / tree / merge_base / diff_sha256 / plan_sha256 / 报告哈希 / 全部 implementer 身份 | reviewer 与任一 implementer 同 session/agent；verdict=blocked；critical/high 未闭合；候选、报告或覆盖变化 |
+| `integration/candidate-verification.json` | `verify_issue.py run-candidate --candidate ... --repo <集成 worktree>` 逐票真实执行冻结 DoD+fast | candidate / tree / main_head / plan_sha256；每票 `verification_path` + SHA256 | 任一票失败、漏票、额外票、证据哈希不匹配或候选不 clean |
+| `integration/conformance-feature.md` | 主会话或独立监督会话按 tech-spec 全节 + 全部票矩阵并集核对 | candidate / tree / coverage.issues / specs hash | verdict≠conform、漏票、漏 spec、空表或证据指针无效 |
+
+票级不再生成 `review-receipt.json`、不再跑 supervisor 复跑或 `conformance-<issue>.md`；票级覆盖矩阵保留在 impl-log，供 feature conformance 汇总。
 
 ## 1. evidence.md（关联自动检查）
 
@@ -139,8 +149,8 @@ business_results_sha256: <最终 business-results.json 的 SHA256>
 ## 7. 集成运行资源与清场
 
 - 实例租约与开发服务记录保存在 integration runtime  registry，绑定 repo / feature / round、candidate、worktree、lease/service ID 和日志代际；business-results.environment 必须引用同一 ID。
-- `feature-merged` 后使用 feature 级 `close-and-clean`：先确认候选后无新提交、无共享需求，停止开发服务并释放租约，再 salvage、删除 integration worktree / 精确 upstream、清理失效代际。
-- 停止或释放失败、候选不匹配、外部能力未知时保留资源并报告 needs-attention；不得用 `git worktree prune` 冒充集成清场完成。
+- `feature-merged` 后运行 `feature_closeout.py finalize --feature-dir <需求目录> --repo <主工作区>`：核对候选与 feature-merged 事件，逐票 `merged → done` 并写 `accepted`，再逐票 close-and-clean，最后清理 integration worktree / 精确 upstream / 失效代际。`--no-cleanup` 只写状态，用于先完成关账再单独清理。
+- 停止服务或释放租约失败、候选不匹配、外部能力未知时保留资源并报告 needs-attention；不得用 `git worktree prune` 冒充集成清场完成。
 - 最终 candidate、验收报告、确认、最终 scoped 结果与被引用截图保留；失效代际和 salvage 只能经独立预检确认后清理。
 
 
@@ -151,7 +161,7 @@ business_results_sha256: <最终 business-results.json 的 SHA256>
 
 ## 6. conformance-feature.md
 
-`issue: feature`，并绑定 `candidate: <完整 commit>`、`candidate_tree: <tree>`、`verdict: conform`。多叶子不在各票提前做 feature 全量；全部票 done 后只在本 candidate 统一核一次。YAML 必须声明完整作用域，正文必须有非空覆盖表，且每张票至少一行有效证据：
+`issue: feature`，并绑定 `candidate: <完整 commit>`、`candidate_tree: <tree>`、`verdict: conform`。多叶子不在各票提前做 feature 全量；全部票 merged/done 后只在本 candidate 统一核一次。YAML 必须声明完整作用域，正文必须有非空覆盖表，且每张票至少一行有效证据：
 
 ```yaml
 issue: feature

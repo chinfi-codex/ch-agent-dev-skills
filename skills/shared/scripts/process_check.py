@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Read-only v2 ticket policy aggregation for review, merge and close.
+"""Read-only v2 ticket policy aggregation for ticket, review, merge and close.
 
 The frozen ``ticket_context`` is the only source of base/target/scope/DoD/spec
 identity.  Evidence is accepted only as verification JSON plus hashed raw logs;
 Markdown evidence is a deterministic rendering checked against that JSON.
 
-CLI: process_check.py --issue ISSUE --repo WORKTREE --phase review|merge|close
+CLI: process_check.py --issue ISSUE --repo WORKTREE --phase ticket|review|merge|close
                      [--json OUTPUT]
+
+``ticket`` is the delivery merge gate: context/scope/deny/size, red and test
+mapping, generated artifacts, worktree-dev, budget,
+manifest, bug regression, active human decision and implementer verification.
+It deliberately does not require the supervisor runner, a review receipt or
+conformance; those stay in the legacy review/merge/close diagnostics and at
+feature finalize.
 
 The ticket worktree is never written.  Generated-refresh commands run only in a
 fresh disposable detached worktree and must reproduce the exact HEAD tree.
@@ -37,7 +44,6 @@ TEST_PATTERNS = [
     "tests/**", "**/tests/**", "test/**", "**/test/**", "**/test_*", "**/*_test.*",
     "**/*.test.*", "**/*.spec.*",
 ]
-ARCHITECTURE_PATTERNS = ["docs/ARCHITECTURE.md", "docs/architecture/**"]
 SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",
     ".jsx", ".kt", ".m", ".mm", ".php", ".py", ".rb", ".rs", ".scala",
@@ -644,11 +650,13 @@ def _check_test_changes(rep, files, policy, context, repo, impl_dir, root, log_t
             and c.get("spec_anchor") == anchor and c.get("mapping_sha256") == digest
             and c.get("status") == "closed" and c.get("note", "").strip()
         ]
-        if phase != "review" and not closures:
+        # review/ticket are the ticket inner loop: a real structured mapping is
+        # required, but semantic closure belongs to the deferred review receipt.
+        if phase in {"merge", "close"} and not closures:
             rep.add("test-change", "FAIL", "%s mapping lacks matching review-receipt semantic closure" % path)
-        elif phase == "review":
+        elif phase in {"review", "ticket"}:
             pending.append(path)
-    if pending and phase == "review":
+    if pending and phase in {"review", "ticket"}:
         rep.add("test-change", "REVIEW", "existing test mappings require receipt semantic closure: %s" % ", ".join(pending))
     return changed
 
@@ -710,35 +718,6 @@ def _check_generated(rep, repo, files, policy, head, tree):
     for entry in entries:
         if isinstance(entry, dict) and any(match_any(path, [entry.get("glob", "")]) for path in paths):
             _run_generator(rep, repo, head, tree, entry, paths)
-
-
-def _check_architecture(rep, repo, issue, context, files, base, head):
-    paths = sorted({p for file in files for p in _all_paths(file)})
-    architecture_changed = [p for p in paths if match_any(p, ARCHITECTURE_PATTERNS)]
-    declared = context.get("architecture_updates") or []
-    if declared and not architecture_changed:
-        rep.add("architecture", "FAIL", "ticket declares architecture-updates but no architecture artifact changed")
-    try:
-        graph = _sibling("architecture_graph")
-        _, errors = graph.check(repo, head=head, base=base)
-        rep.extend("architecture-graph", errors)
-        root = _find_root(issue)
-        spec_path = root / context["spec_path"]
-        issue_paths = sorted((spec_path.parent / "issues").glob("*.md"))
-        errors = graph.check_flow_forward(
-            repo, spec_path, issue_paths, head=head, implementation_ids=set(declared),
-            allow_flow_back=True)
-        rep.extend("architecture-forward", [str(error) for error in errors])
-        if (repo / "docs" / "architecture").is_dir() and list((repo / "docs" / "architecture").glob("*.json")):
-            _, errors = graph.render_homepage(repo, write=False, head=head)
-            rep.extend("architecture-homepage", [str(error) for error in errors])
-        if hasattr(graph, "check_flow_back"):
-            errors = graph.check_flow_back(repo, issue, base, head, spec_path=spec_path)
-            rep.extend("architecture-flow", [str(error) for error in errors])
-        elif declared or architecture_changed:
-            rep.add("architecture-flow", "FAIL", "architecture_graph.check_flow_back is required for architecture changes")
-    except (ImportError, ValueError, OSError, TypeError) as exc:
-        rep.add("architecture-graph", "FAIL", "architecture validation failed: %s" % exc)
 
 
 def _check_worktree_dev(rep, repo, root):
@@ -1029,6 +1008,9 @@ def run(args):
     implementer = _validate_verification(rep, impl_dir, repo, context, issue_id, "implementer")
     supervisor = None
     receipt = None
+    # ticket is the delivery-time inner loop: implementer evidence only.
+    # Supervisor verification and the independent review receipt remain
+    # diagnostic/compat paths (merge/close), not ticket-merge requirements.
     if args.phase in {"merge", "close"}:
         supervisor = _validate_verification(rep, impl_dir, repo, context, issue_id, "supervisor")
         receipt = _load_receipt(rep, impl_dir, issue, repo)
@@ -1038,7 +1020,7 @@ def run(args):
             verifier = _sibling("verify_issue")
             evidence_path = impl_dir / ("evidence-%s.md" % issue_id)
             candidates = [primary]
-            if args.phase == "review":
+            if args.phase in {"ticket", "review"}:
                 supervisor_path = impl_dir / "verification-supervisor.json"
                 if supervisor_path.is_file():
                     try:
@@ -1064,7 +1046,6 @@ def run(args):
         except InputError as exc:
             rep.add("test-change", "FAIL", str(exc))
     _check_generated(rep, repo, files, policy, head, tree)
-    _check_architecture(rep, repo, issue, context, files, base, head)
     _check_worktree_dev(rep, repo, root)
     budget = config.get("artifact-budget") or {}
     _check_budget(rep, impl_dir, issue_id, budget)
@@ -1094,10 +1075,13 @@ def run(args):
             except (InputError, ImportError, ValueError, OSError) as exc:
                 rep.add("bug-regression", "FAIL", "bug regression proof invalid: %s" % exc)
 
+    if args.phase in {"ticket", "close"}:
+        # Active human decisions block ticket merge and close; conformance stays
+        # a feature-level requirement and is never part of the ticket phase.
+        _check_human_decisions(rep, root, context, issue_id)
     if args.phase == "close":
         _check_conformance(rep, tc, context, config, impl_dir, issue_id, integration, log_text, head, tree, repo,
                            integration and _integration_leaf_count(issue, tc.parse_issue) == 1)
-        _check_human_decisions(rep, root, context, issue_id)
 
     meta = {
         "issue": issue_id, "phase": args.phase, "target-branch": target,
@@ -1115,7 +1099,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="read-only v2 ticket process policy aggregation")
     parser.add_argument("--issue", required=True)
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--phase", choices=("review", "merge", "close"), required=True)
+    parser.add_argument("--phase", choices=("ticket", "review", "merge", "close"), required=True)
     parser.add_argument("--json", dest="json_out")
     args = parser.parse_args(argv)
     try:

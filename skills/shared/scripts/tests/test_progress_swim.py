@@ -134,19 +134,69 @@ class SwimFixture(unittest.TestCase):
         self.assertEqual(active, {"模块A/需求甲"})
 
     def test_done_ts_sources(self):
-        """完结时间：merged 事件优先于 status 注释日期；只有注释时用注释；两者皆无为 None"""
+        """完结时间：accepted 优先，历史 done 票回退 merged；再回退 status 注释；皆无为 None"""
         from datetime import datetime
         feat = self.repo / "dev" / "features" / "模块A" / "需求甲"
         (feat / "progress.jsonl").write_text(
-            '{"ts": "2026-01-02 10:00", "event": "merged", "issue": "issue-002"}\n', encoding="utf-8")
+            '{"ts": "2026-01-02 10:00", "event": "merged", "issue": "issue-002"}\n'
+            '{"ts": "2026-01-03 09:00", "event": "merged", "issue": "issue-006"}\n'
+            '{"ts": "2026-01-04 11:30", "event": "accepted", "issue": "issue-006"}\n',
+            encoding="utf-8")
         write_issue(self.repo, "模块E", "需求戊", "issue-001", "注释完结", "done           # 2026-01-01 合并收口")
+        write_issue(self.repo, "模块A", "需求甲", "issue-006", "验收完结", "done")
         p = self.swim()
         by_uid = {i["uid"]: i for f in p["features"] for i in f["issues"]}
         self.assertEqual(by_uid["模块A/需求甲#issue-002"]["done_ts"],
                          datetime(2026, 1, 2, 10, 0).timestamp())
+        self.assertEqual(by_uid["模块A/需求甲#issue-006"]["done_ts"],
+                         datetime(2026, 1, 4, 11, 30).timestamp())
         self.assertEqual(by_uid["模块E/需求戊#issue-001"]["done_ts"],
                          datetime(2026, 1, 1).timestamp())
         self.assertIsNone(by_uid["模块C/需求丙#issue-009"]["done_ts"])
+
+    def test_merged_unlocks_blocked_by_but_is_not_done(self):
+        write_issue(self.repo, "模块F", "需求己", "issue-001", "已合入", "merged")
+        write_issue(self.repo, "模块F", "需求己", "issue-002", "下游", "confirmed",
+                    extra="blocked-by: [issue-001]\n")
+        feat = self.repo / "dev" / "features" / "模块F" / "需求己"
+        (feat / "progress.jsonl").write_text(json.dumps({
+            "ts": "2026-01-02 10:00", "event": "merged", "issue": "issue-001",
+            "target": "feat/需求己", "commit": "b" * 40}) + "\n", encoding="utf-8")
+        issues = progress.load_issues(self.repo, feat, progress.load_events(feat), {})
+        merged = next(it for it in issues if it["id"] == "issue-001")
+        child = next(it for it in issues if it["id"] == "issue-002")
+        self.assertEqual(merged["status"], "merged")
+        self.assertEqual(merged["merged_target"], "feat/需求己")
+        self.assertTrue(child["ready"], "merged dependency must unlock downstream")
+        p = self.swim()
+        feature = next(f for f in p["features"] if f["id"] == "模块F/需求己")
+        self.assertEqual(feature["counts"]["merged"], 1)
+        self.assertEqual(feature["counts"]["done"], 0)
+        self.assertTrue(feature["active"])
+        node = next(i for i in feature["issues"] if i["id"] == "issue-001")
+        self.assertEqual(node["status"], "merged")
+        self.assertEqual(node["merged_target"], "feat/需求己")
+        self.assertEqual(node["merged_ts"], datetime(2026, 1, 2, 10, 0).timestamp())
+        self.assertNotIn("done_ts", node)
+
+    def test_progress_line_shows_merged_status(self):
+        write_issue(self.repo, "模块F", "需求己", "issue-001", "已合入", "merged")
+        feat = self.repo / "dev" / "features" / "模块F" / "需求己"
+        (feat / "progress.jsonl").write_text(json.dumps({
+            "ts": "2026-01-02 10:00", "event": "merged", "issue": "issue-001",
+            "target": "feat/需求己", "commit": "b" * 40}) + "\n", encoding="utf-8")
+        it = progress.load_issues(self.repo, feat, progress.load_events(feat), {})[0]
+        line, mark = progress.issue_line(it, datetime(2026, 1, 2, 12, 0).timestamp(), 30)
+        self.assertIn("待验收", mark)
+        self.assertIn("已合入 feat/需求己", line)
+        self.assertIn("等 feature 验收", line)
+        self.assertEqual(progress.STATUS_LABEL["merged"], "已合入待验收")
+        self.assertIn("merged", progress.STATUS_ORDER)
+        self.assertIn("merged", progress.CANON_STATUSES)
+        chunk, counts = progress.render_project(
+            "repo", self.repo, 30, datetime(2026, 1, 2, 12, 0).timestamp())
+        self.assertIn("已合入待验收", chunk)
+        self.assertEqual(counts["merged"], 1)
 
     def test_summary_facts_include_decision_contract_errors(self):
         """旧 needs-human note 缺活动包时显式报契约错误，不充当决定真源。"""

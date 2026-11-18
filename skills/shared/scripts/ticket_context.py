@@ -537,6 +537,7 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
     current_id = next((ident for ident, item in records.items() if item["path"] == issue), "")
     if current_id not in group:
         errors.append("%s: current ticket does not belong to its resolved tech-spec group" % issue.name)
+    leaves = set()
     try:
         import architecture_graph
         leaves, active_errors = architecture_graph.active_spec_leaves(feature.glob("*-tech-spec-*.md"))
@@ -616,8 +617,29 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         plan = feature_closeout.read_plan(feature)
         errors.extend(feature_closeout.validate_plan_data(plan))
         errors.extend(feature_closeout.validate_plan_sources(feature, plan))
-        if str(plan.get("tech_spec") or "") != spec.name:
-            errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
+        plan_spec_name = str(plan.get("tech_spec") or "")
+        if plan_spec_name != spec.name:
+            import architecture_graph
+
+            # A pure documentation supplement has no new business acceptance
+            # cases. It may explicitly retain this feature's verified plan.
+            inherited = agents_config.read_frontmatter(spec).get("acceptance_from")
+            entries, entry_errors = architecture_graph.parse_spec_updates(spec)
+            paths = [path for values in scopes.values() for path in values]
+            architecture_only = paths and all(
+                path == architecture_graph.HOMEPAGE_REL.as_posix()
+                or (architecture_graph._safe_repo_path(path) is not None
+                    and Path(path).parent == architecture_graph.GRAPH_REL
+                    and Path(path).suffix == ".json" and not set(path) & set("*?[]"))
+                for path in paths)
+            plan_owners = [item for item in records.values()
+                           if item["spec"] == feature / plan_spec_name
+                           and item["frontmatter"].get("status") not in {"deferred", "cancelled"}]
+            if (inherited != plan_spec_name or plan_spec_name not in leaves or not plan_owners
+                    or entry_errors or not entries or any(item["action"] != "describe" for item in entries)
+                    or not architecture_only):
+                errors.append("acceptance-plan tech_spec must equal %s; only a describe-only supplement "
+                              "may explicitly retain this feature's confirmed plan" % spec.name)
     except (ImportError, ValueError, OSError, TypeError) as exc:
         errors.append("acceptance plan validation failed: %s" % exc)
     summary = [{"issue_id": ident, "status": all_statuses.get(ident),

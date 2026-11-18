@@ -142,7 +142,7 @@ class TicketContextTest(unittest.TestCase):
     def test_context_survives_all_real_delivery_phases_without_mocks(self):
         output = self.feature / "impl/issue-001/ticket-context.json"
         frozen = tc.create_context(self.issue, self.root, output)
-        phases = ("confirmed", "start", "in-progress", "in-review", "mr-submitted", "done")
+        phases = ("confirmed", "start", "in-progress", "in-review", "mr-submitted", "merged", "done")
         for index, phase in enumerate(phases):
             with self.subTest(phase=phase):
                 text = ISSUE.replace("status: confirmed", "status: " + phase)
@@ -333,6 +333,49 @@ cases:
                               "--repo", str(self.root)], capture_output=True, text=True)
         self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
         self.assertTrue(json.loads(cli.stdout)["ok"])
+
+    def test_describe_supplement_retains_only_its_feature_acceptance_plan(self):
+        self.prepare_plan()
+        original = self.spec.read_bytes()
+        plan = self.feature / "acceptance-plan.yaml"
+        plan_bytes = plan.read_bytes()
+        supplement = self.feature / "wording-tech-spec-2026-11-15.md"
+        header = ("---\nstatus: 已确认（待拆解）\nacceptance_from: " + self.spec.name + "\n---\n"
+                  "### 3.2 接口变更\n"
+                  "| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |\n"
+                  "| --- | --- | --- | --- | --- | --- | --- |\n")
+        row = "| demo.wording | describe | 范围 | demo | src/a.py:a | — | — |\n"
+        supplement.write_text(header + row)
+        issue = self.write_second_plan_issue(blocked="[issue-001]", scope="docs/architecture/demo.json")
+        body = issue.read_text().replace(self.spec.name, supplement.name).replace(
+            "architecture-updates: []", "architecture-updates: [demo.wording]")
+        issue.write_text(body)
+        result = tc.check_plan(issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(original, self.spec.read_bytes())
+        self.assertEqual(plan_bytes, plan.read_bytes())
+
+        for replacement in (
+            header.replace(self.spec.name, "../other/" + self.spec.name) + row,
+            header.replace(self.spec.name, supplement.name) + row,
+            header + row.replace("describe", "modify").replace("| — | — |", "| — | tests/test_a.py |"),
+            header + row + "| demo.other | new | 新义务 | demo | src/a.py:a | — | tests/test_a.py |\n",
+        ):
+            supplement.write_text(replacement)
+            self.assertFalse(tc.check_plan(issue, self.root)["ok"])
+        supplement.write_text(header + row)
+        issue.write_text(body.replace("docs/architecture/demo.json]", "docs/architecture/demo.json, src/a.py]"))
+        self.assertFalse(tc.check_plan(issue, self.root)["ok"])
+        issue.write_text(body)
+        self.spec.write_text(self.spec.read_text().replace("已确认（待拆解）", "草稿"))
+        self.assertFalse(tc.check_plan(issue, self.root)["ok"])
+        self.spec.write_bytes(original)
+        plan.write_text(plan.read_text().replace(self.spec.name, "unrelated-tech-spec-2026-11-15.md"))
+        self.assertFalse(tc.check_plan(issue, self.root)["ok"])
+        plan.write_bytes(plan_bytes)
+        prd = self.root / "docs/features/m/demo/demo-prd-2026-11-14.md"
+        prd.write_text(prd.read_text() + "- AC-2：Given 新输入，When 运行，Then 覆盖必须失败\n")
+        self.assertFalse(tc.check_plan(issue, self.root)["ok"])
 
     def test_check_plan_rejects_missing_source_ac(self):
         self.prepare_plan()
