@@ -26,7 +26,7 @@ const fragmentMap: Record<string, string> = {
   SUPERVISION_LOOP: "supervision-loop.md",
   PROGRESS_EVENTS: "progress-events.md",
   HUMAN_DECISION: "human-decision.md",
-  ARCHITECTURE_GRAPH: "architecture-graph.md",
+  ARCH_CHECK: "arch-check.md",
 };
 
 const templatesDir = join(rootDir, "shared", "templates");

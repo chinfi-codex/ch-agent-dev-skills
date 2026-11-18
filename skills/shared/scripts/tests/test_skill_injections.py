@@ -68,8 +68,18 @@ class SkillInjectionTest(unittest.TestCase):
         self.assertRegex(sh, r"FLAT_ITEMS=\([^\n]*\bhow\b[^\n]*\bwhy\b")
         self.assertIn('"how","why"', ps1)
         tech_spec = (SKILLS / "tech-spec" / "SKILL.md.tmpl").read_text(encoding="utf-8")
-        for term in ("/how", "/why", "base + graft", "usage-first", "check-design", "redesign"):
+        for term in ("/how", "/why", "base + graft", "usage-first", "arch_check.py validate", "redesign"):
             self.assertIn(term, tech_spec)
+
+    def test_arch_check_fragment_is_wired_into_development_skills(self):
+        generator = (SKILLS / "scripts" / "gen-skill-docs.ts").read_text(encoding="utf-8")
+        self.assertIn('ARCH_CHECK: "arch-check.md"', generator)
+        self.assertTrue((SKILLS / "shared" / "fragments" / "arch-check.md").is_file())
+        self.assertFalse((SKILLS / "shared" / "fragments" / "architecture-graph.md").exists())
+        for name in ("pd-plan", "tech-spec", "issue-split", "implement", "review", "ai-review"):
+            template = (SKILLS / name / "SKILL.md.tmpl").read_text(encoding="utf-8")
+            self.assertIn("{{ARCH_CHECK}}", template, name)
+        self.assertNotIn("{{ARCHITECTURE_GRAPH}}", generator)
 
     def test_sync_never_rewrites_generated_documents_implicitly(self):
         sh = (REPO / "sync.sh").read_text(encoding="utf-8")

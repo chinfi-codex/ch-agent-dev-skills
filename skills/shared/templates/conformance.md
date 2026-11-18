@@ -18,7 +18,7 @@ coverage:
 
 ## 需求点清单（反向枚举）
 
-**先不看各票 impl-log 覆盖矩阵**，从 PRD / change-request 的全部端到端 AC、tech-spec 全节与票「要做什么 / 不做什么」独立枚举需求点，再打开代码逐条判定——防止被实现方叙事带偏。跨票接缝、共享状态、接口顺序和失败路径都在核对范围；`architecture-updates` 契约逐稳定 ID 核对 tech-spec 3.2、票声明、`docs/architecture/*.json` 分片与真实代码四者一致。
+**先不看各票 impl-log 覆盖矩阵**，从 PRD / change-request 的全部端到端 AC、tech-spec 全节与票「要做什么 / 不做什么」独立枚举需求点，再打开代码逐条判定——防止被实现方叙事带偏。跨票接缝、共享状态、接口顺序和失败路径都在核对范围；架构部分核对 `docs/ARCHITECT.md` 的层 / 组 / 依赖规则与 candidate 代码一致，并以 `arch_check.py check` 与 `render check` 的结果为机器证据；规则被放宽或删除时逐条核对理由。
 
 | # | 需求点 | 来源（PRD AC / spec 节锚点） | 票 | 判定（已实现 / 语义偏差 / 未实现） | 核对依据（candidate 代码:符号、测试、verification-supervisor.json#DoD） |
 |---|---|---|---|---|---|

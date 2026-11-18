@@ -46,7 +46,7 @@ verify-policy:
     - "**/*.spec.*"
 
   # 每条派生物只有唯一生成器；process_check 在独立临时工作区重跑并比较 tree，不接受文字声明。
-  # 示例：{id: architecture-home, glob: "docs/ARCHITECTURE.md", generator: "python3 ../shared/scripts/architecture_graph.py render write --repo ."}
+  # 示例：{id: architect-guide, glob: "docs/ARCHITECT.md", generator: "python3 ../shared/scripts/arch_check.py render write --repo ."}
   generated-refresh: []
 
   # 所有 changed paths 都核 declared-scope；越界必须重新确认票上下文，登记漂移不再放行。

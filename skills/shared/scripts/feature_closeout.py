@@ -532,35 +532,46 @@ def check_plan_unchanged(rep: Report, feature_dir: Path, cand: dict):
 # ---------- freeze ----------
 
 
-def _check_architecture_feature(rep: Report, repo: Path, fdir: Path, issue_files: list, head: str):
-    """Run the full active-spec architecture gate on an integration candidate."""
+def _check_arch_rules(rep: Report, repo: Path, head: str):
+    """Run the Python ARCH-CHECK on a frozen candidate and bind rules/guide hashes."""
     try:
-        import architecture_graph
-        import ticket_context
-        primary = repo_root_of(fdir)
-        groups, feature_issue_ids = {}, set()
-        for issue in issue_files:
-            spec = ticket_context.find_spec(issue, primary)
-            feature_issue_ids.add(read_frontmatter(issue).get("issue-id"))
-            groups.setdefault(spec, []).append(issue)
-        has_shards = any((repo / "docs" / "architecture").glob("*.json"))
-        validated = None
-        if has_shards:
-            records, errors = architecture_graph.check(repo, head=head)
-            rep.extend("architecture-feature", errors)
-            validated = {"records": records, "errors": []}
-        for spec, issues in sorted(groups.items(), key=lambda item: str(item[0])):
-            leaves, errors = architecture_graph.active_spec_leaves(spec.parent.glob("*-tech-spec-*.md"))
-            if spec.name not in leaves:
-                errors.append(f"{spec.name}: not an active confirmed leaf tech-spec")
-            errors.extend(architecture_graph.check_flow_forward(
-                repo, spec, issues, head=head, feature_issue_ids=feature_issue_ids, validated=validated))
-            rep.extend("architecture-feature", [str(error) for error in errors])
-        if has_shards:
-            _, errors = architecture_graph.render_homepage(repo, write=False, head=head, validated=validated)
-            rep.extend("architecture-homepage", [str(error) for error in errors])
-    except (ImportError, ValueError, OSError, TypeError) as exc:
-        rep.add("architecture-feature", "FAIL", f"feature architecture validation failed: {exc}")
+        import arch_check
+    except ImportError as exc:
+        rep.add("arch-check", "FAIL", f"arch-check unavailable: {exc}")
+        return None
+    rules_rel = arch_check.RULES_REL
+    guide_rel = arch_check.GUIDE_REL
+    try:
+        raw = arch_check.read_blob(repo, head, rules_rel)
+        if raw is None:
+            rep.add("arch-check", "INFO", f"{rules_rel} 不存在；arch-check 跳过")
+            return None
+        rules = arch_check._load_rules_bytes(raw, rules_rel)
+        errors = arch_check.validate_rules(rules)
+        if errors:
+            for error in errors:
+                rep.add("arch-check", "FAIL", error)
+            return None
+        findings, infos, _ = arch_check.check_repo(repo, head, rules=rules)
+        for finding in findings:
+            level = {"error": "FAIL", "warn": "WARN", "info": "INFO"}.get(finding["severity"], "INFO")
+            rep.add("arch-check", level, "[%s] %s:%d — %s\n  %s" % (
+                finding["rule"], finding["path"], finding["line"], finding["message"],
+                finding["remediation"].replace("\n", "\n  ")))
+        for info in infos:
+            rep.add("arch-check", "INFO", info)
+        for error in arch_check.render_guide_check(repo, head, rules):
+            rep.add("architect-guide", "FAIL", error)
+        guide = arch_check.render_guide(rules)
+        return {
+            "rules": rules_rel,
+            "rules_sha256": arch_check._sha256(raw),
+            "guide": guide_rel,
+            "guide_sha256": arch_check._sha256(guide),
+        }
+    except (InputError, ValueError, OSError, TypeError) as exc:
+        rep.add("arch-check", "FAIL", f"arch-check failed: {exc}")
+        return None
 
 
 def freeze(args) -> Report:
@@ -606,7 +617,6 @@ def freeze(args) -> Report:
         rep.add("worktree", "FAIL", f"集成 worktree 有未提交或未跟踪改动 {len(dirty)} 处；冻结前先提交、清理或还原")
 
     issues = []
-    flow_files = []
     merged = last_merged(fdir)
     files = sorted((fdir / "issues").glob("issue-*.md"))
     if not files:
@@ -635,7 +645,6 @@ def freeze(args) -> Report:
         status = str(fm.get("status") or "")
         if status == "deferred" or (scope and iid not in scope):
             continue
-        flow_files.append(f)
         merged_commit = merged.get(iid)
         issues.append({"id": iid, "status": status, "merged_commit": merged_commit})
         if status not in ("merged", "done"):
@@ -654,7 +663,7 @@ def freeze(args) -> Report:
         check_no_active_decisions(rep, fdir, iid)
     check_no_active_decisions(rep, fdir)
     candidate_head, _ = head_info(repo)
-    _check_architecture_feature(rep, repo, fdir, flow_files, candidate_head)
+    arch_check_meta = _check_arch_rules(rep, repo, candidate_head)
 
     main = cfg["main-branch"]
     main_head = git(repo, "rev-parse", main).strip()
@@ -674,6 +683,7 @@ def freeze(args) -> Report:
         "main_branch": main, "main_head": main_head, "merge_base": merge_base,
         "candidate": head, "candidate_tree": tree, "frozen_at": datetime.now(timezone.utc).isoformat(),
         "issues": issues,
+        "arch_check": arch_check_meta,
         "acceptance_plan": {
             "path": "acceptance-plan.yaml", "sha256": digest, "cases": sorted(plan["cases"].keys()),
         },
@@ -1477,15 +1487,9 @@ def check(args) -> Report:
     _check_main_unchanged(rep, repo, cfg, cand)
     check_plan_unchanged(rep, fdir, cand)
     _check_ticket_states(rep, fdir, repo, cand)
-    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
-    flow_files = []
-    for issue in sorted((fdir / "issues").glob("issue-*.md")):
-        fm = read_frontmatter(issue)
-        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
-        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
-        if iid in wanted and str(fm.get("status") or "") != "deferred":
-            flow_files.append(issue)
-    _check_architecture_feature(rep, repo, fdir, flow_files, str(cand.get("candidate")))
+    arch_check_meta = _check_arch_rules(rep, repo, str(cand.get("candidate")))
+    if arch_check_meta != cand.get("arch_check"):
+        rep.add("arch-check", "FAIL", "arch-check rules/guide changed since freeze; re-freeze the candidate")
     plan = frozen_plan(cand, integ)
 
     ev = yaml_head(integ / "evidence.md")

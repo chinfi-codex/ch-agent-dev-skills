@@ -4,4 +4,4 @@
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
-- 架构事实唯一写入源是 `docs/architecture/*.json`。票 DoD 声明契约更新时，承接票在 worktree 分支内按稳定 ID 修改接口分片，随代码同一 MR 合入；flow-back 同样补记对应分片并在 impl-log「红线接触记录」登记「接口 → 代码位置」映射。`docs/ARCHITECTURE.md` 是确定性生成的只读短首页，所有开发阶段均不得手改。
+- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的只读指南，所有开发阶段均不得手改。票涉及层 / 组 / 规则变更时，按 tech-spec 3.2 更新规则并重新 render；票级不做架构检查，完整 arch-check 在 feature candidate 的 `freeze / check` 执行。

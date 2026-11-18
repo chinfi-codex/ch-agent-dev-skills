@@ -114,7 +114,7 @@ cases:
         explicit = f"target-branch: {target}\n" if target else ""
         self.issue.write_text(
             "---\nissue-id: issue-001\nfeature-slug: demo\ntitle: X\nstatus: confirmed\nblocked-by: []\n"
-            f"declared-scope: [src/a.py]\narchitecture-updates: []\ntech-spec: {self.spec.name}\n{explicit}---\n"
+            f"declared-scope: [src/a.py]\ntech-spec: {self.spec.name}\n{explicit}---\n"
             "# X\n\n## 要做什么\n\n演示命令行为。\n\n## DoD\n\n- [ ] `python3 -I t.py`\n")
 
     @property

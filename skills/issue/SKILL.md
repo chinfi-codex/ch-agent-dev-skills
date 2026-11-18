@@ -86,7 +86,8 @@ allowed-tools:
 ```text
 ./docs/
   GLOSSARY.md
-  ARCHITECTURE.md
+  ARCH-CHECK.json
+  ARCHITECT.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -106,7 +107,7 @@ allowed-tools:
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `docs/architecture/*.json` 是模块、接口、约束的唯一写入源，按稳定 ID 分片维护；`docs/ARCHITECTURE.md` 是可重生成的短首页，不承载架构事实。旧表只为尚未迁移且没有图谱分片的项目保留兼容读取，禁止与图谱并写。巡检见 `shared/references/contract-check.md`。
+- `docs/ARCH-CHECK.json` 是架构分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的指南，禁止手改。旧 `docs/architecture/*.json` 与 `docs/ARCHITECTURE.md` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
@@ -379,6 +380,7 @@ options:
 验收契约必须同时满足：
 - frontmatter `baseline_ac.retain / replace / retire` 显式列出且互斥；未列出的 baseline 不得声称本轮已重验，replace 的目标必须是实际 delta AC。
 - `### Delta 验收场景` 使用 `AC-D<序号>`。先扫描本 feature 既有 PRD 与 change-request，取下一个未使用序号；定稿后不复用、不重排。
+- `### 代码改动清单（文档树）` 以文档树列出本次改动对应的代码模块与文件，逐文件标注「新增 / 修改 / 删除」和一句话计划变动逻辑；与「本次明确不改」一致，范围外文件不得入树；纯文档 / 外部配置变更写「无代码改动」及原因，不留空。
 - 后续 acceptance plan 必须覆盖全部 delta 与 retain baseline；replace / retire 的旧 AC 不得混入。
 
 ---

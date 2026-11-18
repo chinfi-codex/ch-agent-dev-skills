@@ -5,7 +5,7 @@ feature_slug: <feature-slug>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 草稿        # 草稿 | 已确认（待拆解）—— /issue-split 以 status = 已确认（待拆解） 为开工门禁
-supersedes:          # 可空：本 tech-spec 整体取代的旧 tech-spec 文件名（flow-forward 取代链，机器可读；部分取代不填，在 3.2 节写清废弃项）
+supersedes:          # 可空：本 tech-spec 整体取代的旧 tech-spec 文件名（取代链，机器可读；部分取代不填，在 3.2 节写清废弃项）
 upstream:                  # 标准路径：定稿 PRD + pd-review-report；小变更路径：change-request（删 pd-review-report 行）
   prd: <PRD 文件名>                # 小变更路径改写 change-request 文件名
   pd-review-report: <pd-review-report 文件名>
@@ -33,15 +33,29 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 ## 3. 方案设计
 
 ### 3.1 模块拆解
-### 3.2 接口变更（新增 / 修改 / 废弃）
 
-<!-- 每个变更点必须有稳定 ID，并由 /issue-split 逐 ID 写入承接票 frontmatter `architecture-updates`。
-     架构事实只写 `docs/architecture/*.json` 分片；代码与证据生效后由承接票更新分片并重新生成只读首页。
-     动作固定为 new / modify / retire；无变更时保留下方表头，不写占位记录。
-     本节写的废弃项若取代旧 tech-spec 的接口，frontmatter supersedes 填被整体取代的旧 spec 文件名；部分取代在对应行填写被替代的稳定 ID。 -->
+先按模块说清职责与边界，再以**文档树**列出本次实施对应的全部代码模块与文件，逐文件标注动作（`[新增]` / `[修改]` / `[删除]`）和一句话计划变动逻辑（改哪些符号、什么行为变化）。树是 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入：方案范围外文件不得入树；被替代的旧实现及其失效引用以 `[删除]` 入树；架构规则 / 派生物变更（如 `docs/ARCH-CHECK.json`）同样入树并注明承接方式。
 
-| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |
-| --- | --- | --- | --- | --- | --- | --- |
+```text
+<repo>/
+  services/order/                      # 订单模块：本次改动主场
+    order_service.py      [修改] close_order() 增加幂等键校验，回调重试不再重复关单
+    idempotency.py        [新增] 幂等键生成与校验工具
+  tests/order/
+    test_order_close.py   [修改] 新增幂等重试场景 2 条
+  docs/ARCH-CHECK.json   [修改] 新增幂等规则；由承接票更新规则并 render write
+```
+
+### 3.2 架构影响（层 / 组 / 规则）
+
+<!-- 说明本需求对架构规范的影响：新增 / 修改 / 退役哪些层、组、依赖方向或代码规则。
+     规则唯一机器真源是 docs/ARCH-CHECK.json；docs/ARCHITECT.md 只能由 arch_check.py render write 生成。
+     涉及规则变更时，明确由哪张承接票更新规则并重新 render；该票 declared-scope 必须包含这两个文件。
+     没有架构影响时保留表头并写“无”；不写稳定 ID 或 architecture-updates。 -->
+
+| 层 / 组 | 动作 | 路径 / 规则 ID | 说明 | 验证方式 |
+| --- | --- | --- | --- | --- |
+| 例：app/services | new | grp-service / model-no-upward | 新增业务层组，禁止 model 反向依赖 | arch_check.py check + 承接票声明 scope |
 
 ### 3.3 数据与存储
 ### 3.4 关键流程（主路径 + 失败路径）
@@ -55,7 +69,7 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 | DEC-ID | 问题与统一准则 | 结构不同候选 | Base + 现有复用锚点 | Graft / 拒绝项及理由 | 证伪触发 |
 | --- | --- | --- | --- | --- | --- |
-| DEC-01 | 决策、How/Why 证据、3–6 条准则 | A / B（必要时 C）及 judge / 降级披露 | 选中方案及 `path:symbol` 或 architecture ID | 吸收优点、拒绝方案与代价 | 哪些实现证据会触发 redesign |
+| DEC-01 | 决策、How/Why 证据、3–6 条准则 | A / B（必要时 C）及 judge / 降级披露 | 选中方案及 `path:symbol` 或 ARCH-CHECK 组 / 规则 | 吸收优点、拒绝方案与代价 | 哪些实现证据会触发 redesign |
 
 候选与淘汰理由属于本 dated spec，不写成 current 架构事实。
 

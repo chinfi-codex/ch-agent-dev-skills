@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-dev.arch-check/v1",
+  "title": "ARCH-CHECK rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "language", "source_roots", "architecture", "groups", "rules"],
+  "properties": {
+    "schema": {"const": "agent-dev.arch-check/v1"},
+    "version": {"type": "integer", "minimum": 1},
+    "language": {"enum": ["python"]},
+    "source_roots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "architecture": {"$ref": "#/definitions/architecture"},
+    "groups": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/group"}
+    },
+    "rules": {"$ref": "#/definitions/rules"}
+  },
+  "definitions": {
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "layers", "placement"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "layers": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/layer"}
+        },
+        "placement": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "may_depend_on"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "may_depend_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "paths", "layer", "description"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "layer": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "groups_selector": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "severity": {"enum": ["error", "warn"]},
+    "forbidden_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "from", "to", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "from": {"$ref": "#/definitions/groups_selector"},
+        "to": {"$ref": "#/definitions/groups_selector"},
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "cycles_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "groups", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "groups": {"$ref": "#/definitions/groups_selector"},
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "banned_calls_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "from", "calls", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "from": {"$ref": "#/definitions/groups_selector"},
+        "calls": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "methods_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "max_params", "exclude", "count_varargs", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "max_params": {"type": "integer", "minimum": 0},
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "count_varargs": {"type": "boolean"},
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "types_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "max_lines", "exclude", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "max_lines": {"type": "integer", "minimum": 1},
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "comments_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "kinds", "max_lines", "max_docstring_lines", "exclude", "allow", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["commented_code", "placeholder", "restating", "long_line", "long_docstring"]}
+        },
+        "max_lines": {"type": "integer", "minimum": 1},
+        "max_docstring_lines": {"type": "integer", "minimum": 1},
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "allow": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "duplication_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "max_rate", "min_lines", "exclude", "comment"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "severity": {"$ref": "#/definitions/severity"},
+        "max_rate": {"type": "integer", "minimum": 0, "maximum": 100},
+        "min_lines": {"type": "integer", "minimum": 2},
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "comment": {"type": "string", "minLength": 1}
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["forbidden", "cycles", "banned_calls", "methods", "types", "comments", "duplication"],
+      "properties": {
+        "forbidden": {"type": "array", "items": {"$ref": "#/definitions/forbidden_rule"}},
+        "cycles": {"type": "array", "items": {"$ref": "#/definitions/cycles_rule"}},
+        "banned_calls": {"type": "array", "items": {"$ref": "#/definitions/banned_calls_rule"}},
+        "methods": {"type": "array", "items": {"$ref": "#/definitions/methods_rule"}},
+        "types": {"type": "array", "items": {"$ref": "#/definitions/types_rule"}},
+        "comments": {"type": "array", "items": {"$ref": "#/definitions/comments_rule"}},
+        "duplication": {"type": "array", "items": {"$ref": "#/definitions/duplication_rule"}}
+      }
+    }
+  }
+}

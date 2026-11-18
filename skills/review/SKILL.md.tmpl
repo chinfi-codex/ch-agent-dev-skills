@@ -41,7 +41,7 @@ allowed-tools:
 {{DOC_WRITING_RULES}}
 
 
-{{ARCHITECTURE_GRAPH}}
+{{ARCH_CHECK}}
 
 # /review
 
@@ -90,7 +90,7 @@ allowed-tools:
 - **feature 评审轮次**：`integration/feature-review-receipt.json` 的 round、历史 receipt 数、BLOCKER 闭合情况
 - **票级验证统计**：各票 DoD / fast 的 implementer 执行与候选 `run-candidate` 复跑结果、耗时、失败原因、skip 与隔离数；**逃逸缺陷**（合并后在 main 或 CI full 才发现的问题，来源 git log 修复提交 / CI 判决 / 人反馈；归因到对应票 DoD 或 fast 的覆盖缺口）。历史产物中的旧 scoped / full 档位字段只作当时事实读取，不要求新票继续生成，也不把缺失旧字段记为缺陷
 - **问题清单**：聚合各 impl-log 的「放弃了什么 / 假设了什么 / 红线接触 / 漂移记录 / 遗留」与 feature 评审报告的 BLOCKER 清单
-- **契约漂移巡检**（图谱分片或旧项目 ARCHITECTURE.md 存在时；只读，不改图谱）：运行 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/contract-check.md`），FAIL 项逐条进问题清单并标注归因；图谱事实错漏交由对应责任阶段更新分片，复盘报告记录建议与证据
+- **架构规则巡检**（`docs/ARCH-CHECK.json` 存在时；只读）：运行 `python3 ../shared/scripts/arch_check.py check --repo <仓库根> --head HEAD --rules docs/ARCH-CHECK.json` 和 `python3 ../shared/scripts/contract_check.py --check --repo <仓库根>`（规则见 `../shared/references/arch-check.md` 与 `contract-check.md`）。error / FAIL 逐条进问题清单并标注归因（规则误报 / 实现违规 / 规则被放宽）；规则或指南错漏交由责任阶段更新并重新 `render write`，复盘报告记录建议与证据
 - 统计口径随数字给出；取不到标「缺失」
 
 ### Step 3：抽取关键点
@@ -131,7 +131,7 @@ allowed-tools:
 ## 硬约束
 
 - 只读历史产物与 git 历史；`Bash` 只允许 git 只读查询（log / show / diff），禁止任何写操作与实现导向命令
-- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。架构图谱分片与生成首页不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
+- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。`docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md` 不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
 - 不修改任何历史文档、票、代码；发现历史文档互相矛盾，只在问题清单或「数据缺口」中记录
 - 取不到的数据标「缺失」，禁止编造；统计口径必须随数字给出
 - 关键点与经验条目必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告

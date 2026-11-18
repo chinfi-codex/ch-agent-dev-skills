@@ -10,7 +10,7 @@ Public API:
         duplicate commands and malformed checkboxes raise ContextError.
     create_context(issue_path, repo, output_path=None, *, primary_repo=None) -> dict
         Freeze complete target/base/source OIDs, source tree, repo-relative
-        paths, scope, architecture IDs, issue/DoD/spec/config hashes and the
+        paths, scope, issue/DoD/spec/config hashes and the
         gate2 digest.  All input/output paths must stay inside the Git worktree.
         With no output_path, no file is written.
     load_context(path) -> dict
@@ -59,7 +59,7 @@ from state_store import atomic_json_write
 
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "ticket-context.schema.json"
-CONTEXT_SCHEMA = "agent-dev.ticket-context/v3"
+CONTEXT_SCHEMA = "agent-dev.ticket-context/v4"
 _OID = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -317,10 +317,6 @@ def _scope(frontmatter: Dict[str, Any], key: str) -> List[str]:
     value = frontmatter.get(key)
     if isinstance(value, str):
         value = [value]
-    if value is None and key == "architecture_updates":
-        value = []
-    if value is None and key == "architecture-updates":
-        value = []
     if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
         raise ContextError("ticket %s must be a list of non-empty strings" % key)
     result = [item.strip() for item in value]
@@ -396,7 +392,6 @@ def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, prima
     scope = _scope(frontmatter, "declared-scope")
     if not scope:
         raise ContextError("declared-scope must be non-empty when freezing a ticket")
-    architecture = _scope(frontmatter, "architecture-updates")
     dod = parsed["dod"]
     context: Dict[str, Any] = {
         "schema": CONTEXT_SCHEMA,
@@ -411,7 +406,6 @@ def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, prima
         "source_head": source_head,
         "source_tree": source_tree,
         "declared_scope": scope,
-        "architecture_updates": architecture,
         "hashes": {
             "issue": issue_hash,
             "dod": _sha256_bytes(_canonical(dod)),
@@ -537,17 +531,6 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
     current_id = next((ident for ident, item in records.items() if item["path"] == issue), "")
     if current_id not in group:
         errors.append("%s: current ticket does not belong to its resolved tech-spec group" % issue.name)
-    leaves = set()
-    try:
-        import architecture_graph
-        leaves, active_errors = architecture_graph.active_spec_leaves(feature.glob("*-tech-spec-*.md"))
-        errors.extend(active_errors)
-        if spec.name not in leaves:
-            errors.append("%s: not an active confirmed leaf tech-spec" % spec.name)
-        errors.extend(architecture_graph.check_flow_forward(
-            root, spec, [item["path"] for item in group.values()], implementation_ids=set()))
-    except (ImportError, ValueError, OSError, TypeError) as exc:
-        errors.append("architecture plan validation failed: %s" % exc)
     dependencies: Dict[str, List[str]] = {}
     scopes: Dict[str, List[str]] = {}
     for ident, item in group.items():
@@ -619,27 +602,7 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         errors.extend(feature_closeout.validate_plan_sources(feature, plan))
         plan_spec_name = str(plan.get("tech_spec") or "")
         if plan_spec_name != spec.name:
-            import architecture_graph
-
-            # A pure documentation supplement has no new business acceptance
-            # cases. It may explicitly retain this feature's verified plan.
-            inherited = agents_config.read_frontmatter(spec).get("acceptance_from")
-            entries, entry_errors = architecture_graph.parse_spec_updates(spec)
-            paths = [path for values in scopes.values() for path in values]
-            architecture_only = paths and all(
-                path == architecture_graph.HOMEPAGE_REL.as_posix()
-                or (architecture_graph._safe_repo_path(path) is not None
-                    and Path(path).parent == architecture_graph.GRAPH_REL
-                    and Path(path).suffix == ".json" and not set(path) & set("*?[]"))
-                for path in paths)
-            plan_owners = [item for item in records.values()
-                           if item["spec"] == feature / plan_spec_name
-                           and item["frontmatter"].get("status") not in {"deferred", "cancelled"}]
-            if (inherited != plan_spec_name or plan_spec_name not in leaves or not plan_owners
-                    or entry_errors or not entries or any(item["action"] != "describe" for item in entries)
-                    or not architecture_only):
-                errors.append("acceptance-plan tech_spec must equal %s; only a describe-only supplement "
-                              "may explicitly retain this feature's confirmed plan" % spec.name)
+            errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
     except (ImportError, ValueError, OSError, TypeError) as exc:
         errors.append("acceptance plan validation failed: %s" % exc)
     summary = [{"issue_id": ident, "status": all_statuses.get(ident),

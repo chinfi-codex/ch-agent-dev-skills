@@ -7,7 +7,7 @@
 ## 查询
 
 1. 先打开 commit/spec/PR 明确引用的 ticket，读正文、评论、状态历史和关联票。
-2. 本地按 feature-module/slug、issue ID、稳定 AC、architecture ID、关键符号和业务词搜索；外部工具用多种措辞全文搜索。
+2. 本地按 feature-module/slug、issue ID、稳定 AC、ARCH-CHECK 组 / 规则 ID、关键符号和业务词搜索；外部工具用多种措辞全文搜索。
 3. 从子票向父票/项目查 forcing function，从父票向兄弟票查共同约束和重复/替代关系。
 4. 读取关联 PRD/spec/决策包时，本 investigator 只记录文档线索；长文档正文由文档 investigator 深读，避免跨源重复。
 5. 检查 labels、milestone、状态变化、延期/取消原因、关闭为重复后的 canonical ticket。

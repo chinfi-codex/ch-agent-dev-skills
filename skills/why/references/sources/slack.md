@@ -5,7 +5,7 @@
 ## 查询
 
 1. 按目标作者和代码落地前后时间窗搜索。
-2. 搜索真实 PR/ticket/spec URL、issue ID、architecture ID、关键符号和业务词。
+2. 搜索真实 PR/ticket/spec URL、issue ID、ARCH-CHECK 组 / 规则 ID、关键符号和业务词。
 3. 防御性目标搜索异常类、错误原文、timeout/retry/rate-limit 等关键词和 incident 频道。
 4. 命中单条消息后读取完整 thread 和必要上下文；频道决策还要查是否有后续修正或正式文档链接。
 5. 记录频道、日期范围、查询、保留期和未搜索的私域范围。

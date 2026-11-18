@@ -17,7 +17,7 @@ git show <commit>
 git log <old>..<new> -p -- <file>
 ```
 
-- 搜索 `TODO/FIXME/HACK/NOTE`、deprecated 注释、相关测试和 architecture ID。
+- 搜索 `TODO/FIXME/HACK/NOTE`、deprecated 注释、相关测试和 ARCH-CHECK 组 / 规则 ID。
 - 查看同一提交修改的其他文件，识别事故修复、迁移和共同约束。
 - 提交含真实 PR 编号且 `gh` 可用时，读完整 body/comments/reviews；无 PR 时记录“本地 Git 路径，无外部 PR”，不是覆盖失败。
 - 最近 revert/re-apply、fixup、expand/contract 提交要连成序列读。

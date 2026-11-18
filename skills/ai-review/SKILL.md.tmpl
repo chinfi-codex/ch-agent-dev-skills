@@ -29,6 +29,8 @@ allowed-tools:
 
 {{DEV_CONFIG}}
 
+{{ARCH_CHECK}}
+
 {{HUMAN_DECISION}}
 
 # /ai-review
@@ -58,7 +60,7 @@ allowed-tools:
 ## Step 1：定位整需求背景
 
 - 读取 feature 目录全部非 deferred 票，逐票读「要做什么 / DoD / 不做什么」与 `merged` 事件，得到 `issue → merged_commit` 分区。
-- 读 tech-spec 全节（尤其 3.2 接口、3.6 承重决策、4 约束与假设、5 测试策略）、PRD / change-request 对应 AC、acceptance-plan.yaml 全量 case、GLOSSARY 与命中的架构记录。
+- 读 tech-spec 全节（尤其 3.2 架构影响、3.6 承重决策、4 约束与假设、5 测试策略）、PRD / change-request 对应 AC、acceptance-plan.yaml 全量 case、GLOSSARY、`docs/ARCHITECT.md` 与 `docs/ARCH-CHECK.json`。
 - 反向枚举需求：先不看各票覆盖矩阵，从 PRD / spec 独立列出行为点，再打开代码核对。票级 impl-log 矩阵只作为线索，不作为结论。
 - 找不到唯一 feature、关键文档或候选绑定时：**只返回未持久化 human-decision envelope，不直接问人、不写票、不伪造报告路径或代码结论**。
 
@@ -91,7 +93,8 @@ ocr review --from <candidate.main_head> --to <candidate.candidate> \
 票级门禁已由 `process_check --phase ticket` 在每票合入前执行；本步不重复票级 grep / 数文件，只做整需求语义复核：
 
 - **需求覆盖**：PRD / change-request 的全部端到端 AC 与 tech-spec 行为点是否都有实现和可执行验收；跨票拼接是否形成完整主路径与失败路径。
-- **接口与契约**：tech-spec 3.2 的稳定 ID、`docs/architecture/*.json` 与真实代码是否一致；跨模块调用、错误语义、ownership、并发/异步契约是否被票级切分破坏。
+- **接口与契约**：`docs/ARCHITECT.md` 的分层 / 组 / 依赖规则与真实代码是否一致；跨模块调用、错误语义、ownership、并发/异步契约是否被票级切分破坏。
+- **架构规则**：candidate 上 `arch_check.py check` 无 error；规则变更（尤其删除、放宽、提高阈值）是否有 tech-spec / impl-log 依据；`docs/ARCHITECT.md` 是否由 `render write` 生成且无手改。
 - **测试更新**：既有测试修改是否逐条映射真实 DoD / spec 锚点，且只改相关断言 / 夹具；新增测试是否有 runner 见红；跨票是否删除了彼此依赖的覆盖。
 - **生成物**：生成器在临时工作区重跑后 tree 一致，无额外字段或越界输出；文字声明不算。
 - **替代清理**：旧代码、文件、配置、失效引用无保留依据却仍存在 → high；同一能力出现双路径 → high。
@@ -129,6 +132,6 @@ ocr review --from <candidate.main_head> --to <candidate.candidate> \
 - 除评审报告和调用方指定的 receipt 输入外不写任何文件；不代 Implementer 修复，不创建 / 回答 / 路由 human-decision。
 - 评审必须独立于主会话和全部 implementer；一个 feature 一个新评审实例，复审可续接同一实例。不得在实现会话内代评。
 - 固定 candidate、tree、diff、plan、OCR、端点或身份校验失败即停，不自修配置绕过。
-- 需求缺口、跨票契约破坏、旧实现残留、测试映射不成立、生成器不洁净、架构 flow/首页检查失败均列 BLOCKER。
+- 需求缺口、跨票契约破坏、旧实现残留、测试映射不成立、生成器不洁净、arch-check error 或 `ARCHITECT.md` 过期均列 BLOCKER。
 - 不因 CI full 未跑开 BLOCKER；测试代码质量问题照常评。
 - 用词遵循 GLOSSARY 标准术语。

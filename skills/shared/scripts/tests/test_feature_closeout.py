@@ -532,39 +532,93 @@ baseline_ac:
         self.assertEqual(self.candidate["candidate"], self.merged_commit)
         self.assertEqual(self.candidate["acceptance_plan"]["cases"], ["AC-1", "AC-2"])
 
-    def test_feature_gate_checks_graph_once_and_preserves_errors(self):
-        import architecture_graph
+    def _write_arch_rules(self, rules):
+        import arch_check as ac
 
-        shards = self.wt / "docs" / "architecture"
-        shards.mkdir(parents=True)
-        (shards / "demo.json").write_text("{}", encoding="utf-8")
-        issue = self.fdir / "issues" / "issue-001-x.md"
+        (self.wt / "docs").mkdir(parents=True, exist_ok=True)
+        (self.wt / "docs/ARCH-CHECK.json").write_text(json.dumps(rules), encoding="utf-8")
+        (self.wt / "docs/ARCHITECT.md").write_bytes(ac.render_guide(rules))
+        sh(self.wt, "add", "-f", "docs/ARCH-CHECK.json", "docs/ARCHITECT.md")
+        sh(self.wt, "commit", "-qm", "arch rules")
+        return sh(self.wt, "rev-parse", "HEAD")
+
+    def _base_arch_rules(self):
+        import arch_check as ac
+
+        return {
+            "schema": ac.SCHEMA_NAME,
+            "version": 1,
+            "language": "python",
+            "source_roots": ["."],
+            "architecture": {
+                "title": "Demo",
+                "summary": "Layered.",
+                "layers": [
+                    {"name": "data", "description": "data", "may_depend_on": []},
+                    {"name": "web", "description": "web", "may_depend_on": ["data"]},
+                ],
+                "placement": [],
+            },
+            "groups": [
+                {"id": "model", "paths": ["src/model/**"], "layer": "data", "description": "models"},
+                {"id": "controller", "paths": ["src/controller/**"], "layer": "web", "description": "handlers"},
+            ],
+            "rules": {
+                "forbidden": [], "cycles": [], "banned_calls": [], "methods": [],
+                "types": [], "comments": [], "duplication": [],
+            },
+        }
+
+    def test_arch_check_gate_binds_rules_and_guide(self):
+        head = self._write_arch_rules(self._base_arch_rules())
         report = fc.Report()
-        with mock.patch.object(architecture_graph, "check", wraps=architecture_graph.check) as check:
-            fc._check_architecture_feature(report, self.wt, self.fdir, [issue], self.merged_commit)
-        check.assert_called_once_with(self.wt, head=self.merged_commit)
-        self.assertTrue(any(item["check"] == "architecture-feature" and item["level"] == "FAIL"
+        meta = fc._check_arch_rules(report, self.wt, head)
+        self.assertFalse(report.failed, report.items)
+        self.assertEqual(meta["rules"], "docs/ARCH-CHECK.json")
+        self.assertEqual(len(meta["rules_sha256"]), 64)
+        self.assertEqual(meta["guide"], "docs/ARCHITECT.md")
+        self.assertEqual(len(meta["guide_sha256"]), 64)
+
+    def test_arch_check_gate_reports_forbidden_dependency(self):
+        rules = self._base_arch_rules()
+        rules["rules"]["forbidden"] = [{
+            "id": "model-no-upward",
+            "severity": "error",
+            "from": ["model"],
+            "to": ["controller"],
+            "comment": "Step 1: find the import.\nStep 2: move the shared type down.",
+        }]
+        (self.wt / "src/model").mkdir(parents=True, exist_ok=True)
+        (self.wt / "src/controller").mkdir(parents=True, exist_ok=True)
+        (self.wt / "src/controller/y.py").write_text("def handler():\n    return 1\n", encoding="utf-8")
+        (self.wt / "src/model/x.py").write_text(
+            "from src.controller.y import handler\n\n\ndef f():\n    return handler()\n", encoding="utf-8")
+        head = self._write_arch_rules(rules)
+        sh(self.wt, "add", "src/controller/y.py", "src/model/x.py")
+        sh(self.wt, "commit", "-qm", "violation")
+        head = sh(self.wt, "rev-parse", "HEAD")
+        report = fc.Report()
+        fc._check_arch_rules(report, self.wt, head)
+        self.assertTrue(report.failed)
+        self.assertTrue(any(item["check"] == "arch-check" and "model-no-upward" in item["msg"]
                             for item in report.items))
 
-    def test_freeze_requires_feature_wide_architecture_completion(self):
-        spec = self.fdir / "demo-tech-spec-2026-11-14.md"
-        spec.write_text("""---
-status: 已确认（待拆解）
----
-# Spec
-
-### 3.2 接口变更
-
-| 稳定 ID | 动作 | 名称 | 模块 | 源代码位置 | supersedes | 验证证据 |
-| --- | --- | --- | --- | --- | --- | --- |
-| demo.entry | new | entry | mod | src/a.py:run | — | t.py |
-""", encoding="utf-8")
-        issue = self.fdir / "issues" / "issue-001-x.md"
-        issue.write_text(issue.read_text().replace("tech-spec:", "architecture-updates: [demo.entry]\ntech-spec:"), encoding="utf-8")
+    def test_freeze_embeds_arch_check_metadata(self):
+        self._write_arch_rules(self._base_arch_rules())
         result = self.freeze()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("architecture-feature", result.stdout)
-        self.assertIn("demo.entry", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.candidate["arch_check"]["rules"], "docs/ARCH-CHECK.json")
+        self.assertEqual(len(self.candidate["arch_check"]["rules_sha256"]), 64)
+        self.assertEqual(self.candidate["arch_check"]["guide"], "docs/ARCHITECT.md")
+        self.assertEqual(len(self.candidate["arch_check"]["guide_sha256"]), 64)
+
+    def test_arch_check_gate_skips_without_rules(self):
+        report = fc.Report()
+        meta = fc._check_arch_rules(report, self.wt, self.merged_commit)
+        self.assertFalse(report.failed, report.items)
+        self.assertIsNone(meta)
+        self.assertTrue(any(item["check"] == "arch-check" and item["level"] == "INFO"
+                            for item in report.items))
 
     def test_freeze_accepts_merged_or_done_and_requires_full_ancestor(self):
         self.write_issue("in-review")

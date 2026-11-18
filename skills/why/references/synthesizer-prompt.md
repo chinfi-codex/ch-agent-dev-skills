@@ -45,7 +45,7 @@
 
 ### The Code in Question
 
-目标文件/行、符号、architecture ID 和关键提交，让冷读者能定位。
+目标文件/行、符号、ARCH-CHECK 组 / 规则 ID 和关键提交，让冷读者能定位。
 
 ### What We Found
 

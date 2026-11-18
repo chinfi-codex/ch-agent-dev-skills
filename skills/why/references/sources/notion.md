@@ -6,7 +6,7 @@
 
 ## 查询
 
-1. 用 feature 名、关键符号、architecture ID、作者、错误文本、业务词和落地时间做多轮搜索。
+1. 用 feature 名、关键符号、ARCH-CHECK 组 / 规则 ID、作者、错误文本、业务词和落地时间做多轮搜索。
 2. 先读 commit/ticket 明确链接的文档，再查同 feature 目录、supersedes 链、相关 review 和 prototype verdict。
 3. 对候选页面/文件读全文，不用预览代替正文；记录节标题和版本/日期。
 4. 沿同一文档来源的父页、子页、backlink 和会议记录查找，不跨到聊天或 ticket 深查，只记 Additional Leads。

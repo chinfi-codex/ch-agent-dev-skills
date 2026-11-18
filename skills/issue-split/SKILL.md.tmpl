@@ -31,7 +31,7 @@ allowed-tools:
 
 {{MODE_GUARD}}
 
-本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`architecture_graph.py check-design` 和 `ticket_context.py check-plan`。它们只验证功能验收计划、设计结构与整组票计划，不属于实现或测试执行；其他实现导向命令限制不变。
+本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`ticket_context.py check-plan`，以及规则存在时的 `arch_check.py validate` / `render check`。它们只验证功能验收计划、整组票计划与规则结构，不属于实现或测试执行；其他实现导向命令限制不变。
 
 {{GLOSSARY}}
 
@@ -52,7 +52,7 @@ allowed-tools:
 {{SUPERVISION_LOOP}}
 
 
-{{ARCHITECTURE_GRAPH}}
+{{ARCH_CHECK}}
 
 # /issue-split
 
@@ -75,7 +75,7 @@ allowed-tools:
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`；存在时先运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，旧版本或非法配置不得继续
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、通过 `architecture_graph.py --repo <项目根> --interface <关键词>` 查询接口图谱（tech-spec 3.2 非空时作为契约 DoD 的对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECT.md` 与 `docs/ARCH-CHECK.json`（tech-spec 3.2 列出层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
 - 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
 
 ---
@@ -104,30 +104,29 @@ allowed-tools:
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：标准路径覆盖 PRD 全部稳定 AC；小变更覆盖 change-request 全部 delta 与 retained baseline，replace / retire 不得混入。`acceptance-plan.yaml` 的 documents / source 由同一机器校验器核对真实文档、hash、锚点与集合；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
-**契约归属（拆票阶段；tech-spec「3.2 接口变更」非空时强制）**：3.2 固定表的每个稳定 ID 必须恰好落入一张承接票 frontmatter `architecture-updates`。实现后的 DoD、评审、合并与验收不再要求架构或图谱检查。无承接票的变更点必须补票；确属纯内部且不进入图谱的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
+**架构规则变更归属（拆票阶段；tech-spec 3.2 列出层 / 组 / 规则变更时强制）**：规则变更必须落入**恰好一张**承接票的 `declared-scope`，并包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`。没有机器 ID 对账，也没有票级架构门；完整 arch-check 在 feature candidate 的 `freeze / check` 统一执行。无承接票的变更必须补票；确属纯内部且不改变层 / 组 / 依赖的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
 
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
-- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置和架构分片路径 / glob；生产子集用于粒度统计）
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`；生产子集用于粒度统计）
 - **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
 - **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与 feature 级核对；它仍只跑本票 DoD + fast，不做票级 conformance。全部票合入集成分支后，feature 级评审、候选复跑和 conformance 在 candidate 统一做一次；所有票同样受上述粒度红线约束
 
 **判定票类型 `type`**：修复既有缺陷（现象 → 根因 → 修复）的票标 `type: bug`，其余标 `feature`（缺省）。bug 票的 DoD 必须含一条复现该 bug 的回归测试命令——写不出复现测试的 bug 票，退回 `/tech-spec` 补测试策略；实现期该票须过回归有效性验证（revert 修复见红，见 `/implement` Step 5）
 
-**本地 proposed 草稿**：按 `shared/templates/issue.md` 在 `issues/` 下形成每票一个文件，frontmatter 写 `status: proposed`、唯一 `blocked-by`、完整 `declared-scope` 和 `architecture-updates`。这只是门②前的本地文档草稿，不是 tracker 发布，也不得派发。每票备注必须引用同一 active tech-spec 和对应 How/Why 决策锚点；历史其他 spec 的票不得混入当前组。
+**本地 proposed 草稿**：按 `shared/templates/issue.md` 在 `issues/` 下形成每票一个文件，frontmatter 写 `status: proposed`、唯一 `blocked-by`、完整 `declared-scope`。这只是门②前的本地文档草稿，不是 tracker 发布，也不得派发。每票备注必须引用同一 active tech-spec 和对应 How/Why 决策锚点；历史其他 spec 的票不得混入当前组。
 
 ### Step 2：门②——清单确认（阻塞型，必须人批准）
 
-先运行三道只读检查，任一失败就回 Step 1 或 `/tech-spec`，不得把失败草稿交给用户批准：
+先运行两道只读检查，任一失败就回 Step 1 或 `/tech-spec`，不得把失败草稿交给用户批准：
 
 ```bash
 python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需求目录>
-python3 ../shared/scripts/architecture_graph.py check-design --repo <项目根> --spec <tech-spec>
 python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一票> --repo <项目根>
 ```
 
-`check-design` 不要求接口已 current；`check-plan` 检查组内 DAG、scope 重叠串行、DoD、架构 ID 唯一承接和 AC 计划。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
+若 tech-spec 3.2 声明了规则变更，另跑 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json`（只读）。`check-plan` 检查组内 DAG、scope 重叠串行、DoD 与 AC 计划；不做架构 ID 对账。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
 
 向用户呈现编号清单，一次审全部：
 
@@ -144,7 +143,7 @@ python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一�
 
 确认后按 `agents-config.tracker` 发布：
 
-- **local 模式**（默认）：把门②前已写入的本地 proposed 草稿置为 `status: confirmed`，不得借发布改写标题 / DoD / declared-scope / architecture-updates；若内容有变，重新运行 checker 并过门②
+- **local 模式**（默认）：把门②前已写入的本地 proposed 草稿置为 `status: confirmed`，不得借发布改写标题 / DoD / declared-scope；若内容有变，重新运行 checker 并过门②
 - **gitlab 模式**：本地票文件同样先由 proposed 置 confirmed，另用 `glab issue create` 逐票建 issue：标题 `[<feature-slug>] issue-NNN <标题>`，正文取票文件内容，label `ready-for-agent`；把 IID / URL 回写票文件 frontmatter。glab 命令失败：报告错误并保持 local 产物完整，不阻塞
 - 修改父级 issue / tech-spec / PRD：禁止
 
@@ -161,6 +160,6 @@ python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一�
 - tech-spec 未确认不开拆；`acceptance-plan.yaml` 缺失或校验不过不开拆；拆解不改变方案与验收计划内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
-- 票一旦 confirmed，标题 / DoD / declared-scope / architecture-updates 不得由本 skill 或实现方单方面修改；变更须重新过门②并生成新 ticket context。实现期任何 changed path 越界都直接 FAIL，超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以登记漂移或补跑测试代替
+- 票一旦 confirmed，标题 / DoD / declared-scope 不得由本 skill 或实现方单方面修改；变更须重新过门②并生成新 ticket context。实现期任何 changed path 越界都直接 FAIL，超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以登记漂移或补跑测试代替
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语

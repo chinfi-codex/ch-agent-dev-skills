@@ -88,7 +88,8 @@ allowed-tools:
 ```text
 ./docs/
   GLOSSARY.md
-  ARCHITECTURE.md
+  ARCH-CHECK.json
+  ARCHITECT.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -108,7 +109,7 @@ allowed-tools:
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `docs/architecture/*.json` 是模块、接口、约束的唯一写入源，按稳定 ID 分片维护；`docs/ARCHITECTURE.md` 是可重生成的短首页，不承载架构事实。旧表只为尚未迁移且没有图谱分片的项目保留兼容读取，禁止与图谱并写。巡检见 `shared/references/contract-check.md`。
+- `docs/ARCH-CHECK.json` 是架构分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的指南，禁止手改。旧 `docs/architecture/*.json` 与 `docs/ARCHITECTURE.md` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
@@ -273,28 +274,24 @@ options:
 - 术语用法与指标口径遵循「术语与数据口径（GLOSSARY）」使用纪律，本节不重复
 
 
-## 架构图谱与经验的消费义务
+## ARCH-CHECK 规范与动作
 
-- 架构事实唯一真源是 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。读取现行架构或影响分析使用：
-  ```bash
-  python3 ../shared/scripts/architecture_graph.py --repo <项目根> [--module <模块>|--interface <关键词>|--version <版本>]
-  ```
-  默认查询排除 needs_verification / superseded / retired，release_only 仅按匹配版本查询。无分片的旧首页必须先 `migrate-legacy`，不得把旧表与分片合并成双真源。
-- 所有开发技能按模块 / 分类 / 适用条件查询项目经验；通用经验只在适用时消费。记录命中的稳定经验 ID、适用结论和冲突，不把关键词命中当适用结论。
-- `/pd-plan` 记录受影响模块及现行架构 ID；模块归属按 GLOSSARY 登记，图谱不另造归属。
-- `/tech-spec` 在 3.2 用固定表逐条声明 `稳定 ID / new|modify|retire|describe / 名称 / 模块 / 源代码位置 / supersedes / 验证证据`，同时标记版本适用范围和命中的项目经验。
-- `describe` 只适用于现有 ID 的职责文字纠正。表内沿用现有名称、模块、源码锚点和替代关系，证据栏用 `—`。承接票单独声明全部 ID，只能更新这些记录的非空 `responsibility`，可随唯一生成器更新首页。票级与候选级都核对提交差异及所属合入，记录的状态、历史证据、关系和其他字段保持原值。新增、删除、迁移分片或夹带源码、测试、配置会拒绝。独立的确认补充方案可承接此类票，其 frontmatter 用 `acceptance_from: <原方案文件名>` 继承同需求已验证的验收计划。补充规格必须全为 `describe`，其全部票的冻结范围限于架构分片及生成首页。同需求再次修正同一记录须另行确认补充规格。候选按第一父链核验每次真实合入及所声明的 ID，拒绝未经声明的中间改动和终态漂移。
-- `/issue-split` 把每个 ID 写入承接票 frontmatter `architecture-updates`，同时拆出失败场景和验证义务；不得只在集成票留空泛责任。SPEC-2 按 ID 对账，不再以正文出现 architecture 字样放行。
-- `/implement` 按票更新分片、证据与替代关系。`current` 必须有完整 verified_commit 且为候选 HEAD 祖先，候选上的源码 hash / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则保持 needs_verification。
-- `source` 始终是唯一主绑定和主代码证据绑定；可选记录级 `sources` 只登记辅助源码，逐项沿用 `path / symbol / sha256` 约束，同一 path+symbol+sha256 不得重复；同一文件的不同符号可共存，完全重复的主 / 辅助绑定只在迁移时去重并留审计，同一路径 hash 不一致即拒绝。`current / release_only` 必须逐个核对辅助源码在 verified_commit 与候选 HEAD 的存在、bytes SHA256 和 symbol，verified_commit 须为 HEAD 祖先且 verified_commit..HEAD 不得漂移；release_only 的主 source 仍只作历史核验。多源码或预填 hash 不会把 needs_verification 自动提升为 current。
-- 未声明 ID 的源码 diff 命中接口记录的主 source 或任一辅助 sources 时均执行 flow-back，补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名主源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。v1 迁移必须保留辅助源码及其多源码验证，不得删除或降级为只核主 source。
-- `docs/ARCHITECTURE.md` 只能由以下命令生成；禁止手改：
-  ```bash
-  python3 ../shared/scripts/architecture_graph.py render write --repo <项目根>
-  python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>  # 只读字节比对
-  ```
-- `/process_check --phase ticket` 只在票声明 `architecture-updates`、改动架构产物或命中已绑定源码时执行票级架构门，并只判 base..head 新增错误（baseline 仅 INFO）；feature `freeze` / `check` 在 candidate 上执行全量 active-spec、flow-forward/back 与首页字节比对。`/review` 另运行 `contract_check.py --check` 做完整契约巡检。事实更正需已生效代码 / 发布证据，职责或语义争议交回原责任环节或 human-decision。
-- 经验消费须记录命中的经验 ID；需求、项目和通用经验维持既有分层，并分别记录最后复现与最后核实。规则级建议关联承接票、延期决定或拒绝理由。
+- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的人类 / agent 指南，禁止手改。
+- 编码前先读 `docs/ARCHITECT.md`：分层、组与路径、允许 / 禁止依赖、放置规则、参数 / 类行数 / 注释 / 重复度阈值。AI 的上下文里没有这些规则就不会遵守。
+- **票级不设架构门**：`delivery.start`、`ticket_context.check_plan`、`process_check --phase ticket` 都不做架构检查。架构检查只在 feature candidate 的 `freeze / check` 强制运行；本地 pre-push hook 只做提前预警，权威门仍是 candidate。
+- 规则变更（新增、删除、放宽、改阈值）必须写进 tech-spec 3.2 和承接票 `declared-scope`，并重新 `render write`；ai-review 把“删除 / 放宽规则”当作高风险项审查。
+- 旧 `docs/architecture/*.json`、`docs/ARCHITECTURE.md`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
+
+常用命令：
+
+```bash
+python3 ../shared/scripts/arch_check.py check  --repo <项目根> --head HEAD --rules docs/ARCH-CHECK.json
+python3 ../shared/scripts/arch_check.py validate --repo <项目根> --worktree --rules docs/ARCH-CHECK.json
+python3 ../shared/scripts/arch_check.py render write --repo <项目根>
+python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktree
+```
+
+违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECT.md`，也不要用改规则来绕过错误。
 
 # /pd-plan
 
@@ -358,7 +355,7 @@ options:
    - 推导三来源：自上而下读产品领域语言（README / AGENTS.md、project memo、roadmap、已有 PRD 的「模块拆解」、产品菜单与信息架构）按业务能力域定框架；自下而上对存量 `feature-slug` 目录做亲和度聚类校准；代码一级目录 / 服务边界只做佐证，不照抄技术分层
    - 输出提议表：`feature-module | 一句话说明 | 预期成员`
    - **用户最终确认后才建目录、登记 GLOSSARY**；用户推翻任一条，回到推导重提
-4. **登记**：确认后把模块名、说明、成员 `feature-slug` 写入 GLOSSARY「feature-module 归档」节，再建两级目录；同步在 `docs/architecture/modules.json` 按稳定 ID 新增或更新模块记录，缺少代码核验时保持 `needs_verification`。ARCHITECTURE.md 只由图谱工具生成
+4. **登记**：确认后把模块名、说明、成员 `feature-slug` 写入 GLOSSARY「feature-module 归档」节，再建两级目录；模块若引入新的层 / 组或改变依赖方向，更新 `docs/ARCH-CHECK.json` 的 `architecture.layers` / `groups`，再运行 `arch_check.py render write` 生成 `docs/ARCHITECT.md`。不再新建 `docs/architecture` 图谱或 `modules.json`。
 
 ### 划分原则
 

@@ -40,8 +40,8 @@ coverage_rate: N%
 ## 语义复核
 
 - 需求覆盖：PRD / change-request 全部 AC 与 tech-spec 行为点是否有实现和可执行验收；跨票主路径 / 失败路径是否闭合。
-- 接口与契约：tech-spec 3.2 稳定 ID、`docs/architecture/*.json` 与真实代码是否一致；ownership、错误语义、并发 / 异步契约是否被票级切分破坏。
-- 测试更新映射、生成器 tree、旧实现清理、架构 flow-back / 首页：结论与依据；无则写「无」。
+- 接口与契约：`docs/ARCHITECT.md` 的层 / 组 / 依赖规则与真实代码是否一致；ownership、错误语义、并发 / 异步契约是否被票级切分破坏。
+- 测试更新映射、生成器 tree、旧实现清理、arch-check / 指南字节检查：结论与依据；无则写「无」。
 - 评审只判代码、需求一致性与测试质量，不运行或等待 CI full；候选复跑由 `verify_issue.py run-candidate` 独立完成。候选 HEAD/tree、报告和回执必须同源。
 
 找不到唯一 feature、候选或关键输入时，不伪造代码评审结论或报告路径：返回 human-decision 请求，由主会话统一问人。

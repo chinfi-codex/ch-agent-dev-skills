@@ -42,7 +42,7 @@ allowed-tools:
 {{DOC_WRITING_RULES}}
 
 
-{{ARCHITECTURE_GRAPH}}
+{{ARCH_CHECK}}
 
 # /pd-plan
 
@@ -106,7 +106,7 @@ allowed-tools:
    - 推导三来源：自上而下读产品领域语言（README / AGENTS.md、project memo、roadmap、已有 PRD 的「模块拆解」、产品菜单与信息架构）按业务能力域定框架；自下而上对存量 `feature-slug` 目录做亲和度聚类校准；代码一级目录 / 服务边界只做佐证，不照抄技术分层
    - 输出提议表：`feature-module | 一句话说明 | 预期成员`
    - **用户最终确认后才建目录、登记 GLOSSARY**；用户推翻任一条，回到推导重提
-4. **登记**：确认后把模块名、说明、成员 `feature-slug` 写入 GLOSSARY「feature-module 归档」节，再建两级目录；同步在 `docs/architecture/modules.json` 按稳定 ID 新增或更新模块记录，缺少代码核验时保持 `needs_verification`。ARCHITECTURE.md 只由图谱工具生成
+4. **登记**：确认后把模块名、说明、成员 `feature-slug` 写入 GLOSSARY「feature-module 归档」节，再建两级目录；模块若引入新的层 / 组或改变依赖方向，更新 `docs/ARCH-CHECK.json` 的 `architecture.layers` / `groups`，再运行 `arch_check.py render write` 生成 `docs/ARCHITECT.md`。不再新建 `docs/architecture` 图谱或 `modules.json`。
 
 ### 划分原则
 

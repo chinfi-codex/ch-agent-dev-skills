@@ -59,7 +59,7 @@ allowed-tools:
 
 ## Step 1：确定 Target 与 Question
 
-target 可以是代码段、接口、模式、阈值、架构 ID、feature 或已命名决策。question 可以是设计动机、取舍、回归、事故、失效约束或阈值来源。
+target 可以是代码段、接口、模式、阈值、ARCH-CHECK 组 / 规则 ID、feature 或已命名决策。question 可以是设计动机、取舍、回归、事故、失效约束或阈值来源。
 
 指代含糊时结合当前文件、近期改动和对话给出最短范围解释并继续，让用户可纠正。用户问题中自带的假设只是待验证 hypothesis，不是结论。
 
@@ -67,7 +67,7 @@ target 可以是代码段、接口、模式、阈值、架构 ID、feature 或�
 
 在启动 investigator 前，主会话内联完成：
 
-- 目标 `path:line`、关键符号、architecture ID、相关测试与文档；
+- 目标 `path:line`、关键符号、ARCH-CHECK 组 / 规则 ID、相关测试与文档；
 - `git blame -L <start>,<end> <file>`；
 - `git log --follow -p -- <file>` 追踪重命名和补丁；
 - `git log --oneline -20 -- <file>` 扩大近期历史；

@@ -1,54 +1,42 @@
-# 架构契约巡检规则（contract_check v2）
+# 契约巡检规则（v3，ARCH-CHECK 模型）
 
-> 配套脚本：`shared/scripts/contract_check.py`；图谱与首页：`shared/scripts/architecture_graph.py`；严格 schema：`shared/references/architecture-graph.schema.json`。
-> 原则：**只报告、不改文件**；唯一写入例外是 `--init` 初始化盘点草稿、`architecture_graph.py migrate-legacy` 一次性迁移和 `render write` 确定性首页生成。
-> v2 接入 `/review` 复盘与显式 `--check`；feature `freeze / check` 的架构门由 `architecture_graph.py` 执行，contract_check 不再挂到票级 merge / close。
+> 配套脚本：`shared/scripts/contract_check.py`；架构规则：`shared/scripts/arch_check.py` 与 `shared/references/arch-check.md`。
+> 原则：**只报告、不改文件**；唯一写入例外是 `--init` 初始化 `docs/ARCH-CHECK.json` / `docs/ARCHITECT.md`。
 
 ## 术语与模型
 
-- **tech-spec = flow-forward**：日期快照，不覆盖旧文件；整体取代关系由 frontmatter `supersedes` 显式声明。
-- **图谱分片 = 唯一写入源**：模块、接口、约束均写 `docs/architecture/*.json`（`pandu.architecture-graph/v2`）。`docs/ARCHITECTURE.md` 只是 `architecture_graph.py render write` 的确定性短首页，禁止手改。
-- **逐 ID 义务**：tech-spec 3.2 固定表的每个稳定 ID 必须恰好落入一张票的 `architecture-updates`，再对照分片动作、supersedes、代码和证据；正文出现 architecture 或“来源引用”不再构成放行。
-- **检查范围**：设计阶段保留 `check-design` 与拆票静态校验；票级 `process_check --phase ticket` 只在相关时执行架构 A/B/D 门，不跑 contract_check；feature `freeze / check` 在 candidate 上执行全量 architecture_graph 门；`contract_check --check` 用于复盘与显式诊断。
-- **flow-back**：实现 diff 命中接口记录绑定的主 source 或任一辅助 sources 而票未声明 ID 时，必须同分支补分片、验证信息和 impl-log 接口→代码映射；删除 / 重命名主源码必须 retired / superseded。graph-only 无票 / spec 义务的变更同样拒绝。
-- **多源码绑定**：`source` 是唯一主绑定和主代码证据绑定；可选 `sources` 是辅助源码数组，对象沿用 source 的 `path / symbol / sha256` 约束；同一 path+symbol+sha256 不得重复，同文件不同符号可共存，同一路径 hash 不一致即拒绝。`current / release_only` 对辅助源码逐个核对 verified_commit 与候选 HEAD 的文件存在、bytes SHA256、symbol 及区间无漂移，verified_commit 必须为 HEAD 祖先；release_only 主 source 保持仅历史提交核验。
-- **current**：完整 verified_commit 为候选 HEAD 祖先，候选上的源码 bytes / SHA256 / symbol 未漂移，证据 path / hash / commit / tree 可追溯；否则只能 needs_verification。release_only 不进入默认现行查询；needs_verification 不因配置多源码或填入 hash 自动提升。
+- **`docs/ARCH-CHECK.json` = 唯一架构机器真源**：分层、组、依赖方向、禁用调用、参数 / 类行数、注释、重复度。
+- **`docs/ARCHITECT.md` = 确定性生成指南**：由 `arch_check.py render write` 生成，`render check` 字节比对，禁止手改。
+- **`docs/GLOSSARY.md`**：feature-module 归属登记单源；不再有 `modules.json`。
+- **票级不做架构检查**；arch-check 在 feature candidate 的 `freeze / check` 强制，pre-push 只做提前预警。
+- **旧 `docs/architecture/*.json` / `docs/ARCHITECTURE.md`** 不再读取；迁移后删除。
 
 ## 检查项（`--check`，0 通过 / 1 有发现 / 2 输入错误）
 
 | ID | 检查 | 确定性判定 |
 | --- | --- | --- |
-| MOD-1 | 模块归属 | GLOSSARY「feature-module 归档」与 kind=module 的记录精确一致；空图谱不得掩盖已有模块事实 |
-| SPEC-1 | 取代链 | tech-spec supersedes 目标存在且链无环 |
-| SPEC-2 | flow-forward 义务 | 3.2 每个稳定 ID ↔ 恰好一张票 architecture-updates ↔ 分片动作 / 关系 ↔ 代码证据；缺任一环 FAIL。祖父历史只 INFO，不自动 current |
-| GRAPH-1 | 图谱 schema 与保鲜 | document / record / source / sources / relation / evidence 严格类型与未知字段检查；辅助绑定唯一且同路径 hash 一致；ID 唯一、重用 / 消失、关系 dangling、supersedes 环、冲突 current、current 祖先 / hash / 证据全部核对 |
-| GRAPH-2 | 首页唯一生成源 | `render check` 字节比较磁盘首页与分片生成结果；手改正文、计数或过期内容均 FAIL。无分片旧项目必须先 migrate-legacy |
-| FLOW-BACK | 实现反补义务 | 按 base/head diff 核主 source 与所有辅助 sources 的新增 / 修改 / 删除 / rename、票声明、分片更新、验证信息与 impl-log 映射 |
+| MOD-1 | 模块登记 | GLOSSARY「feature-module 归档」首张表：模块名非空且不重复；缺表只 INFO |
+| SPEC-1 | 取代链 | tech-spec frontmatter `supersedes` 目标存在、不自指、链无环 |
+| GUIDE-1 | 指南唯一生成源 | `docs/ARCH-CHECK.json` 存在时校验 schema / 规则语义，并 `render check` 字节比对 `docs/ARCHITECT.md`；缺规则只 INFO |
 
-MOD-1 / SPEC-1 的表解析只取节内第一张表；删除线退役行不参与对账。文档目录先行造成的模块瞬时差仅 INFO，登记过的接口与代码事实不一致一律 FAIL。
+MOD-1 只取节内第一张表；删除线退役行不参与对账。
 
-## 一次性迁移与首页
+## 与 ARCH-CHECK 的分工
 
-无分片旧项目使用：
+- `contract_check.py --check` 是复盘 / 显式诊断的文档一致性巡检，不替代 `arch_check.py check` 的代码结构检查。
+- `/review` 同时运行两者：`arch_check.py check` 报 error / warn，`contract_check.py --check` 报 MOD-1 / SPEC-1 / GUIDE-1。
+- 规则语义、豁免与误报处理见 `arch-check.md`；事实更正由责任阶段更新规则并 `render write`。
 
-```bash
-python3 ../shared/scripts/architecture_graph.py migrate-legacy --repo <项目根>
-python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>
-```
-
-迁移只把旧表导入 `legacy-migration.json` 并保留原始行、hash 和审计记录；所有记录均为 `needs_verification`，不得自动提升 current。已有有效分片或已经迁移时拒绝重复迁移，不保留运行时旧表 + 分片合并读取。v1 图谱迁移同样必须保留 `sources` 辅助源码、路径唯一约束和逐个源码验证，不得删除多源码信息或退化为只核主 source。
-
-首页写入与检查是两个独立命令：
+## 初始化
 
 ```bash
-python3 ../shared/scripts/architecture_graph.py render write --repo <项目根>
-python3 ../shared/scripts/architecture_graph.py render check --repo <项目根>
+python3 ../shared/scripts/contract_check.py --init --repo <项目根>
 ```
 
-`--init` 只生成初始化盘点草稿，已有文件拒绝覆盖；它不能代替迁移或证据核验。
+等价于 `arch_check.py init`：创建 `docs/ARCH-CHECK.json` 空规则与 `docs/ARCHITECT.md`；已有规则时拒绝覆盖。
 
 ## 巡检输出纪律
 
-- 报告列出 FIND / FAIL 及通过计数，不改任何业务文件；事实更正由责任阶段按分片写权限处理。
-- `process_check --phase ticket` 的架构聚合保持只读并复用单次校验；feature `freeze / check` 的全量架构门只读；生成器验证只能在独立临时工作区运行，不能借检查改写票 worktree。
-- 模块、接口或约束语义有争议时进入 human-decision，不以复盘或文本合并覆盖另一票已确认的契约。
+- 报告列出 FAIL / INFO 及计数，不改任何业务文件。
+- 架构规则事实错漏交由责任阶段更新 `docs/ARCH-CHECK.json`；语义争议进入 human-decision。
+- 票级 `process_check`、`delivery.start`、`ticket_context.check_plan` 均不调用本脚本的架构检查。

@@ -10,7 +10,7 @@
 
 **Target files / lines:** {FILES_WITH_LINE_RANGES}
 
-**Key symbols / architecture IDs:** {SYMBOLS}
+**Key symbols / ARCH-CHECK 组 / 规则 IDs:** {SYMBOLS}
 
 **Initial commits:** {COMMIT_LIST}
 

@@ -65,7 +65,6 @@ status: in-progress
 created: 2026-11-14
 target-branch:
 declared-scope: [src/**, tests/**]
-architecture-updates: []
 ---
 # Demo
 
@@ -84,7 +83,6 @@ status: done
 created: 2026-11-14
 target-branch:
 declared-scope: [src/**, tests/**]
-architecture-updates: []
 ---
 # Demo {issue_id}
 

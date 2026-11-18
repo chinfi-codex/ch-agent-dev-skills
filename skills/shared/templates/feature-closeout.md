@@ -9,6 +9,7 @@
 | `integration/feature-review.md` + `integration/feature-review-receipt.json` | 独立 `/ai-review` 一次审 `main_head..candidate`；`review_receipt.py create-feature` 生成回执 | candidate / tree / merge_base / diff_sha256 / plan_sha256 / 报告哈希 / 全部 implementer 身份 | reviewer 与任一 implementer 同 session/agent；verdict=blocked；critical/high 未闭合；候选、报告或覆盖变化 |
 | `integration/candidate-verification.json` | `verify_issue.py run-candidate --candidate ... --repo <集成 worktree>` 逐票真实执行冻结 DoD+fast | candidate / tree / main_head / plan_sha256；每票 `verification_path` + SHA256 | 任一票失败、漏票、额外票、证据哈希不匹配或候选不 clean |
 | `integration/conformance-feature.md` | 主会话或独立监督会话按 tech-spec 全节 + 全部票矩阵并集核对 | candidate / tree / coverage.issues / specs hash | verdict≠conform、漏票、漏 spec、空表或证据指针无效 |
+| arch-check + `docs/ARCHITECT.md` | `feature_closeout` freeze/check 从 candidate 读取 `docs/ARCH-CHECK.json`，运行 Python AST 检查并 `render check` | rules / guide SHA256 写入 `candidate.json` | error 违规、指南缺失 / 过期、冻结后规则或指南变更 |
 
 票级不再生成 `review-receipt.json`、不再跑 supervisor 复跑或 `conformance-<issue>.md`；票级覆盖矩阵保留在 impl-log，供 feature conformance 汇总。
 

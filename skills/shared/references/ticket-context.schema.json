@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "agent-dev.ticket-context/v3",
+  "$id": "agent-dev.ticket-context/v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,13 +16,12 @@
     "source_head",
     "source_tree",
     "declared_scope",
-    "architecture_updates",
     "hashes",
     "gate2_context_digest",
     "dod"
   ],
   "properties": {
-    "schema": {"const": "agent-dev.ticket-context/v3"},
+    "schema": {"const": "agent-dev.ticket-context/v4"},
     "issue_id": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
     "issue_path": {"$ref": "#/definitions/repo-path"},
     "feature_dir": {"$ref": "#/definitions/repo-path"},
@@ -36,11 +35,6 @@
     "declared_scope": {
       "type": "array",
       "minItems": 1,
-      "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
-    },
-    "architecture_updates": {
-      "type": "array",
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}
     },
