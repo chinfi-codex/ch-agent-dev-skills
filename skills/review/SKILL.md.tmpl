@@ -78,7 +78,7 @@ allowed-tools:
 
 - `./docs/features/<feature-module>/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
 - `./dev/features/<feature-module>/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
-- `./docs/EXPERIENCE.md` 与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重合并要用）
+- `./docs/EXPERIENCE.md`（需求阶段 + 开发阶段两节）与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重、引入、晋升、退役要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞
 - 任何该有而没有的文件：标「缺失」，不编造内容
@@ -115,26 +115,31 @@ allowed-tools:
 
 ### Step 4：经验分级沉淀
 
+经验库只沉淀规则，不沉淀历史；来源、证据、轮次与处置全部写进本报告的「经验库变更清单」。
+
 - **规则级（先判，不进经验库）**：一条经验若靠「下次注意」无法根治、根治方式是改流水线规则本身——模板缺章节（如 PRD 反复漏同一类边界）、fragment 纪律有漏洞（如拆票粒度反复失准）、`verify-policy` 阈值失准——写入复盘报告「流水线改进建议」节：逐条写明建议改动的 template / fragment / 配置项路径与具体改法。在 ch-agent-dev-skills 仓库自身运行时建议转 `/issue` 小变更；在用户仓库只建议，不代改
-- **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 `./docs/EXPERIENCE.md`（懒创建）
-- **通用级**（与具体仓库无关的流程方法类）→ 追加 `~/.pd-workflow/general-experience.md`（懒创建）
-- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增，同步更新「最后复现」为本次复盘日期；仅在有证据复核有效性时更新「最后核实」
-- 项目级条目在 ≥2 个 feature 复现后晋升通用级，并在项目级条目备注「已晋升」
-- **老化**：既有条目「最后复现」距本次复盘超过 90 天 → 整行移入经验库「已归档」节（不删除）；归档条目再次命中则移回原节并复现次数 +1
+- **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 / 合并 `./docs/EXPERIENCE.md`（懒创建）
+- **通用级**（与具体仓库无关的流程方法类）→ 追加 / 合并 `~/.pd-workflow/general-experience.md`（懒创建）
+- **去重**：写入前先读既有规则，按「阶段 + 触发场景 + 规则语义」判断；相似条目合并表述、保留既有规则 ID，不重复新增。报告记「合并进 <规则ID>」
+- **晋升**：项目级规则换到其他仓库仍成立 → 复制进通用级并分配通用级规则 ID；报告记「晋升通用级（原 <规则ID>）」
+- **引入**：通用级规则与本次项目相关 → 复制进项目级经验库并分配项目级规则 ID，`适用模块` 写实际模块或 `全部`；报告记「引入项目级（原 <通用级规则ID>）」。下游技能只读项目级文件
+- **退役**：巡检本次 feature 涉及模块（`适用模块` 命中本模块或 `全部`）的既有规则；触发场景已不存在、被新规则取代或不再成立 → 从库中删除，报告记「退役 <规则ID> + 原因」。项目级库由 Git 保留历史，通用级库的历史由本报告承担
+- 条目只写「规则ID / 触发场景 / 经验细则 / 检查点 / 适用模块」，不写日期、来源 feature-slug、证据、复现次数、最后复现、最后核实
 - 条目格式见 `../shared/templates/experience.md`
 
 ### Step 5：落盘与交付
 
 - 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付语言按「完成状态协议 · 对人表达」：先说复盘结论（这个需求做得顺不顺、最大的教训是什么），再说需求侧与开发侧最重要的发现各三条（每条说人话：发生了什么、下次该怎么办），然后经验库变化（新增 / 合并 / 晋升 / 归档各几条、最值钱的一条是什么）与规则级改进建议条数，最后给报告路径
+- 交付语言按「完成状态协议 · 对人表达」：先说复盘结论（这个需求做得顺不顺、最大的教训是什么），再说需求侧与开发侧最重要的发现各三条（每条说人话：发生了什么、下次该怎么办），然后经验库变化（新增 / 合并 / 晋升 / 引入 / 退役各几条、最值钱的一条是什么）与规则级改进建议条数，最后给报告路径
 
 ## 硬约束
 
 - 只读历史产物与 git 历史；`Bash` 只允许 git 只读查询（log / show / diff），禁止任何写操作与实现导向命令
-- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。`docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md` 不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
+- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。`docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
 - 不修改任何历史文档、票、代码；发现历史文档互相矛盾，只在问题清单或「数据缺口」中记录
 - 取不到的数据标「缺失」，禁止编造；统计口径必须随数字给出
-- 关键点与经验条目必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告
+- 关键点必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告
+- 经验库只写规则：不写日期、来源 feature-slug、证据、复现次数、最后复现、最后核实；来源与证据只进复盘报告「经验库变更清单」
 - 提问只有两种：发布确认、部分复盘确认；其余不打扰用户
 
 输出模板见本 skill 包内 `shared/templates/retro-report.md` 与 `shared/templates/experience.md`（相对本 SKILL.md 为 `../shared/templates/retro-report.md`、`../shared/templates/experience.md`）。

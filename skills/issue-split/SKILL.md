@@ -215,7 +215,7 @@ options:
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构规范只编辑 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 只能由 `arch_check.py render write` 确定性重生成并随规则提交，任何开发阶段均不得手工编辑。
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
@@ -678,11 +678,13 @@ python3 human_decision.py reconcile --main-session --repo REPO [--feature M/S]
 
 ## ARCH-CHECK 规范与动作
 
-- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的人类 / agent 指南，禁止手改。
-- 编码前先读 `docs/ARCHITECT.md`：分层、组与路径、允许 / 禁止依赖、放置规则、参数 / 类行数 / 注释 / 重复度阈值。AI 的上下文里没有这些规则就不会遵守。
+- 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，禁止手改。
+- 编码前先读 `docs/ARCHITECTURE.md`：1–10 节的系统结构、组件、存储、集成、部署、安全、测试与演进，以及附录 A–E 的分层、组、依赖、放置和阈值。AI 的上下文里没有这些事实就不会遵守。
+- `init` 只生成空规则与 11 节骨架；首次出现架构影响时由 `/tech-spec` 3.2 按代码与 How/Why 证据补全总览基线，不能留空跳过。后续技术方案只更新受影响节，不重写无关节。
 - **票级不设架构门**：`delivery.start`、`ticket_context.check_plan`、`process_check --phase ticket` 都不做架构检查。架构检查只在 feature candidate 的 `freeze / check` 强制运行；本地 pre-push hook 只做提前预警，权威门仍是 candidate。
 - 规则变更（新增、删除、放宽、改阈值）必须写进 tech-spec 3.2 和承接票 `declared-scope`，并重新 `render write`；ai-review 把“删除 / 放宽规则”当作高风险项审查。
-- 旧 `docs/architecture/*.json`、`docs/ARCHITECTURE.md`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
+- 总览与规则冲突时以代码事实修正总览、以 tech-spec 讨论规则；不得为了绕过错误而改总览或放宽规则。
+- 旧 `docs/architecture/*.json`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
 
 常用命令：
 
@@ -693,7 +695,7 @@ python3 ../shared/scripts/arch_check.py render write --repo <项目根>
 python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktree
 ```
 
-违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECT.md`，也不要用改规则来绕过错误。
+违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECTURE.md`，也不要用改规则来绕过错误。
 
 # /issue-split
 
@@ -717,7 +719,8 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - **复用旧 feature 目录必须换新 round**：该 feature 目录下已有收口过的需求（存在 `integration/` 结论产物或已 `done` 票）时，本轮所有票的 `feature-slug` 一律写新 round 名 `<原feature-slug>-<YYYY-MM-DD>`，tech-spec/PRD/计划放同目录；不得沿用旧 slug——旧集成分支若残留会被 `delivery start` 新鲜度门拒绝，旧候选也会阻塞 finalize 清理。首轮需求维持 slug = 目录名不变
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECT.md` 与 `docs/ARCH-CHECK.json`（tech-spec 3.2 列出层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 读取 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（如有）：按「适用模块」与「触发场景」筛出拆票 / 粒度 / 依赖 / declared-scope 类命中规则，补进拆票检查清单与粒度红线；规则与 tech-spec 冲突时以 tech-spec 为准，冲突点记入待确认项
 - 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
 
 ---
@@ -746,11 +749,11 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：标准路径覆盖 PRD 全部稳定 AC；小变更覆盖 change-request 全部 delta 与 retained baseline，replace / retire 不得混入。`acceptance-plan.yaml` 的 documents / source 由同一机器校验器核对真实文档、hash、锚点与集合；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
-**架构规则变更归属（拆票阶段；tech-spec 3.2 列出层 / 组 / 规则变更时强制）**：规则变更必须落入**恰好一张**承接票的 `declared-scope`，并包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`。没有机器 ID 对账，也没有票级架构门；完整 arch-check 在 feature candidate 的 `freeze / check` 统一执行。无承接票的变更必须补票；确属纯内部且不改变层 / 组 / 依赖的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
+**架构契约变更归属（拆票阶段；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时强制）**：层 / 组 / 规则变更必须落入**恰好一张**承接票的 `declared-scope`，并包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`。总览基线已由 tech-spec 写入时不在票内重复生成；若实现证据使总览失真，承接票可在同一 scope 内更新对应节并 `render write`。没有机器 ID 对账，也没有票级架构门；完整 arch-check 在 feature candidate 的 `freeze / check` 统一执行。无承接票的变更必须补票；确属纯内部且不改变层 / 组 / 依赖的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
 
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
-- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`；生产子集用于粒度统计）
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`；生产子集用于粒度统计）
 - **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
 - **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与 feature 级核对；它仍只跑本票 DoD + fast，不做票级 conformance。全部票合入集成分支后，feature 级评审、候选复跑和 conformance 在 candidate 统一做一次；所有票同样受上述粒度红线约束

@@ -6,7 +6,7 @@ type: feature         # feature / bug；bug 票须做回归有效性验证（rev
 status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / merged / needs-human / done / deferred / cancelled
 blocked-by: []          # 例如 [issue-001]；merged（已合入集成分支）或 done（feature 已验收）解锁下游
 target-branch:          # 可空：由 delivery start 通过 ticket_context 解析并冻结；local-human 不得指向 main
-declared-scope: []      # 预计触碰的所有代码 / 测试 / 配置路径；本票修改架构规则时含 docs/ARCH-CHECK.json 与 docs/ARCHITECT.md；开工后不可自行扩大
+declared-scope: []      # 预计触碰的所有代码 / 测试 / 配置路径；本票修改架构总览或规则时含 docs/ARCH-CHECK.json 与 docs/ARCHITECTURE.md；开工后不可自行扩大
 verify-fails: 0         # 票级门禁 / feature 候选门打回计数；达 2 创建 human-decision
 dispatch:               # 派发归属，主会话派发时写入（见 Progress Events 契约）；未派发票留空
   host:                 # 执行宿主

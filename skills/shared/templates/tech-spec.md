@@ -44,14 +44,21 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
   tests/order/
     test_order_close.py   [修改] 新增幂等重试场景 2 条
   docs/ARCH-CHECK.json   [修改] 新增幂等规则；由承接票更新规则并 render write
+  docs/ARCHITECTURE.md   [修改] 由 render write 确定性重生成；禁止手改
 ```
 
-### 3.2 架构影响（层 / 组 / 规则）
+### 3.2 架构影响（总览 / 层 / 组 / 规则）
 
-<!-- 说明本需求对架构规范的影响：新增 / 修改 / 退役哪些层、组、依赖方向或代码规则。
-     规则唯一机器真源是 docs/ARCH-CHECK.json；docs/ARCHITECT.md 只能由 arch_check.py render write 生成。
-     涉及规则变更时，明确由哪张承接票更新规则并重新 render；该票 declared-scope 必须包含这两个文件。
+<!-- 说明本需求对架构契约的影响：11 节总览中哪些节需要补全或更新，以及新增 / 修改 / 退役哪些层、组、依赖方向或代码规则。
+     契约唯一机器真源是 docs/ARCH-CHECK.json；docs/ARCHITECTURE.md 只能由 arch_check.py render write 生成。
+     首次出现架构影响时，必须补全 architecture.overview 的 1–10 节（没有该类对象在 overview.notes.<节名> 写“不适用”及理由），由本 skill 写入并 render write；
+     层 / 组 / 规则变更仍由恰好一张承接票更新并重新 render，该票 declared-scope 必须包含这两个文件。
      没有架构影响时保留表头并写“无”；不写稳定 ID 或 architecture-updates。 -->
+
+| 总览节 | 动作 | 依据 | 承接方式 |
+| --- | --- | --- | --- |
+| 例：1–10 全部 | 首次补全 | How 报告 + 目录 / 依赖扫描 | 本 skill 写入 architecture.overview 并 render write |
+| 例：3 核心组件 | 更新 | 本次新增 ingest 组件 | 本 skill 更新对应节并 render write |
 
 | 层 / 组 | 动作 | 路径 / 规则 ID | 说明 | 验证方式 |
 | --- | --- | --- | --- | --- |

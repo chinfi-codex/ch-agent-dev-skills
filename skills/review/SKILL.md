@@ -48,10 +48,11 @@ allowed-tools:
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
 - 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
-- 经验库读法：`EXPERIENCE.md` ≤50 行全读；超过则按本模块 slug 清单（GLOSSARY「feature-module 归档」节）与相关分类关键词 grep 滤行，只带命中行进上下文（「已归档」节不参与筛选），不全读
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 经验库读法：只读 `EXPERIENCE.md` 的「需求阶段经验」节；按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛行，命中即带进上下文，不读「开发阶段经验」节，不读通用级文件，不全量读
 - 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
-- 经验库回流：`./docs/EXPERIENCE.md`（项目级经验库，由 `/review` 维护）中与本需求同模块 / 同分类的条目，作为「已知坑」进入本轮提问与写作——需求阶段条目进拷打维度与假设清单，不重复踩过的坑；条目与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
+- 经验库回流：命中的规则要落到本技能的具体动作——提问维度、假设清单、评审或文档检查点；不重复踩已记录的坑；规则与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
+- 特例：`/review` 按自身 Step 1 读取需求、开发两节与通用级规则库，用于去重、引入、晋升、退役，不受本节「只读需求阶段」限制
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
@@ -90,7 +91,7 @@ allowed-tools:
 ./docs/
   GLOSSARY.md
   ARCH-CHECK.json
-  ARCHITECT.md
+  ARCHITECTURE.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -110,7 +111,7 @@ allowed-tools:
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `docs/ARCH-CHECK.json` 是架构分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的指南，禁止手改。旧 `docs/architecture/*.json` 与 `docs/ARCHITECTURE.md` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
+- `docs/ARCH-CHECK.json` 是架构总览与分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览（规则在附录），禁止手改。旧 `docs/architecture/*.json` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
@@ -177,7 +178,7 @@ allowed-tools:
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构规范只编辑 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 只能由 `arch_check.py render write` 确定性重生成并随规则提交，任何开发阶段均不得手工编辑。
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
@@ -287,11 +288,13 @@ options:
 
 ## ARCH-CHECK 规范与动作
 
-- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的人类 / agent 指南，禁止手改。
-- 编码前先读 `docs/ARCHITECT.md`：分层、组与路径、允许 / 禁止依赖、放置规则、参数 / 类行数 / 注释 / 重复度阈值。AI 的上下文里没有这些规则就不会遵守。
+- 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，禁止手改。
+- 编码前先读 `docs/ARCHITECTURE.md`：1–10 节的系统结构、组件、存储、集成、部署、安全、测试与演进，以及附录 A–E 的分层、组、依赖、放置和阈值。AI 的上下文里没有这些事实就不会遵守。
+- `init` 只生成空规则与 11 节骨架；首次出现架构影响时由 `/tech-spec` 3.2 按代码与 How/Why 证据补全总览基线，不能留空跳过。后续技术方案只更新受影响节，不重写无关节。
 - **票级不设架构门**：`delivery.start`、`ticket_context.check_plan`、`process_check --phase ticket` 都不做架构检查。架构检查只在 feature candidate 的 `freeze / check` 强制运行；本地 pre-push hook 只做提前预警，权威门仍是 candidate。
 - 规则变更（新增、删除、放宽、改阈值）必须写进 tech-spec 3.2 和承接票 `declared-scope`，并重新 `render write`；ai-review 把“删除 / 放宽规则”当作高风险项审查。
-- 旧 `docs/architecture/*.json`、`docs/ARCHITECTURE.md`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
+- 总览与规则冲突时以代码事实修正总览、以 tech-spec 讨论规则；不得为了绕过错误而改总览或放宽规则。
+- 旧 `docs/architecture/*.json`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
 
 常用命令：
 
@@ -302,7 +305,7 @@ python3 ../shared/scripts/arch_check.py render write --repo <项目根>
 python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktree
 ```
 
-违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECT.md`，也不要用改规则来绕过错误。
+违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECTURE.md`，也不要用改规则来绕过错误。
 
 # /review
 
@@ -339,7 +342,7 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 - `./docs/features/<feature-module>/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
 - `./dev/features/<feature-module>/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
-- `./docs/EXPERIENCE.md` 与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重合并要用）
+- `./docs/EXPERIENCE.md`（需求阶段 + 开发阶段两节）与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重、引入、晋升、退役要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞
 - 任何该有而没有的文件：标「缺失」，不编造内容
@@ -376,26 +379,31 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 ### Step 4：经验分级沉淀
 
+经验库只沉淀规则，不沉淀历史；来源、证据、轮次与处置全部写进本报告的「经验库变更清单」。
+
 - **规则级（先判，不进经验库）**：一条经验若靠「下次注意」无法根治、根治方式是改流水线规则本身——模板缺章节（如 PRD 反复漏同一类边界）、fragment 纪律有漏洞（如拆票粒度反复失准）、`verify-policy` 阈值失准——写入复盘报告「流水线改进建议」节：逐条写明建议改动的 template / fragment / 配置项路径与具体改法。在 ch-agent-dev-skills 仓库自身运行时建议转 `/issue` 小变更；在用户仓库只建议，不代改
-- **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 `./docs/EXPERIENCE.md`（懒创建）
-- **通用级**（与具体仓库无关的流程方法类）→ 追加 `~/.pd-workflow/general-experience.md`（懒创建）
-- 写入前先读既有条目：相似条目合并、复现次数 +1，不重复新增，同步更新「最后复现」为本次复盘日期；仅在有证据复核有效性时更新「最后核实」
-- 项目级条目在 ≥2 个 feature 复现后晋升通用级，并在项目级条目备注「已晋升」
-- **老化**：既有条目「最后复现」距本次复盘超过 90 天 → 整行移入经验库「已归档」节（不删除）；归档条目再次命中则移回原节并复现次数 +1
+- **项目级**（与本仓库技术栈 / 业务模块 / 团队配置强相关）→ 追加 / 合并 `./docs/EXPERIENCE.md`（懒创建）
+- **通用级**（与具体仓库无关的流程方法类）→ 追加 / 合并 `~/.pd-workflow/general-experience.md`（懒创建）
+- **去重**：写入前先读既有规则，按「阶段 + 触发场景 + 规则语义」判断；相似条目合并表述、保留既有规则 ID，不重复新增。报告记「合并进 <规则ID>」
+- **晋升**：项目级规则换到其他仓库仍成立 → 复制进通用级并分配通用级规则 ID；报告记「晋升通用级（原 <规则ID>）」
+- **引入**：通用级规则与本次项目相关 → 复制进项目级经验库并分配项目级规则 ID，`适用模块` 写实际模块或 `全部`；报告记「引入项目级（原 <通用级规则ID>）」。下游技能只读项目级文件
+- **退役**：巡检本次 feature 涉及模块（`适用模块` 命中本模块或 `全部`）的既有规则；触发场景已不存在、被新规则取代或不再成立 → 从库中删除，报告记「退役 <规则ID> + 原因」。项目级库由 Git 保留历史，通用级库的历史由本报告承担
+- 条目只写「规则ID / 触发场景 / 经验细则 / 检查点 / 适用模块」，不写日期、来源 feature-slug、证据、复现次数、最后复现、最后核实
 - 条目格式见 `../shared/templates/experience.md`
 
 ### Step 5：落盘与交付
 
 - 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
-- 交付语言按「完成状态协议 · 对人表达」：先说复盘结论（这个需求做得顺不顺、最大的教训是什么），再说需求侧与开发侧最重要的发现各三条（每条说人话：发生了什么、下次该怎么办），然后经验库变化（新增 / 合并 / 晋升 / 归档各几条、最值钱的一条是什么）与规则级改进建议条数，最后给报告路径
+- 交付语言按「完成状态协议 · 对人表达」：先说复盘结论（这个需求做得顺不顺、最大的教训是什么），再说需求侧与开发侧最重要的发现各三条（每条说人话：发生了什么、下次该怎么办），然后经验库变化（新增 / 合并 / 晋升 / 引入 / 退役各几条、最值钱的一条是什么）与规则级改进建议条数，最后给报告路径
 
 ## 硬约束
 
 - 只读历史产物与 git 历史；`Bash` 只允许 git 只读查询（log / show / diff），禁止任何写操作与实现导向命令
-- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。`docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md` 不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
+- 只写三处：复盘报告、`./docs/EXPERIENCE.md`、`~/.pd-workflow/general-experience.md`。`docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 不在复盘阶段改写；问题应留证并交给对应责任阶段处理。
 - 不修改任何历史文档、票、代码；发现历史文档互相矛盾，只在问题清单或「数据缺口」中记录
 - 取不到的数据标「缺失」，禁止编造；统计口径必须随数字给出
-- 关键点与经验条目必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告
+- 关键点必须挂证据；「沟通不充分」「考虑不周」类空泛结论禁止入报告
+- 经验库只写规则：不写日期、来源 feature-slug、证据、复现次数、最后复现、最后核实；来源与证据只进复盘报告「经验库变更清单」
 - 提问只有两种：发布确认、部分复盘确认；其余不打扰用户
 
 输出模板见本 skill 包内 `shared/templates/retro-report.md` 与 `shared/templates/experience.md`（相对本 SKILL.md 为 `../shared/templates/retro-report.md`、`../shared/templates/experience.md`）。

@@ -173,11 +173,72 @@ class ArchCheckTest(unittest.TestCase):
             [sys.executable, "-I", str(SCRIPT), "render", "check", "--repo", str(self.root), "--worktree"],
             capture_output=True, text=True)
         self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-        (self.root / "docs/ARCHITECT.md").write_text("hand edit\n", encoding="utf-8")
+        (self.root / "docs/ARCHITECTURE.md").write_text("hand edit\n", encoding="utf-8")
         stale = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "render", "check", "--repo", str(self.root), "--worktree"],
             capture_output=True, text=True)
         self.assertEqual(stale.returncode, 1)
+
+    def test_render_includes_eleven_section_overview(self):
+        value = rules()
+        value["architecture"]["overview"] = {
+            "project": {"name": "Demo", "repository": "git@example.com:demo.git",
+                        "team": "core", "updated": "2026-11-19"},
+            "structure": "demo/\n  app/",
+            "diagram": "flowchart LR\n  A --> B",
+            "components": [{"name": "API", "description": "entry", "technologies": ["Flask"], "deployment": "container"}],
+            "data_stores": [{"name": "main", "type": "PostgreSQL", "purpose": "business", "keys": ["orders"]}],
+            "integrations": [{"name": "pay", "purpose": "collect", "method": "REST"}],
+            "deployment": {"cloud": "aliyun", "services": ["ACK"], "ci_cd": "GitLab CI", "monitoring": "Prometheus"},
+            "security": {"authentication": "OIDC", "authorization": "RBAC", "encryption": "TLS", "practices": ["no secrets"]},
+            "development": {"setup": "make dev", "test_frameworks": ["pytest"], "quality_tools": ["ruff"]},
+            "roadmap": ["split reports"],
+        }
+        text = ac.render_guide(value).decode("utf-8")
+        for heading in ("## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6.",
+                        "## 7.", "## 8.", "## 9.", "## 10.", "## 11.",
+                        "## 附录 A", "## 附录 E"):
+            self.assertIn(heading, text)
+        self.assertIn("flowchart LR", text)
+        self.assertIn("GitLab CI", text)
+        self.assertIn("docs/GLOSSARY.md", text)
+        self.assertNotIn("未登记", text)
+        self.assertEqual(ac.validate_rules(value), [])
+
+    def test_overview_notes_mark_sections_not_applicable(self):
+        value = rules()
+        value["architecture"]["overview"] = {
+            "notes": {
+                "data_stores": "不适用：纯静态工具仓，无持久化存储。",
+                "integrations": "不适用：不调用外部服务。",
+            },
+        }
+        text = ac.render_guide(value).decode("utf-8")
+        self.assertIn("不适用：纯静态工具仓，无持久化存储。", text)
+        self.assertIn("不适用：不调用外部服务。", text)
+        self.assertNotIn("## 4. 数据存储\n\n> 未登记", text)
+        self.assertEqual(ac.validate_rules(value), [])
+
+    def test_overview_rejects_fence_injection(self):
+        value = rules()
+        value["architecture"]["overview"] = {"diagram": "flowchart LR\n```\nA --> B"}
+        errors = ac.validate_rules(value)
+        self.assertTrue(any("triple-backtick" in error for error in errors))
+
+    def test_init_renders_skeleton_and_refuses_unmanaged_guide(self):
+        (self.root / "docs").mkdir()
+        ac.init_repo(self.root)
+        text = (self.root / "docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("## 11. 术语与缩写", text)
+        self.assertIn("未登记", text)
+
+    def test_init_refuses_unmanaged_architecture_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            (root / "docs/ARCHITECTURE.md").write_text("# legacy\n", encoding="utf-8")
+            with self.assertRaises(ac.InputError):
+                ac.init_repo(root)
 
     def test_validate_rejects_unknown_group_and_missing_steps(self):
         value = rules()
@@ -204,7 +265,7 @@ class ArchCheckTest(unittest.TestCase):
         (self.root / "docs").mkdir()
         first = ac.init_repo(self.root)
         self.assertTrue(first.is_file())
-        self.assertTrue((self.root / "docs/ARCHITECT.md").is_file())
+        self.assertTrue((self.root / "docs/ARCHITECTURE.md").is_file())
         with self.assertRaises(ac.InputError):
             ac.init_repo(self.root)
 
@@ -225,7 +286,7 @@ class ArchCheckTest(unittest.TestCase):
     def test_cli_exit_codes(self):
         (self.root / "docs").mkdir()
         (self.root / "docs/ARCH-CHECK.json").write_text(json.dumps(rules()), encoding="utf-8")
-        (self.root / "docs/ARCHITECT.md").write_bytes(ac.render_guide(rules()))
+        (self.root / "docs/ARCHITECTURE.md").write_bytes(ac.render_guide(rules()))
         clean = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "check", "--repo", str(self.root), "--worktree"],
             capture_output=True, text=True)
@@ -234,7 +295,7 @@ class ArchCheckTest(unittest.TestCase):
         broken["rules"]["forbidden"] = [rule("model-no-upward", **{"from": ["model"], "to": ["controller"]})]
         self.write("app/model/z.py", "from app.controllers.x import handler\n")
         (self.root / "docs/ARCH-CHECK.json").write_text(json.dumps(broken), encoding="utf-8")
-        (self.root / "docs/ARCHITECT.md").write_bytes(ac.render_guide(broken))
+        (self.root / "docs/ARCHITECTURE.md").write_bytes(ac.render_guide(broken))
         failed = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "check", "--repo", str(self.root), "--worktree"],
             capture_output=True, text=True)
@@ -249,7 +310,7 @@ class ArchCheckTest(unittest.TestCase):
         value["rules"]["forbidden"] = [rule("model-no-upward", **{"from": ["model"], "to": ["controller"]})]
         (self.root / "docs").mkdir()
         (self.root / "docs/ARCH-CHECK.json").write_text(json.dumps(value), encoding="utf-8")
-        (self.root / "docs/ARCHITECT.md").write_bytes(ac.render_guide(value))
+        (self.root / "docs/ARCHITECTURE.md").write_bytes(ac.render_guide(value))
         subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "-qm", "base"], cwd=self.root, check=True)
         (self.root / "app/model/z.py").write_text("from app.controllers.x import handler\n", encoding="utf-8")

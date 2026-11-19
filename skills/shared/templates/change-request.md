@@ -68,7 +68,7 @@ baseline_ac:
 ### 术语与口径对齐
 - **本文使用的标准术语**（须与 GLOSSARY 一致）：
 - **口径是否变化**：否 / 是（若是，须已同步更新 GLOSSARY 并说明新旧口径差异）
-- **架构规则是否变化**：否 / 是（若是，走 tech-spec 小变更路径时须在 3.2 节列出层 / 组 / 规则变更并指定承接票；承接票只编辑 `docs/ARCH-CHECK.json` 并重新 `render write`，变更单不直接改规则）
+- **架构契约是否变化**：否 / 是（若是，走 tech-spec 小变更路径时须在 3.2 节列出总览 / 层 / 组 / 规则变更并指定承接票；首次架构影响由 tech-spec 补全 `architecture.overview`，层 / 组 / 规则变更由承接票编辑 `docs/ARCH-CHECK.json` 并重新 `render write`；变更单不直接改契约）
 
 ### 风险与兼容性
 - **兼容性风险**：

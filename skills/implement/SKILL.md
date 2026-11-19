@@ -26,7 +26,7 @@ allowed-tools:
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
-- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的只读指南，所有开发阶段均不得手改。票涉及层 / 组 / 规则变更时，按 tech-spec 3.2 更新规则并重新 render；票级不做架构检查，完整 arch-check 在 feature candidate 的 `freeze / check` 执行。
+- 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，所有开发阶段均不得手改。编码前读总览与附录；票涉及层 / 组 / 规则变更时，按 tech-spec 3.2 更新规则并重新 render；票级不做架构检查，完整 arch-check 在 feature candidate 的 `freeze / check` 执行。
 
 ## 完成状态协议
 
@@ -113,7 +113,7 @@ allowed-tools:
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构规范只编辑 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 只能由 `arch_check.py render write` 确定性重生成并随规则提交，任何开发阶段均不得手工编辑。
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
@@ -131,11 +131,13 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 
 ## ARCH-CHECK 规范与动作
 
-- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的人类 / agent 指南，禁止手改。
-- 编码前先读 `docs/ARCHITECT.md`：分层、组与路径、允许 / 禁止依赖、放置规则、参数 / 类行数 / 注释 / 重复度阈值。AI 的上下文里没有这些规则就不会遵守。
+- 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，禁止手改。
+- 编码前先读 `docs/ARCHITECTURE.md`：1–10 节的系统结构、组件、存储、集成、部署、安全、测试与演进，以及附录 A–E 的分层、组、依赖、放置和阈值。AI 的上下文里没有这些事实就不会遵守。
+- `init` 只生成空规则与 11 节骨架；首次出现架构影响时由 `/tech-spec` 3.2 按代码与 How/Why 证据补全总览基线，不能留空跳过。后续技术方案只更新受影响节，不重写无关节。
 - **票级不设架构门**：`delivery.start`、`ticket_context.check_plan`、`process_check --phase ticket` 都不做架构检查。架构检查只在 feature candidate 的 `freeze / check` 强制运行；本地 pre-push hook 只做提前预警，权威门仍是 candidate。
 - 规则变更（新增、删除、放宽、改阈值）必须写进 tech-spec 3.2 和承接票 `declared-scope`，并重新 `render write`；ai-review 把“删除 / 放宽规则”当作高风险项审查。
-- 旧 `docs/architecture/*.json`、`docs/ARCHITECTURE.md`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
+- 总览与规则冲突时以代码事实修正总览、以 tech-spec 讨论规则；不得为了绕过错误而改总览或放宽规则。
+- 旧 `docs/architecture/*.json`、stable ID、`architecture-updates`、flow-forward/back 已废弃；不要新增或读取。
 
 常用命令：
 
@@ -146,7 +148,7 @@ python3 ../shared/scripts/arch_check.py render write --repo <项目根>
 python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktree
 ```
 
-违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECT.md`，也不要用改规则来绕过错误。
+违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECTURE.md`，也不要用改规则来绕过错误。
 
 # /implement
 
@@ -183,7 +185,7 @@ CI 模式仍按 provider MR 流程交付，但同样不在票级发起独立评�
 2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。
 3. `/implement issue-NNN` 或 GitLab IID 必须唯一定位本地票。新启动只接受 `confirmed`；`proposed` 先回 `/issue-split` 完成票清单确认，其他状态按 ticket context、journal 和 decision 包恢复，不凭 worktree 是否存在猜状态。
 4. `blocked-by` 全部为 `merged` 或 `done`；merged 表示依赖代码已在集成分支上，足以解锁下游实现；deferred / cancelled / needs-human 均不算完成。
-5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、`docs/ARCHITECT.md` / `docs/ARCH-CHECK.json`（如存在）与适用经验。发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
+5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、`docs/ARCHITECTURE.md`（11 节总览 + 规则附录）/ `docs/ARCH-CHECK.json`（如存在），以及 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（按「适用模块」与「触发场景」筛出实现 / 验证 / 环境类命中规则，作为开工前已知坑，进入本票执行清单与 DoD 自检）。总览描述与代码冲突时先按代码事实确认，再交 feature 评审统一修正；发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
 
 ## Step 1：冻结上下文并建立隔离
 
@@ -229,7 +231,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
    python3 ../shared/scripts/verify_issue.py run implementer --issue <票文件> --repo <票 worktree>
    ```
    不运行票级 scoped / full，不换算其他测试套件。
-5. 本票 `declared-scope` 含 `docs/ARCH-CHECK.json` 时，按 tech-spec 3.2 更新层 / 组 / 规则，运行 `arch_check.py validate --worktree`，再 `arch_check.py render write` 生成 `docs/ARCHITECT.md`；只提交规则与生成指南，禁止手改指南。规则放宽或删除必须在 impl-log 说明理由，供 feature 评审重点核对。
+5. 本票 `declared-scope` 含 `docs/ARCH-CHECK.json` 时，按 tech-spec 3.2 更新层 / 组 / 规则；实现证据使总览失真时同时更新 `architecture.overview` 对应节。运行 `arch_check.py validate --worktree`，再 `arch_check.py render write` 生成 `docs/ARCHITECTURE.md`；只提交规则、总览与生成物，禁止手改生成物。规则放宽或删除必须在 impl-log 说明理由，供 feature 评审重点核对。
 6. 交付前运行本地自检（非票级门禁；pre-push 也会运行同一检查）：
    ```bash
    python3 ../shared/scripts/arch_check.py check --repo <票 worktree> --worktree --rules docs/ARCH-CHECK.json

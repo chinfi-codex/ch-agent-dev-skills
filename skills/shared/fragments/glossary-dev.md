@@ -4,4 +4,4 @@
 
 - 输出（票状态、impl-log、evidence、评审报告、对话）必须使用表内**标准术语**；引用任何指标必须带口径（定义 / 统计窗口 / 数据来源），且与 GLOSSARY 一致
 - 实现与评审中**不新建、不回写** GLOSSARY（worktree 分支回写会与主干漂移）；发现术语冲突、缺口或别名误用，记入 impl-log「遗留」或评审报告「评审员意见」，由文档阶段与复盘统一处理
-- 架构规范的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的只读指南，所有开发阶段均不得手改。票涉及层 / 组 / 规则变更时，按 tech-spec 3.2 更新规则并重新 render；票级不做架构检查，完整 arch-check 在 feature candidate 的 `freeze / check` 执行。
+- 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，所有开发阶段均不得手改。编码前读总览与附录；票涉及层 / 组 / 规则变更时，按 tech-spec 3.2 更新规则并重新 render；票级不做架构检查，完整 arch-check 在 feature candidate 的 `freeze / check` 执行。

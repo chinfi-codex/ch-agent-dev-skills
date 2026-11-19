@@ -6,7 +6,7 @@
 ./docs/
   GLOSSARY.md
   ARCH-CHECK.json
-  ARCHITECT.md
+  ARCHITECTURE.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -26,7 +26,7 @@
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `docs/ARCH-CHECK.json` 是架构分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的指南，禁止手改。旧 `docs/architecture/*.json` 与 `docs/ARCHITECTURE.md` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
+- `docs/ARCH-CHECK.json` 是架构总览与分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览（规则在附录），禁止手改。旧 `docs/architecture/*.json` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新

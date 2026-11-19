@@ -20,7 +20,7 @@
 
 ## 评审与符合性
 
-- 票级不发起独立评审；全部票合入集成分支后，在 feature candidate 上执行一次整需求 `/ai-review`、一次 feature conformance，以及 `feature_closeout` 的 arch-check + `ARCHITECT.md` 字节检查。
+- 票级不发起独立评审；全部票合入集成分支后，在 feature candidate 上执行一次整需求 `/ai-review`、一次 feature conformance，以及 `feature_closeout` 的 arch-check + `ARCHITECTURE.md` 字节检查。
 - feature 评审报告 / receipt：`integration/feature-review.md`、`integration/feature-review-receipt.json`；符合性：`integration/conformance-feature.md`。
 - 票级遗留 medium / low：N 条，见 impl-log「遗留」。
 

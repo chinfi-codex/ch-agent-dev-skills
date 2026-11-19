@@ -2,7 +2,8 @@
 """Deterministic Python ARCH-CHECK.
 
 The single machine-readable architecture contract is ``docs/ARCH-CHECK.json``;
-``docs/ARCHITECT.md`` is a deterministic rendering of the same rules.  Checks
+``docs/ARCHITECTURE.md`` is its deterministic rendering: an eleven-section
+architecture overview plus the layered contract and rule appendices.  Checks
 are Python-AST based and run at the feature candidate gate or from the local
 pre-push hook.  There is deliberately no ticket-level architecture gate.
 
@@ -42,9 +43,8 @@ import json_schema as js  # noqa: E402
 SCHEMA_NAME = "agent-dev.arch-check/v1"
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "arch-check.schema.json"
 RULES_REL = "docs/ARCH-CHECK.json"
-GUIDE_REL = "docs/ARCHITECT.md"
+GUIDE_REL = "docs/ARCHITECTURE.md"
 LEGACY_GRAPH_REL = "docs/architecture"
-LEGACY_HOME_REL = "docs/ARCHITECTURE.md"
 SEVERITIES = ("error", "warn")
 COMMENT_KINDS = ("commented_code", "placeholder", "restating", "long_line", "long_docstring")
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -274,6 +274,19 @@ def _validate_group_selector(selector: Any, groups: Set[str], label: str, allow_
     return errors
 
 
+def _validate_overview(overview: Dict[str, Any]) -> List[str]:
+    errors = []
+    for field in ("structure", "diagram"):
+        if "```" in str(overview.get(field) or ""):
+            errors.append("architecture.overview.%s must not contain a triple-backtick fence" % field)
+    notes = overview.get("notes") or {}
+    if isinstance(notes, dict):
+        for key, value in notes.items():
+            if "```" in str(value or ""):
+                errors.append("architecture.overview.notes.%s must not contain a triple-backtick fence" % key)
+    return errors
+
+
 def validate_rules(rules: Dict[str, Any]) -> List[str]:
     try:
         errors = list(js.load_validate(SCHEMA_PATH, rules))
@@ -281,6 +294,7 @@ def validate_rules(rules: Dict[str, Any]) -> List[str]:
         return ["rules schema is invalid: %s" % exc]
     if errors:
         return errors
+    errors.extend(_validate_overview(rules["architecture"].get("overview") or {}))
     groups = set()
     layers = {layer.get("name") for layer in rules["architecture"]["layers"] if isinstance(layer, dict)}
     for group in rules["groups"]:
@@ -921,8 +935,6 @@ def check_repo(
     if not worktree:
         if _git(repo, "cat-file", "-e", "%s:%s" % (head, LEGACY_GRAPH_REL)).returncode == 0:
             infos.append("%s exists but is no longer read; delete it after creating %s" % (LEGACY_GRAPH_REL, RULES_REL))
-        if _git(repo, "cat-file", "-e", "%s:%s" % (head, LEGACY_HOME_REL)).returncode == 0:
-            infos.append("%s is legacy; use %s" % (LEGACY_HOME_REL, GUIDE_REL))
     return findings, _dedup(infos), rules
 
 
@@ -933,44 +945,222 @@ def _md_escape(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
+_EMPTY_SECTION = "> 未登记；首次架构变更时由 `/tech-spec` 3.2 按本节要求补全。"
+
+
+def _md_value(value: Any) -> str:
+    text = "" if value is None else str(value).strip()
+    return _md_escape(text) if text else "—"
+
+
+def _md_list(values: Any) -> str:
+    if not isinstance(values, list):
+        return "—"
+    items = [str(item).strip() for item in values if str(item).strip()]
+    return _md_escape(", ".join(items)) if items else "—"
+
+
+def _has_content(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(str(item).strip() for item in value)
+    return bool("" if value is None else str(value).strip())
+
+
+def _note(overview: Dict[str, Any], key: str) -> str:
+    notes = overview.get("notes") or {}
+    return str(notes.get(key) or "").strip() if isinstance(notes, dict) else ""
+
+
+def _empty_section(lines: List[str], overview: Dict[str, Any], key: str) -> None:
+    lines.extend([_note(overview, key) or _EMPTY_SECTION, ""])
+
+
+def _fenced(lines: List[str], body: Any, language: str, note: str = "") -> None:
+    text = "" if body is None else str(body).strip("\n")
+    if text.strip():
+        lines.extend(["```%s" % language, text, "```", ""])
+    else:
+        lines.extend([note or _EMPTY_SECTION, ""])
+
+
+def _table(lines: List[str], headers: List[str], rows: List[List[str]]) -> None:
+    lines.append("| %s |" % " | ".join(headers))
+    lines.append("| %s |" % " | ".join("---" for _ in headers))
+    lines.extend("| %s |" % " | ".join(row) for row in rows)
+    lines.append("")
+
+
+def _bullets(lines: List[str], entries: List[Tuple[str, str]]) -> None:
+    for label, value in entries:
+        lines.append("- %s：%s" % (label, value))
+    lines.append("")
+
+
 def render_guide(rules: Dict[str, Any]) -> bytes:
     architecture = rules["architecture"]
+    overview = architecture.get("overview") or {}
+    project = overview.get("project") or {}
+    deployment = overview.get("deployment") or {}
+    security = overview.get("security") or {}
+    development = overview.get("development") or {}
     lines = [
-        "# ARCHITECT",
+        "# %s" % architecture["title"],
         "",
-        "> 本页由 `docs/ARCH-CHECK.json` 确定性生成；请只编辑规则文件，不要手改本页。",
-        "> 编码前先读本页的分层、组与依赖规则；违规会被 `arch_check.py` 和 feature candidate 门拦截。",
-        "",
-        "## 架构原则",
+        "> 本页由 `docs/ARCH-CHECK.json` 确定性生成；只编辑该契约文件，不要手改本页。",
+        "> 编码前先读本页；首次架构变更时由 `/tech-spec` 3.2 补全 1–10 节。票级不设架构门，feature candidate 的 `freeze / check` 强制校验。",
         "",
         architecture["summary"],
         "",
-        "## 分层",
+        "## 1. 项目结构",
         "",
-        "| 层 | 职责 | 允许依赖 |",
-        "| --- | --- | --- |",
     ]
-    for layer in architecture["layers"]:
-        lines.append("| %s | %s | %s |" % (
-            _md_escape(layer["name"]),
-            _md_escape(layer["description"]),
-            _md_escape(", ".join(layer["may_depend_on"]) or "—"),
-        ))
+    _fenced(lines, overview.get("structure"), "text", _note(overview, "structure"))
+    lines.extend(["## 2. 高层系统图", ""])
+    _fenced(lines, overview.get("diagram"), "mermaid", _note(overview, "diagram"))
+
+    lines.extend(["## 3. 核心组件", ""])
+    components = overview.get("components") or []
+    if components:
+        _table(
+            lines,
+            ["组件", "职责", "技术", "部署"],
+            [[
+                _md_value(item.get("name")),
+                _md_value(item.get("description")),
+                _md_list(item.get("technologies")),
+                _md_value(item.get("deployment")),
+            ] for item in components],
+        )
+    else:
+        _empty_section(lines, overview, "components")
+
+    lines.extend(["## 4. 数据存储", ""])
+    data_stores = overview.get("data_stores") or []
+    if data_stores:
+        _table(
+            lines,
+            ["存储", "类型", "用途", "关键数据"],
+            [[
+                _md_value(item.get("name")),
+                _md_value(item.get("type")),
+                _md_value(item.get("purpose")),
+                _md_list(item.get("keys")),
+            ] for item in data_stores],
+        )
+    else:
+        _empty_section(lines, overview, "data_stores")
+
+    lines.extend(["## 5. 外部集成", ""])
+    integrations = overview.get("integrations") or []
+    if integrations:
+        _table(
+            lines,
+            ["服务", "用途", "集成方式"],
+            [[
+                _md_value(item.get("name")),
+                _md_value(item.get("purpose")),
+                _md_value(item.get("method")),
+            ] for item in integrations],
+        )
+    else:
+        _empty_section(lines, overview, "integrations")
+
+    lines.extend(["## 6. 部署与基础设施", ""])
+    deployment_rows = [
+        ("云平台", deployment.get("cloud")),
+        ("关键服务", deployment.get("services")),
+        ("CI/CD", deployment.get("ci_cd")),
+        ("监控与日志", deployment.get("monitoring")),
+    ]
+    if any(_has_content(value) for _, value in deployment_rows):
+        _bullets(lines, [(label, _md_list(value) if isinstance(value, list) else _md_value(value))
+                         for label, value in deployment_rows])
+    else:
+        _empty_section(lines, overview, "deployment")
+
+    lines.extend(["## 7. 安全", ""])
+    security_rows = [
+        ("认证", security.get("authentication")),
+        ("授权", security.get("authorization")),
+        ("加密", security.get("encryption")),
+        ("安全实践", security.get("practices")),
+    ]
+    if any(_has_content(value) for _, value in security_rows):
+        _bullets(lines, [(label, _md_list(value) if isinstance(value, list) else _md_value(value))
+                         for label, value in security_rows])
+    else:
+        _empty_section(lines, overview, "security")
+
+    lines.extend(["## 8. 开发与测试环境", ""])
+    development_rows = [
+        ("本地启动", development.get("setup")),
+        ("测试框架", development.get("test_frameworks")),
+        ("质量工具", development.get("quality_tools")),
+    ]
+    if any(_has_content(value) for _, value in development_rows):
+        _bullets(lines, [(label, _md_list(value) if isinstance(value, list) else _md_value(value))
+                         for label, value in development_rows])
+    else:
+        _empty_section(lines, overview, "development")
+
+    lines.extend(["## 9. 演进与技术债", ""])
+    roadmap = overview.get("roadmap") or []
+    if roadmap:
+        lines.extend("- %s" % _md_escape(str(item)) for item in roadmap)
+        lines.append("")
+    else:
+        _empty_section(lines, overview, "roadmap")
+
+    lines.extend(["## 10. 项目标识", ""])
+    identity = [
+        ("项目名称", project.get("name")),
+        ("仓库", project.get("repository")),
+        ("负责团队", project.get("team")),
+        ("最近更新", project.get("updated")),
+    ]
+    if any(_has_content(value) for _, value in identity):
+        _table(lines, ["项", "值"], [[label, _md_value(value)] for label, value in identity])
+    else:
+        _empty_section(lines, overview, "project")
+
     lines.extend([
+        "## 11. 术语与缩写",
         "",
-        "## 组与路径",
+        "项目术语、缩写与 feature-module 归档见 [`docs/GLOSSARY.md`](GLOSSARY.md)；本页不复制术语表，避免双真源。",
         "",
-        "| 组 | 层 | 路径 | 职责 |",
-        "| --- | --- | --- | --- |",
+        "## 附录 A：分层与组",
+        "",
+        "### 分层",
+        "",
     ])
-    for group in sorted(rules["groups"], key=lambda item: item["id"]):
-        lines.append("| %s | %s | %s | %s |" % (
-            _md_escape(group["id"]),
-            _md_escape(group["layer"]),
-            _md_escape(", ".join(group["paths"])),
-            _md_escape(group["description"]),
-        ))
-    lines.extend(["", "## 依赖规则", ""])
+    if architecture["layers"]:
+        _table(
+            lines,
+            ["层", "职责", "允许依赖"],
+            [[
+                _md_escape(layer["name"]),
+                _md_escape(layer["description"]),
+                _md_escape(", ".join(layer["may_depend_on"]) or "—"),
+            ] for layer in architecture["layers"]],
+        )
+    else:
+        lines.extend(["（未配置分层。）", ""])
+    lines.extend(["### 组与路径", ""])
+    if rules["groups"]:
+        _table(
+            lines,
+            ["组", "层", "路径", "职责"],
+            [[
+                _md_escape(group["id"]),
+                _md_escape(group["layer"]),
+                _md_escape(", ".join(group["paths"])),
+                _md_escape(group["description"]),
+            ] for group in sorted(rules["groups"], key=lambda item: item["id"])],
+        )
+    else:
+        lines.extend(["（未配置组。）", ""])
+
+    lines.extend(["## 附录 B：依赖规则", ""])
     any_rule = False
     for rule in rules["rules"]["forbidden"]:
         any_rule = True
@@ -994,7 +1184,8 @@ def render_guide(rules: Dict[str, Any]) -> bytes:
         ])
     if not any_rule:
         lines.extend(["（未配置依赖规则。）", ""])
-    lines.extend(["## 代码规则", ""])
+
+    lines.extend(["## 附录 C：代码规则", ""])
     any_rule = False
     for rule in rules["rules"]["banned_calls"]:
         any_rule = True
@@ -1048,14 +1239,15 @@ def render_guide(rules: Dict[str, Any]) -> bytes:
         ])
     if not any_rule:
         lines.extend(["（未配置代码规则。）", ""])
-    lines.extend(["## 放置规则", ""])
+
+    lines.extend(["## 附录 D：放置规则", ""])
     if architecture["placement"]:
         lines.extend("- %s" % item for item in architecture["placement"])
     else:
         lines.append("（未配置放置规则。）")
     lines.extend([
         "",
-        "## 运行检查",
+        "## 附录 E：运行检查",
         "",
         "```bash",
         "python3 ../shared/scripts/arch_check.py check --repo <项目根> --head HEAD --rules docs/ARCH-CHECK.json",
@@ -1091,6 +1283,19 @@ def _template_rules() -> Dict[str, Any]:
             "summary": "按层分包：上层可以调用下层，下层不得反向依赖上层；跨层共享能力下沉到更低的层。",
             "layers": [],
             "placement": [],
+            "overview": {
+                "project": {"name": "", "repository": "", "team": "", "updated": ""},
+                "structure": "",
+                "diagram": "",
+                "components": [],
+                "data_stores": [],
+                "integrations": [],
+                "deployment": {"cloud": "", "services": [], "ci_cd": "", "monitoring": ""},
+                "security": {"authentication": "", "authorization": "", "encryption": "", "practices": []},
+                "development": {"setup": "", "test_frameworks": [], "quality_tools": []},
+                "roadmap": [],
+                "notes": {},
+            },
         },
         "groups": [],
         "rules": {
@@ -1111,9 +1316,13 @@ def init_repo(repo: Path) -> Path:
     if rules_path.exists():
         raise InputError("%s already exists; refusing to overwrite" % RULES_REL)
     rules = _template_rules()
+    guide_path = repo / GUIDE_REL
+    if guide_path.exists() and guide_path.read_bytes() != render_guide(rules):
+        raise InputError(
+            "%s already exists and is not a managed render; move it before init" % GUIDE_REL)
     rules_path.parent.mkdir(parents=True, exist_ok=True)
     rules_path.write_bytes(_pretty_json(rules))
-    (repo / GUIDE_REL).write_bytes(render_guide(rules))
+    guide_path.write_bytes(render_guide(rules))
     return rules_path
 
 
@@ -1136,7 +1345,7 @@ def _hook_block() -> str:
         '    exit "$status"',
         '  fi',
         'elif [ -f "docs/ARCH-CHECK.json" ]; then',
-        '  echo "arch-check: docs/ARCH-CHECK.json is present but not committed; commit it with docs/ARCHITECT.md to enable the pre-push check." >&2',
+        '  echo "arch-check: docs/ARCH-CHECK.json is present but not committed; commit it with docs/ARCHITECTURE.md to enable the pre-push check." >&2',
         'fi',
         MARK_END,
     ])
@@ -1222,7 +1431,7 @@ def _run_check(args) -> int:
             findings.append(_finding(
                 "architect-guide", "error", GUIDE_REL, 1, error,
                 "Step 1: run `arch_check.py render write` after editing docs/ARCH-CHECK.json.\n"
-                "Step 2: commit docs/ARCHITECT.md; never hand-edit it.",
+                "Step 2: commit docs/ARCHITECTURE.md; never hand-edit it.",
             ))
         findings = _sort_findings(findings)
         _print_findings(findings, infos)
@@ -1302,7 +1511,7 @@ def _run_init(args) -> int:
     except InputError as exc:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 2
-    print("created %s and %s; edit groups/rules, then run render write" % (path.name, GUIDE_REL))
+    print("created %s and %s; edit overview/groups/rules, then run render write" % (path.name, GUIDE_REL))
     return 0
 
 

@@ -63,7 +63,7 @@ CI 模式仍按 provider MR 流程交付，但同样不在票级发起独立评�
 2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。
 3. `/implement issue-NNN` 或 GitLab IID 必须唯一定位本地票。新启动只接受 `confirmed`；`proposed` 先回 `/issue-split` 完成票清单确认，其他状态按 ticket context、journal 和 decision 包恢复，不凭 worktree 是否存在猜状态。
 4. `blocked-by` 全部为 `merged` 或 `done`；merged 表示依赖代码已在集成分支上，足以解锁下游实现；deferred / cancelled / needs-human 均不算完成。
-5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、`docs/ARCHITECT.md` / `docs/ARCH-CHECK.json`（如存在）与适用经验。发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
+5. 读取票全文、tech-spec「4. 约束与假设」全节和票标注锚点、PRD 相关节、GLOSSARY、`docs/ARCHITECTURE.md`（11 节总览 + 规则附录）/ `docs/ARCH-CHECK.json`（如存在），以及 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（按「适用模块」与「触发场景」筛出实现 / 验证 / 环境类命中规则，作为开工前已知坑，进入本票执行清单与 DoD 自检）。总览描述与代码冲突时先按代码事实确认，再交 feature 评审统一修正；发现无法自行裁决的冲突时，按 Human Decision 协议返回请求，不直接问人。
 
 ## Step 1：冻结上下文并建立隔离
 
@@ -109,7 +109,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
    python3 ../shared/scripts/verify_issue.py run implementer --issue <票文件> --repo <票 worktree>
    ```
    不运行票级 scoped / full，不换算其他测试套件。
-5. 本票 `declared-scope` 含 `docs/ARCH-CHECK.json` 时，按 tech-spec 3.2 更新层 / 组 / 规则，运行 `arch_check.py validate --worktree`，再 `arch_check.py render write` 生成 `docs/ARCHITECT.md`；只提交规则与生成指南，禁止手改指南。规则放宽或删除必须在 impl-log 说明理由，供 feature 评审重点核对。
+5. 本票 `declared-scope` 含 `docs/ARCH-CHECK.json` 时，按 tech-spec 3.2 更新层 / 组 / 规则；实现证据使总览失真时同时更新 `architecture.overview` 对应节。运行 `arch_check.py validate --worktree`，再 `arch_check.py render write` 生成 `docs/ARCHITECTURE.md`；只提交规则、总览与生成物，禁止手改生成物。规则放宽或删除必须在 impl-log 说明理由，供 feature 评审重点核对。
 6. 交付前运行本地自检（非票级门禁；pre-push 也会运行同一检查）：
    ```bash
    python3 ../shared/scripts/arch_check.py check --repo <票 worktree> --worktree --rules docs/ARCH-CHECK.json

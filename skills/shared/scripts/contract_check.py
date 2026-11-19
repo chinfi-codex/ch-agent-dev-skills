@@ -7,7 +7,7 @@ facts that the checker does not:
 
 - MOD-1: GLOSSARY "feature-module 归档" rows are well formed and unique.
 - SPEC-1: tech-spec ``supersedes`` targets exist and the chain has no cycle.
-- GUIDE-1: ``docs/ARCHITECT.md`` is the deterministic rendering of the rules.
+- GUIDE-1: ``docs/ARCHITECTURE.md`` is the deterministic rendering of the contract.
 
 Usage:
     python3 contract_check.py --check --repo <项目根> [--json OUT]
@@ -30,7 +30,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 GLOSSARY_REL = Path("docs") / "GLOSSARY.md"
 RULES_REL = Path("docs") / "ARCH-CHECK.json"
-GUIDE_REL = Path("docs") / "ARCHITECT.md"
+GUIDE_REL = Path("docs") / "ARCHITECTURE.md"
 PLACEHOLDERS = {"…", "", "（待核对）", "待核对", "YYYY-MM-DD"}
 
 
@@ -237,7 +237,7 @@ def run_init(repo: Path) -> int:
     except (arch_check.InputError, OSError, ValueError) as exc:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 2
-    print("created %s and %s; edit groups/rules, then run arch_check.py render write" % (
+    print("created %s and %s; edit overview/groups/rules, then run arch_check.py render write" % (
         path.relative_to(repo).as_posix(), GUIDE_REL.as_posix()))
     return 0
 

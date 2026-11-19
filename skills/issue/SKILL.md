@@ -45,10 +45,11 @@ allowed-tools:
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
 - 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md` → 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
-- 经验库读法：`EXPERIENCE.md` ≤50 行全读；超过则按本模块 slug 清单（GLOSSARY「feature-module 归档」节）与相关分类关键词 grep 滤行，只带命中行进上下文（「已归档」节不参与筛选），不全读
+- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 经验库读法：只读 `EXPERIENCE.md` 的「需求阶段经验」节；按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛行，命中即带进上下文，不读「开发阶段经验」节，不读通用级文件，不全量读
 - 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
-- 经验库回流：`./docs/EXPERIENCE.md`（项目级经验库，由 `/review` 维护）中与本需求同模块 / 同分类的条目，作为「已知坑」进入本轮提问与写作——需求阶段条目进拷打维度与假设清单，不重复踩过的坑；条目与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
+- 经验库回流：命中的规则要落到本技能的具体动作——提问维度、假设清单、评审或文档检查点；不重复踩已记录的坑；规则与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
+- 特例：`/review` 按自身 Step 1 读取需求、开发两节与通用级规则库，用于去重、引入、晋升、退役，不受本节「只读需求阶段」限制
 - 所有正式产物统一写入 artifact 根目录，不把关键上下文散落在临时回复中
 - 行为边界：只做产品工作流内的判断、提问、整理与写作；不输出技术实现方案、数据库设计、API 设计、任务拆解；上下文不足先显式说明缺口，再进入单问题补充；发现已有文档与当前结论冲突，指出并在新产物中统一口径
 
@@ -87,7 +88,7 @@ allowed-tools:
 ./docs/
   GLOSSARY.md
   ARCH-CHECK.json
-  ARCHITECT.md
+  ARCHITECTURE.md
   EXPERIENCE.md
   project-memos/
     project-memo-YYYY-MM-DD.md
@@ -107,7 +108,7 @@ allowed-tools:
 路径使用规则：
 
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
-- `docs/ARCH-CHECK.json` 是架构分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECT.md` 是 `arch_check.py render write` 确定性生成的指南，禁止手改。旧 `docs/architecture/*.json` 与 `docs/ARCHITECTURE.md` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
+- `docs/ARCH-CHECK.json` 是架构总览与分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览（规则在附录），禁止手改。旧 `docs/architecture/*.json` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
 - 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
 - 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新

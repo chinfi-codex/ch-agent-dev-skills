@@ -89,13 +89,13 @@ progress.py recall [--since 日期|auto] [--topic 关键词] [--detail 指针]
 | 层 | 容器 | 写者 | 性质 |
 |---|---|---|---|
 | 仓级廉史（L1/L2） | **journal**（新） | 监督循环 / 复盘 / handoff | 自动、廉价、按时间 |
-| 评审过的教训（L3 精选） | EXPERIENCE.md | /review 复盘 | 有合并 / 晋升 / 90 天归档（review/SKILL.md:300-304） |
+| 评审过的教训（L3 精选） | EXPERIENCE.md | /review 复盘 | 只放可复用规则；按语义合并 / 晋升 / 引入 / 退役，历史与证据在复盘报告 |
 | 票级过程 | impl-log / 评审报告 | 实现对话 / 评审对话 | 头部收口可续接 |
 | 工作流状态 | progress.jsonl | 监督循环 | 8 词表事件流 |
 | 设计决策史 | tech-spec supersedes 链 | /tech-spec | 追溯用 |
 | 现行态 | GLOSSARY / ARCHITECTURE | 文档阶段 + 契约票 | 只记现行 |
 
-- 晋升路径：journal 的 `坑` / `解法` 行在 /review 复盘时并入 EXPERIENCE（走既有「相似条目合并、复现次数 +1」规则），journal 永不删改。
+- 晋升路径：journal 的 `坑` / `解法` 行在 /review 复盘时并入 EXPERIENCE（按「阶段 + 触发场景 + 规则语义」合并，历史与证据留复盘报告），journal 永不删改。
 - 宿主自动记忆（如 ZCode auto-memory）是宿主私有、不随仓走——journal 是仓内真源，两者互补。
 
 ## 5. 分期

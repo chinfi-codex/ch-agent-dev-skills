@@ -570,8 +570,8 @@ baseline_ac:
 
         (self.wt / "docs").mkdir(parents=True, exist_ok=True)
         (self.wt / "docs/ARCH-CHECK.json").write_text(json.dumps(rules), encoding="utf-8")
-        (self.wt / "docs/ARCHITECT.md").write_bytes(ac.render_guide(rules))
-        sh(self.wt, "add", "-f", "docs/ARCH-CHECK.json", "docs/ARCHITECT.md")
+        (self.wt / "docs/ARCHITECTURE.md").write_bytes(ac.render_guide(rules))
+        sh(self.wt, "add", "-f", "docs/ARCH-CHECK.json", "docs/ARCHITECTURE.md")
         sh(self.wt, "commit", "-qm", "arch rules")
         return sh(self.wt, "rev-parse", "HEAD")
 
@@ -609,7 +609,7 @@ baseline_ac:
         self.assertFalse(report.failed, report.items)
         self.assertEqual(meta["rules"], "docs/ARCH-CHECK.json")
         self.assertEqual(len(meta["rules_sha256"]), 64)
-        self.assertEqual(meta["guide"], "docs/ARCHITECT.md")
+        self.assertEqual(meta["guide"], "docs/ARCHITECTURE.md")
         self.assertEqual(len(meta["guide_sha256"]), 64)
 
     def test_arch_check_gate_reports_forbidden_dependency(self):
@@ -642,7 +642,7 @@ baseline_ac:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.candidate["arch_check"]["rules"], "docs/ARCH-CHECK.json")
         self.assertEqual(len(self.candidate["arch_check"]["rules_sha256"]), 64)
-        self.assertEqual(self.candidate["arch_check"]["guide"], "docs/ARCHITECT.md")
+        self.assertEqual(self.candidate["arch_check"]["guide"], "docs/ARCHITECTURE.md")
         self.assertEqual(len(self.candidate["arch_check"]["guide_sha256"]), 64)
 
     def test_arch_check_gate_skips_without_rules(self):

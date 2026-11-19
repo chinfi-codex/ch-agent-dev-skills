@@ -70,7 +70,7 @@ class ContractTest(unittest.TestCase):
 
     def write_rules(self):
         (self.root / "docs" / "ARCH-CHECK.json").write_text(json.dumps(RULES), encoding="utf-8")
-        (self.root / "docs" / "ARCHITECT.md").write_bytes(ac.render_guide(RULES))
+        (self.root / "docs" / "ARCHITECTURE.md").write_bytes(ac.render_guide(RULES))
 
     def check(self):
         return run("--check", "--repo", str(self.root))
@@ -79,7 +79,7 @@ class ContractTest(unittest.TestCase):
         first = run("--init", "--repo", str(self.root))
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         self.assertTrue((self.root / "docs" / "ARCH-CHECK.json").is_file())
-        self.assertTrue((self.root / "docs" / "ARCHITECT.md").is_file())
+        self.assertTrue((self.root / "docs" / "ARCHITECTURE.md").is_file())
         second = run("--init", "--repo", str(self.root))
         self.assertEqual(second.returncode, 2)
 
@@ -122,7 +122,7 @@ class ContractTest(unittest.TestCase):
 
     def test_guide_missing_or_stale_fails(self):
         self.write_rules()
-        (self.root / "docs" / "ARCHITECT.md").write_text("hand edited\n", encoding="utf-8")
+        (self.root / "docs" / "ARCHITECTURE.md").write_text("hand edited\n", encoding="utf-8")
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("stale or hand-edited", result.stdout)

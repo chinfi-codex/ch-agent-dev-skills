@@ -76,7 +76,8 @@ allowed-tools:
 - 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
 - **复用旧 feature 目录必须换新 round**：该 feature 目录下已有收口过的需求（存在 `integration/` 结论产物或已 `done` 票）时，本轮所有票的 `feature-slug` 一律写新 round 名 `<原feature-slug>-<YYYY-MM-DD>`，tech-spec/PRD/计划放同目录；不得沿用旧 slug——旧集成分支若残留会被 `delivery start` 新鲜度门拒绝，旧候选也会阻塞 finalize 清理。首轮需求维持 slug = 目录名不变
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECT.md` 与 `docs/ARCH-CHECK.json`（tech-spec 3.2 列出层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 读取 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（如有）：按「适用模块」与「触发场景」筛出拆票 / 粒度 / 依赖 / declared-scope 类命中规则，补进拆票检查清单与粒度红线；规则与 tech-spec 冲突时以 tech-spec 为准，冲突点记入待确认项
 - 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
 
 ---
@@ -105,11 +106,11 @@ allowed-tools:
 
 **DoD 覆盖性自查（防 DoD 写窄——票级核对再严也只是照窄 DoD 核）**：每条 DoD 必须能映射到 tech-spec 节锚点；反过来，标注节的每个行为点至少被一条 DoD（或人工确认项）覆盖——覆盖不上的行为点，要么补 DoD，要么显式写进票的「不做什么」，不许无声漏掉。自查产物 = 「需求点 → 票 / DoD」覆盖表，门②时随票清单一并呈现（只在对话呈现，不落盘）。另做需求级 AC 对账：标准路径覆盖 PRD 全部稳定 AC；小变更覆盖 change-request 全部 delta 与 retained baseline，replace / retire 不得混入。`acceptance-plan.yaml` 的 documents / source 由同一机器校验器核对真实文档、hash、锚点与集合；票级 DoD 负责实现切片，需求级计划负责最终业务验收，二者不得相互替代。发现 AC 漏项、重复或分类理由不成立，退回 `/tech-spec`，不得在票里悄悄补一条就算闭环。
 
-**架构规则变更归属（拆票阶段；tech-spec 3.2 列出层 / 组 / 规则变更时强制）**：规则变更必须落入**恰好一张**承接票的 `declared-scope`，并包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`。没有机器 ID 对账，也没有票级架构门；完整 arch-check 在 feature candidate 的 `freeze / check` 统一执行。无承接票的变更必须补票；确属纯内部且不改变层 / 组 / 依赖的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
+**架构契约变更归属（拆票阶段；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时强制）**：层 / 组 / 规则变更必须落入**恰好一张**承接票的 `declared-scope`，并包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`。总览基线已由 tech-spec 写入时不在票内重复生成；若实现证据使总览失真，承接票可在同一 scope 内更新对应节并 `render write`。没有机器 ID 对账，也没有票级架构门；完整 arch-check 在 feature candidate 的 `freeze / check` 统一执行。无承接票的变更必须补票；确属纯内部且不改变层 / 组 / 依赖的事项须在 3.2 明确说明并经门②确认，不许无声漏掉。
 
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
-- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md`；生产子集用于粒度统计）
+- 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`；生产子集用于粒度统计）
 - **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
 - **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与 feature 级核对；它仍只跑本票 DoD + fast，不做票级 conformance。全部票合入集成分支后，feature 级评审、候选复跑和 conformance 在 candidate 统一做一次；所有票同样受上述粒度红线约束

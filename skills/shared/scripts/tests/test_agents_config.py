@@ -31,7 +31,7 @@ def fixture():
             "ticket-max-loc": 400,
             "deny": ["protocols/**", "**/*.key"],
             "test-change": ["tests/**"],
-            "generated-refresh": [{"id": "architect-guide", "glob": "docs/ARCHITECT.md",
+            "generated-refresh": [{"id": "architect-guide", "glob": "docs/ARCHITECTURE.md",
                                     "generator": "python3 render.py --write"}],
             "base-freeze": True,
             "attribution": "quarantine",

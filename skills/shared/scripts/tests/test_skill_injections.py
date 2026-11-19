@@ -81,6 +81,23 @@ class SkillInjectionTest(unittest.TestCase):
             self.assertIn("{{ARCH_CHECK}}", template, name)
         self.assertNotIn("{{ARCHITECTURE_GRAPH}}", generator)
 
+    def test_experience_library_is_rule_only_and_consumed(self):
+        experience = (SKILLS / "shared" / "templates" / "experience.md").read_text(encoding="utf-8")
+        for term in ("规则ID", "触发场景", "经验细则", "检查点", "适用模块"):
+            self.assertIn(term, experience)
+        for historical_header in ("| 日期 |", "| 复现次数 |", "| 最后复现 |", "| 最后核实 |"):
+            self.assertNotIn(historical_header, experience)
+
+        preamble = (SKILLS / "shared" / "fragments" / "preamble.md").read_text(encoding="utf-8")
+        self.assertIn("需求阶段经验", preamble)
+        self.assertIn("不读通用级文件", preamble)
+        for name in ("tech-spec", "issue-split", "implement", "ai-review"):
+            template = (SKILLS / name / "SKILL.md.tmpl").read_text(encoding="utf-8")
+            self.assertIn("开发阶段经验", template, name)
+        review = (SKILLS / "review" / "SKILL.md.tmpl").read_text(encoding="utf-8")
+        for term in ("经验库变更清单", "引入", "退役", "不写日期"):
+            self.assertIn(term, review)
+
     def test_sync_never_rewrites_generated_documents_implicitly(self):
         sh = (REPO / "sync.sh").read_text(encoding="utf-8")
         ps1 = (REPO / "sync.ps1").read_text(encoding="utf-8")

@@ -1,15 +1,15 @@
 # 契约巡检规则（v3，ARCH-CHECK 模型）
 
 > 配套脚本：`shared/scripts/contract_check.py`；架构规则：`shared/scripts/arch_check.py` 与 `shared/references/arch-check.md`。
-> 原则：**只报告、不改文件**；唯一写入例外是 `--init` 初始化 `docs/ARCH-CHECK.json` / `docs/ARCHITECT.md`。
+> 原则：**只报告、不改文件**；唯一写入例外是 `--init` 初始化 `docs/ARCH-CHECK.json` / `docs/ARCHITECTURE.md`。
 
 ## 术语与模型
 
-- **`docs/ARCH-CHECK.json` = 唯一架构机器真源**：分层、组、依赖方向、禁用调用、参数 / 类行数、注释、重复度。
-- **`docs/ARCHITECT.md` = 确定性生成指南**：由 `arch_check.py render write` 生成，`render check` 字节比对，禁止手改。
+- **`docs/ARCH-CHECK.json` = 唯一架构机器真源**：11 节架构总览 + 分层、组、依赖方向、禁用调用、参数 / 类行数、注释、重复度。
+- **`docs/ARCHITECTURE.md` = 确定性生成的架构总览**：1–10 节为项目架构，11 节指向 GLOSSARY，附录 A–E 为规则；由 `arch_check.py render write` 生成，`render check` 字节比对，禁止手改。
 - **`docs/GLOSSARY.md`**：feature-module 归属登记单源；不再有 `modules.json`。
 - **票级不做架构检查**；arch-check 在 feature candidate 的 `freeze / check` 强制，pre-push 只做提前预警。
-- **旧 `docs/architecture/*.json` / `docs/ARCHITECTURE.md`** 不再读取；迁移后删除。
+- **旧 `docs/architecture/*.json`** 不再读取；迁移后删除。
 
 ## 检查项（`--check`，0 通过 / 1 有发现 / 2 输入错误）
 
@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | MOD-1 | 模块登记 | GLOSSARY「feature-module 归档」首张表：模块名非空且不重复；缺表只 INFO |
 | SPEC-1 | 取代链 | tech-spec frontmatter `supersedes` 目标存在、不自指、链无环 |
-| GUIDE-1 | 指南唯一生成源 | `docs/ARCH-CHECK.json` 存在时校验 schema / 规则语义，并 `render check` 字节比对 `docs/ARCHITECT.md`；缺规则只 INFO |
+| GUIDE-1 | 总览唯一生成源 | `docs/ARCH-CHECK.json` 存在时校验 schema / 规则语义，并 `render check` 字节比对 `docs/ARCHITECTURE.md`；缺规则只 INFO |
 
 MOD-1 只取节内第一张表；删除线退役行不参与对账。
 
@@ -33,7 +33,7 @@ MOD-1 只取节内第一张表；删除线退役行不参与对账。
 python3 ../shared/scripts/contract_check.py --init --repo <项目根>
 ```
 
-等价于 `arch_check.py init`：创建 `docs/ARCH-CHECK.json` 空规则与 `docs/ARCHITECT.md`；已有规则时拒绝覆盖。
+等价于 `arch_check.py init`：创建 `docs/ARCH-CHECK.json` 空规则与 `docs/ARCHITECTURE.md` 的 11 节骨架；已有规则或未托管的同名文档时拒绝覆盖。
 
 ## 巡检输出纪律
 

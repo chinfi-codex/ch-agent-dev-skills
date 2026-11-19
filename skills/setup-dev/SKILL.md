@@ -166,7 +166,7 @@ options:
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
 - `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构规范只编辑 `docs/ARCH-CHECK.json`；`docs/ARCHITECT.md` 只能由 `arch_check.py render write` 确定性重生成并随规则提交，任何开发阶段均不得手工编辑。
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
 - worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
@@ -234,7 +234,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - ocr：`ocr --version`（未装则提示 `npm install -g @alibaba-group/open-code-review`）；`~/.opencodereview/config.json` 是否已有 provider（delegate 模式不需要 provider；只有打算用 local / ci 时才需要 `ocr llm test` 验证连通）
 - 规则：`<repo>/.opencodereview/rule.json` 是否已存在
 - 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/` 与 `dev/`；`git ls-files dev` 是否已有跟踪条目（dev/ 一旦入库，每个 worktree checkout 自带一份完整副本，磁盘随票线性膨胀）
-- 架构规则：`docs/ARCH-CHECK.json` 与 `docs/ARCHITECT.md` 是否已存在；若不存在，本 skill 会初始化空规则并安装 pre-push hook。旧 `docs/architecture/*.json` / `docs/ARCHITECTURE.md` 只提示迁移删除，不再读取
+- 架构契约：`docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 是否已存在；若不存在，本 skill 会初始化空规则与 11 节架构总览骨架并安装 pre-push hook。总览正文不在本 skill 生成，由首次出现架构影响的 `/tech-spec` 3.2 补全。旧 `docs/architecture/*.json` 只提示迁移删除，不再读取
 - 测试选择基建：仅在配置 `feature-closeout.mode: local-human` 时探查 pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力——决定需求集成候选的 dir-map 映射怎么配；不用于单票测试选择或定档
 - 宿主可选模型与原生适配：逐个探查本机已安装、会跑 dev 流程的 `claude-code / codex / zcode / dsh`。用宿主模型列举能力取得**精确模型 ID 与支持的 effort**，同时确认主会话模型设置、独立对话机制及角色绑定能力（Claude frontmatter / Codex 角色 TOML / ZCode frontmatter / DSH `subagent` 路由）；Claude 另查 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` / `CLAUDE_CODE_EFFORT_LEVEL` 等环境覆盖，存在与配置冲突时先报告，不得静默接受。把已核实目录写成 `dev/dispatch-model-catalog.json`（结构 `{host: {model: [effort...]}}`），不靠记忆补模型名
 - 宿主能力：用 `host_adapters.py` 只读探测独立实现 / 评审、复审与回答后续接、session 活性、worktree 文件系统、浏览器和运行资源能力，区分 available / unavailable / unknown。配置里写了不代表实际可用；host-verified 评审必须先通过原生接口写入绑定，再实时调用 `verify_review_session` 重读；host-probes.json 只保存写回执，不单独构成证明。server-enforced 还用 `ci_proof.py capabilities` 在线核 CI API、workflow、protected branch、required checks、有效权限和 expected-SHA，任何未知都不得落为该模式
@@ -272,20 +272,20 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
   - 复制 `shared/templates/gitlab-ci-ocr.yml`（相对本 SKILL.md 为 `../shared/templates/gitlab-ci-ocr.yml`）为仓库 `ci/ocr-review.gitlab-ci.yml`，并在项目 `.gitlab-ci.yml` 加 `include: local`；回贴脚本 `ci/ocr-post-review.py` 需人从上游仓库获取放置（模板头部有说明，内网不能现场 curl 外网）
   - 明确列出**人要在 GitLab 后台设置的 CI 变量清单**（`OCR_LLM_URL` / `OCR_LLM_AUTH_TOKEN` 掩码 / `OCR_LLM_MODEL` 必需，`GITLAB_API_TOKEN` 掩码可选）——本 skill 不碰 GitLab 后台
 - `.opencodereview/rule.json` 种子（存在则不动；三种模式通用，delegate 同样靠它解析评审规则）：`exclude` 放协议 / 密钥等不送审目录，`rules` 按主要模块放占位条目（真实评审规则由人从 REVIEW.md 提炼维护）
-- 架构规则初始化：`docs/ARCH-CHECK.json` 不存在时运行 `python3 ../shared/scripts/arch_check.py init --repo <仓库根>`（生成空规则与 `docs/ARCHITECT.md`），存在则不动；随后运行 `python3 ../shared/scripts/arch_check.py install-hook --repo <仓库根>` 安装 pre-push 预警（保留已有 hook）。规则内容由后续 `/pd-plan` / `/tech-spec` 按真实分层补齐
+- 架构契约初始化：`docs/ARCH-CHECK.json` 不存在时运行 `python3 ../shared/scripts/arch_check.py init --repo <仓库根>`（生成空规则与 `docs/ARCHITECTURE.md` 的 11 节骨架），存在则不动；同名 `docs/ARCHITECTURE.md` 已存在但不是托管生成物时 `init` 会拒绝覆盖，先请人明确移走旧文件。已有 `docs/ARCH-CHECK.json` 但缺 `docs/ARCHITECTURE.md`（含从旧 `docs/ARCHITECT.md` 升级）时运行 `python3 ../shared/scripts/arch_check.py render write --repo <仓库根>` 重新生成，并提示人确认后删除旧 `docs/ARCHITECT.md`。随后运行 `python3 ../shared/scripts/arch_check.py install-hook --repo <仓库根>` 安装 pre-push 预警（保留已有 hook）。总览正文由首次出现架构影响的 `/tech-spec` 3.2 按真实证据补全，本 skill 不代写架构事实；旧 `docs/ARCHITECT.md` 不再读取，提示人确认后删除
 - 若仓库存在 AGENTS.md 或 CLAUDE.md，追加一节 `## Dev workflow skills`：5 行以内，逐条一行说明 `/tech-spec` `/issue-split` `/implement` `/ai-review` 各自读什么写什么；两者都存在时只改 AGENTS.md，都不存在则不创建
 
 ### Step 3：验证与收尾
 
 - 回读写出的配置，向用户逐项复述，每项三句话以内说清：这项规定什么、定了什么、对日常开发意味着什么；不把字段名堆叠成清单念。逐宿主运行 `resolve --role supervisor / review / development`，并用 `dispatch_config.py render --check` 核对原生角色文件没有缺失或过期；当前主会话不符合 `supervisor-review` 时明确提示新开或切换会话，不宣称已在当前会话生效。请人最终确认
-- 架构规则初始化后运行 `python3 ../shared/scripts/arch_check.py validate --repo <仓库根> --worktree --rules docs/ARCH-CHECK.json` 与 `render check --worktree`，并确认 pre-push hook 已安装；告诉用户票级不做架构检查，feature candidate 的 `freeze / check` 才强制 arch-check
+- 架构契约初始化后运行 `python3 ../shared/scripts/arch_check.py validate --repo <仓库根> --worktree --rules docs/ARCH-CHECK.json` 与 `render check --worktree`，并确认 pre-push hook 已安装；告诉用户 11 节总览此时只是骨架，首次架构变更会由 `/tech-spec` 3.2 补全；票级不做架构检查，feature candidate 的 `freeze / check` 才强制 arch-check
 - `ocr.mode = ci` 时逐条核对 CI 前提：include 已加、post 脚本已放、GitLab 变量已设（后两项须人确认，未确认则 `gitlab-ci: manual` 落配置）；`delegate` 模式无 CI 前提，跳过核对
 - repo-level = A 时显式警示：本仓库不得运行 `/implement`，AI 仅只读辅助
 - 告诉用户配置已完成、下一步该跑什么（`/tech-spec`），按「完成状态协议 · 对人表达」收尾
 
 ## 硬约束
 
-- 只写配置与种子：`./dev/agents-config.md`、`./dev/dispatch-model-catalog.json`、经确认的宿主原生角色配置、`.gitignore` 一行、`.opencodereview/rule.json`、`docs/ARCH-CHECK.json` / `docs/ARCHITECT.md`（仅初始化时）、`.git/hooks/pre-push`（arch-check 托管块）、AGENTS.md / CLAUDE.md 说明节；`ci/ocr-review.gitlab-ci.yml` 与 `.gitlab-ci.yml` 的 include 节仅在 ci 模式写；不写任何业务代码
+- 只写配置与种子：`./dev/agents-config.md`、`./dev/dispatch-model-catalog.json`、经确认的宿主原生角色配置、`.gitignore` 一行、`.opencodereview/rule.json`、`docs/ARCH-CHECK.json` / `docs/ARCHITECTURE.md`（仅初始化时）、`.git/hooks/pre-push`（arch-check 托管块）、AGENTS.md / CLAUDE.md 说明节；`ci/ocr-review.gitlab-ci.yml` 与 `.gitlab-ci.yml` 的 include 节仅在 ci 模式写；不写任何业务代码
 - 不替人决定 repo-level；不代替人在 GitLab 后台设变量；api_key 只进 `ocr config`（或人手填），不写进任何入库文件
 - `delegate` 是默认模式而非降级，无需 LLM 端点即可落；`ocr llm test` 不通过不得把 `ocr.mode` 落为 `local` / `ci`
 - server-enforced 未经在线能力证明不得落配置；协作 / 本地模式不得冒称服务端强制。配置中的 token-env 只能是环境变量名，token、CI verdict / proof 不得写入配置
