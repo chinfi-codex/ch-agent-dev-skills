@@ -80,7 +80,7 @@ allowed-tools:
             logs/                     # 原始命令输出与哈希索引
       mr/
         <feature-summary>-mr-issue-001-YYYY-MM-DD.md
-      integration/                # 需求收口（feature-closeout: local-human）产物，结构见 shared/templates/feature-closeout.md
+      integration/                # 需求收口（feature-closeout: local-human）产物；复用旧 feature 目录的轮次写 integration/<round>/，round 名 = 票 feature-slug = 集成分支名（建议 <feature-slug>-<YYYY-MM-DD>），结构见 shared/templates/feature-closeout.md
         candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
         acceptance-plan.json      #   冻结时的计划快照
         feature-review.md         #   整需求独立评审报告（main_head..candidate）
@@ -195,7 +195,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
 
 `start` 负责：
 
-- 从唯一目标分支创建 `feat/<feature-slug>-<issue-id>` 和隔离 worktree；local-human 只能使用本需求集成分支，目标不存在即停止。
+- 从唯一目标分支创建 `feat/<feature-slug>-<issue-id>` 和隔离 worktree；local-human 只能使用本需求集成分支，目标不存在即停止。`delivery start` 会做集成分支新鲜度门：本轮首票开工时集成分支若携带非 main 提交（旧需求残留）即停——此时须先收口/清理旧需求，由主会话用新 round 名（建议 `<feature-slug>-<YYYY-MM-DD>`，票 feature-slug 同步）建新集成分支后重开。
 - 建立并验证 `<worktree>/dev` 指向主工作区 dev 的软链；实体副本、broken 或错误目标软链一律拒绝。
 - 冻结完整 target/base/source HEAD/tree、declared-scope、票 / DoD / spec / config 哈希到 `ticket-context.json`。
 - 支持中断后的幂等续建：先完整预校验 DoD/spec/config/scope，恢复时核对实际 worktree、分支和 context，不重复创建或重复应用变更。宿主自管沙箱也必须提供等价的 context 与资源回执，不能另开无记录的第二路径。

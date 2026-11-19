@@ -1891,13 +1891,13 @@ def find_ticket(repo, issue, key=None):
 
 
 def cleanup_plan(repo, branch=None, issue=None, feature_dir=None, intent="close",
-                 operation_id=None, authorize=True):
+                 operation_id=None, authorize=True, round=None):
     """Build/preview a v2 plan. ``branch`` remains only an internal resolver input."""
     import progress_cleanup as pc
     repo = Path(repo).resolve()
     if feature_dir is not None:
         return pc.make_plan(repo, feature_dir=feature_dir, intent=intent,
-                            operation_id=operation_id, authorize=authorize)
+                            operation_id=operation_id, authorize=authorize, round=round)
     ticket = find_ticket(repo, issue) if issue else None
     if issue and not ticket:
         return {"ok": False, "eligible": False, "error": f"票号不存在或不唯一：{issue}",
@@ -1961,7 +1961,8 @@ def close_clean_command(args):
             raise pc.CleanupError("--apply 必须同时提供 --operation-id 与 --confirm", code="invalid-confirmation")
         if not args.apply:
             plan = cleanup_plan(pick_repo(args), issue=args.issue, feature_dir=args.feature_dir,
-                                intent=args.intent, operation_id=args.operation_id)
+                                intent=args.intent, operation_id=args.operation_id,
+                                round=getattr(args, "round", None))
             print(json.dumps(pc.public_plan(plan), ensure_ascii=False))
             if not plan.get("eligible"):
                 sys.exit(1)
@@ -2148,6 +2149,7 @@ def main():
     target = p7.add_mutually_exclusive_group(required=True)
     target.add_argument("--issue", help="票文件 stem 或票号")
     target.add_argument("--feature-dir", help="已 feature-merged 的主工作区需求目录")
+    p7.add_argument("--round", help="--feature-dir 为多轮复用目录时指定本轮 round 名（与 freeze --round 一致）")
     p7.add_argument("--intent", choices=["close", "discard"], default="close")
     p7.add_argument("--apply", action="store_true", help="执行；缺省只 preview 并授权 journal")
     p7.add_argument("--operation-id", help="preview 返回的授权操作 ID")

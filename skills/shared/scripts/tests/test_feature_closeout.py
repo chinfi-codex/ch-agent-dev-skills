@@ -532,6 +532,39 @@ baseline_ac:
         self.assertEqual(self.candidate["candidate"], self.merged_commit)
         self.assertEqual(self.candidate["acceptance_plan"]["cases"], ["AC-1", "AC-2"])
 
+    def test_freeze_rejects_ticket_slug_round_mismatch(self):
+        # 复用旧 feature 目录的轮次：票 feature-slug 与 --round 不一致即 FAIL
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        issue.write_text(issue.read_text(encoding="utf-8")
+                         .replace("feature-slug: %s" % SLUG, "feature-slug: demo-2026-11-01"), encoding="utf-8")
+        result = self.run_cli("freeze", "--feature-dir", str(self.fdir), "--repo", str(self.wt),
+                              "--round", "demo-2026-11-18", "--issues", "issue-001")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("feature-slug=demo-2026-11-01", result.stdout)
+        self.assertNotIn("已冻结", result.stdout)
+
+    def test_freeze_round_accepts_matching_slug_and_exempt_promoted_old_tickets(self):
+        # 已 promote 进 main 的旧轮票（旧 slug）不阻塞新 round；本轮票 slug 必须与 round 一致
+        sh(self.root, "merge", "--no-ff", "-q", "-m", "promote round 1", "feat/demo")
+        main_head = sh(self.root, "rev-parse", "main")
+        wt2 = self.root / ".worktrees" / "integration-round2"
+        sh(self.root, "worktree", "add", "-q", str(wt2), "-b", "feat/demo-2026-11-18", "main")
+        issue = self.fdir / "issues" / "issue-001-x.md"
+        self.write_issue("done")
+        second = self.fdir / "issues" / "issue-002-y.md"
+        second.write_text(
+            "---\nissue-id: issue-002\nfeature-slug: demo-2026-11-18\nstatus: merged\n"
+            "dispatch:\n  host: zcode\n  model: provider/dev\n  session_id: impl-2\n  agent: development\n"
+            "tech-spec: demo-tech-spec-2026-11-14.md\n---\n# y\n", encoding="utf-8")
+        self.write_merged(main_head, issue_id="issue-002", append=True)
+        result = self.run_cli("freeze", "--feature-dir", str(self.fdir), "--repo", str(wt2),
+                              "--round", "demo-2026-11-18", "--issues", "issue-001,issue-002")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        candidate = json.loads((self.fdir / "integration" / "demo-2026-11-18" / "candidate.json").read_text())
+        self.assertEqual(candidate["integration_branch"], "feat/demo-2026-11-18")
+        self.assertEqual(candidate["round"], "demo-2026-11-18")
+        self.assertEqual([item["id"] for item in candidate["issues"]], ["issue-001", "issue-002"])
+
     def _write_arch_rules(self, rules):
         import arch_check as ac
 

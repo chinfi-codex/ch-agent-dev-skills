@@ -233,6 +233,49 @@ cases:
                 result = self.start()
                 self.assertEqual(result["target"], "feat/demo")
 
+    def stale_integration_commit(self):
+        (self.integration / "leftover.py").write_text("LEFTOVER = 1\n")
+        sh(self.integration, "add", "leftover.py")
+        sh(self.integration, "commit", "-qm", "leftover from previous requirement")
+
+    def test_start_rejects_stale_integration_branch_without_side_effects(self):
+        # 旧需求残留：集成分支携带非 main 提交时本轮首票必须停止
+        self.stale_integration_commit()
+        with self.assertRaisesRegex(delivery.DeliveryError, "携带非 main 提交"):
+            self.start()
+        self.assertFalse(self.source.exists())
+
+    def test_start_rejects_stale_branch_after_previous_round_done(self):
+        # 旧轮已收口（mate done）时不得静默复用同一集成分支名
+        second = self.fdir / "issues" / "issue-002-y.md"
+        second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
+                          .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]")
+                          .replace("status: confirmed", "status: done"), encoding="utf-8")
+        self.stale_integration_commit()
+        with self.assertRaisesRegex(delivery.DeliveryError, "携带非 main 提交"):
+            self.start()
+
+    def test_start_allows_live_round_to_reuse_integration_branch(self):
+        # 同轮前一票 merged：本轮仍在进行，后续票直接从集成分支 tip 续开
+        second = self.fdir / "issues" / "issue-002-y.md"
+        second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
+                          .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]")
+                          .replace("status: confirmed", "status: merged"), encoding="utf-8")
+        self.stale_integration_commit()
+        result = self.start()
+        self.assertEqual(result["target"], "feat/demo")
+
+    def test_start_ignores_mates_from_other_rounds(self):
+        # 旧轮票用不同 feature-slug → 不算本轮 mate，新鲜度门仍生效
+        second = self.fdir / "issues" / "issue-002-y.md"
+        second.write_text(self.issue.read_text().replace("issue-001", "issue-002")
+                          .replace("feature-slug: demo", "feature-slug: demo-2026-11-01")
+                          .replace("declared-scope: [src/a.py]", "declared-scope: [src/b.py]")
+                          .replace("status: confirmed", "status: merged"), encoding="utf-8")
+        self.stale_integration_commit()
+        with self.assertRaisesRegex(delivery.DeliveryError, "携带非 main 提交"):
+            self.start()
+
     def test_confirmed_redesign_refreezes_context_but_active_resume_cannot(self):
         first = self.start()
         old = self.context

@@ -301,6 +301,8 @@ def start(issue_path, repo) -> dict:
         if statuses.get(dependency) not in {"merged", "done"}:
             raise DeliveryError("blocked-by dependency is neither merged nor done: %s" % dependency)
     _oid(root, target)
+    if fc.get("mode") == "local-human" and target != str(config.get("main-branch") or "").strip():
+        _require_fresh_integration_branch(root, config, feature_dir, fm, issue, target)
     # Validate DoD/spec/config/scope and all primary-repo inputs before any Git
     # mutation.  The provisional main-HEAD context is discarded, never reused.
     try:
@@ -362,6 +364,37 @@ def start(issue_path, repo) -> dict:
     return {"schema": SCHEMA, "operation": "start", "context": str(output),
             "worktree": str(worktree), "branch": branch, "target": target,
             "source_head": context["source_head"]}
+
+
+def _require_fresh_integration_branch(root, config, feature_dir, fm, issue, target):
+    """local-human 集成分支新鲜度门：本轮首票开工前目标分支不得携带非 main 提交。
+
+    旧需求残留的集成分支会让新需求票从旧 tip 开出，candidate 被旧提交污染。
+    同轮次已有票处于 in-progress / in-review / mr-submitted / merged 时视为本轮
+    仍在进行，直接放行；否则要求 target 是 main 的祖先（新分支与 main 同点或
+    仅落后于 main），携带旧提交即停。
+    """
+    ac = _module("agents_config")
+    slug = str(fm.get("feature-slug") or "").strip() or feature_dir.name
+    for sibling in sorted(feature_dir.glob("issues/issue-*.md")):
+        try:
+            if sibling.resolve() == issue.resolve():
+                continue
+            mate = ac.read_frontmatter(sibling)
+        except (ValueError, OSError):
+            continue
+        mate_slug = str(mate.get("feature-slug") or "").strip() or feature_dir.name
+        if mate_slug != slug:
+            continue
+        if str(mate.get("status") or "") in {"in-progress", "in-review", "mr-submitted", "merged"}:
+            return
+    main_branch = str(config.get("main-branch") or "").strip()
+    ancestor = _git(root, "merge-base", "--is-ancestor", target, main_branch, check=False)
+    if ancestor.returncode != 0:
+        raise DeliveryError(
+            "local-human 集成分支 %s 携带非 %s 提交（旧需求残留或已收口分支），不得续开新需求票；"
+            "先收口/清理旧需求，再为新需求建新集成分支并同步票 feature-slug（新 round 建议 "
+            "%s-<YYYY-MM-DD>，freeze --round 同名）" % (target, main_branch, slug))
 
 
 def context_relative(fm, issue: Path, root: Path) -> str:

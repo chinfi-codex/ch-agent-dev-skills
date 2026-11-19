@@ -646,6 +646,19 @@ def freeze(args) -> Report:
         if status == "deferred" or (scope and iid not in scope):
             continue
         merged_commit = merged.get(iid)
+        ticket_slug = str(fm.get("feature-slug") or "").strip() or fdir.name
+        if ticket_slug != slug:
+            in_main = False
+            if isinstance(merged_commit, str) and re.fullmatch(r"[0-9a-f]{40}", merged_commit):
+                try:
+                    in_main = subprocess_run_ancestor(repo, merged_commit, cfg["main-branch"])
+                except InputError:
+                    in_main = False
+            if not in_main:
+                rep.add("issues", "FAIL",
+                        f"{iid} feature-slug={ticket_slug} ≠ 本轮 round/目录名 {slug}；"
+                        "本轮票必须携带与本轮一致的 feature-slug（复用旧 feature 目录时换新 round 名，"
+                        "建议 <feature-slug>-<YYYY-MM-DD>），仅已在 main 的旧需求票可保留旧 slug")
         issues.append({"id": iid, "status": status, "merged_commit": merged_commit})
         if status not in ("merged", "done"):
             rep.add("issues", "FAIL", f"{iid} status={status or '<空>'}，须全部 merged（已入集成分支）或 done；"
@@ -1766,7 +1779,7 @@ def _cleanup_ticket(rep: Report, repo: Path, fdir: Path, iid: str, issue: Path):
         rep.add("cleanup", "FAIL", f"{iid} 清理失败：{exc}")
 
 
-def _cleanup_feature(rep: Report, repo: Path, fdir: Path, cand: dict):
+def _cleanup_feature(rep: Report, repo: Path, fdir: Path, cand: dict, round_name=None):
     try:
         pc = importlib.import_module("progress_cleanup")
         branch_oid = pc._full_oid(repo, cand["integration_branch"])
@@ -1776,7 +1789,7 @@ def _cleanup_feature(rep: Report, repo: Path, fdir: Path, cand: dict):
         if not branch_oid and not worktrees and not impl_exists:
             rep.add("cleanup", "PASS", "集成分支/worktree/dev 过程物均已清理，跳过重复 feature 清理")
             return
-        plan = pc.make_plan(repo, feature_dir=fdir, intent="close")
+        plan = pc.make_plan(repo, feature_dir=fdir, intent="close", round=round_name)
         if not plan.get("ok"):
             rep.add("cleanup", "FAIL", f"feature 清理计划不可执行：{plan.get('reason') or plan.get('error')}")
             return
@@ -1872,7 +1885,7 @@ def finalize_tickets(fdir: Path, repo: Path, round_name=None, cleanup=True) -> R
             continue
         if iid in records:
             _cleanup_ticket(rep, repo, fdir, iid, records[iid][0])
-    _cleanup_feature(rep, repo, fdir, cand)
+    _cleanup_feature(rep, repo, fdir, cand, round_name)
     return rep
 
 
@@ -2060,7 +2073,7 @@ def main(argv=None) -> int:
     for name in ("freeze", "check", "report", "run-ac"):
         p = sub.add_parser(name)
         p.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
-        p.add_argument("--round", help="同一 feature 目录下的一轮需求名：产物写 integration/<round>/，集成分支按 <round> 代入")
+        p.add_argument("--round", help="同一 feature 目录下的一轮需求名：产物写 integration/<round>/，集成分支按 <round> 代入；建议 <feature-slug>-<YYYY-MM-DD>，本轮票 feature-slug 须与其一致")
         p.add_argument("--repo", required=True, help="集成 worktree")
         if name == "freeze":
             p.add_argument("--issues", help="--round 时本轮票清单，逗号分隔（如 issue-031,issue-039）")

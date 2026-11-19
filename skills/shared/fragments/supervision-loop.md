@@ -5,7 +5,7 @@
 门②通过后，主会话自动进入监督循环，**派出后不停手，直到每票合入集成分支、feature candidate 收口和清理都有确定结果**：
 
 1. **取票**：只读票 frontmatter 的 status / blocked-by，重算 frontier。依赖为 `merged` 或 `done` 才算满足；`merged` 表示依赖代码已在集成分支上，`done` 表示已通过 feature 验收。deferred / cancelled / needs-human 不解锁。
-2. **派发**：local-human 首次派发前建立本需求独立集成分支和集成 worktree。按 Dispatch Protocol 为 frontier 票新开独立实现对话；先写 dispatch 块和事件。declared-scope 两两不相交的票可按 parallel-max 并行，有交集或疑义串行，不用关联测试闭包决定并行。
+2. **派发**：local-human 首次派发前建立本需求独立集成分支（从当前 main 建，`feat/<feature-slug>`）和集成 worktree。**复用旧 feature 目录（该目录已有收口过的需求）必须换新 round**：票 feature-slug、`freeze --round`、集成分支三者同名（建议 `<feature-slug>-<YYYY-MM-DD>`）；`delivery start` 会拒绝携带非 main 提交的集成分支（旧需求残留），不换 round 无法开工。按 Dispatch Protocol 为 frontier 票新开独立实现对话；先写 dispatch 块和事件。declared-scope 两两不相交的票可按 parallel-max 并行，有交集或疑义串行，不用关联测试闭包决定并行。
 3. **跟踪**：成功结构化回报到达即写 returned。回报只提供分支、worktree、ticket context、verification、process-check-ticket、impl-log 和遗留线索，不作为成功依据。needs-human 不是成功回报。
 4. **票级收口**：
    - 实现会话已执行 `process_check.py --phase ticket`；主会话复核其 JSON、implementer verification、票 scope 和活动 decision，不重复发起独立评审、supervisor 复跑或 conformance。
@@ -23,7 +23,7 @@
 全部票 `merged` 或 `done` 后按以下顺序执行；所有产物写主工作区 `integration/[round/]`，不写集成 worktree、不提交到集成分支。`executor` 决定谁执行，`oracle` 决定谁最终验收，浏览器操作不能替代人的业务判断。
 
 1. **前提**：全票 merged/done + 每票 merged commit 完整且为候选祖先、无活动 human-decision；`freeze` 只冻结候选与票组，**不再要求每票 conformance**。PRD 或 change-request delta + retained baseline AC 全部进入 acceptance-plan.yaml 且 validate-plan 通过。
-2. **同步并冻结**：集成 worktree 先同步 main，冲突在集成分支解决；`feature_closeout.py freeze` 绑定 candidate / tree / 票组与计划哈希。main 或候选之后任何前进都必须重新同步、freeze 并重跑 feature 门。
+2. **同步并冻结**：集成 worktree 先同步 main，冲突在集成分支解决；`feature_closeout.py freeze` 绑定 candidate / tree / 票组与计划哈希（复用旧 feature 目录的轮次加 `--round <round名> --issues <本轮票>`，round 名与票 feature-slug 一致，产物写 `integration/<round>/`）。main 或候选之后任何前进都必须重新同步、freeze 并重跑 feature 门。
 3. **整需求独立评审**：在冻结候选上发起**一次** `/ai-review`，评审 `main_head..candidate` 全 diff，按票 merge commit 分段并整体判断跨票契约。评审者必须独立于主会话和全部票 implementer；产出 `integration/feature-review.md` 与 `integration/feature-review-receipt.json`（`review_receipt.py create-feature`）。critical/high 未闭合或 verdict=blocked 即阻塞。
 4. **候选 supervisor 复跑**：在集成 worktree 执行：
    ```bash
@@ -45,9 +45,9 @@
 10. **finalize 与集成清场**：feature-merged 后运行：
     ```bash
     python3 ../shared/scripts/feature_closeout.py finalize \
-      --feature-dir <主工作区 feature 目录> --repo <主工作区>
+      --feature-dir <主工作区 feature 目录> --repo <主工作区> [--round <round名>]
     ```
-    确认候选、feature-merged 事件和主 HEAD 一致；逐票 close-and-clean，再清理 integration worktree / 精确 upstream / 失效代际。任何一步失败都保持 needs-attention，不能用总结掩盖残留。
+    确认候选、feature-merged 事件和主 HEAD 一致；逐票 close-and-clean，再清理 integration worktree / 精确 upstream / 失效代际（多轮复用目录必须带本轮 `--round`，finalize 只清本轮候选与分支，不动旧轮结论产物）。任何一步失败都保持 needs-attention，不能用总结掩盖残留。
 11. **发布与兜底**：push、Prod dry-run/sync、只读冒烟和 rollback 均需人另行明确授权；main push 后 CI full 是安全网。新失败归因到本需求则开修复票，影响 Prod 时提议 revert / 回滚，人确认后执行。
 
 ### 无人值守模式（人离场自动跑）

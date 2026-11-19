@@ -534,6 +534,44 @@ integration-runtime:
         finally:
             case.tearDown()
 
+    def _promoted_round(self, round_name, branch):
+        """Create one promoted (feature-merged) round candidate for scoping tests."""
+        self.git("checkout", "-q", "-b", branch)
+        (self.repo / ("round-%s.py" % round_name)).write_text("VALUE = '%s'\n" % round_name, encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "round %s" % round_name)
+        candidate = self.git("rev-parse", "HEAD").stdout.strip()
+        tree = self.git("rev-parse", "HEAD^{tree}").stdout.strip()
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", branch, "-m", "merge round %s" % round_name)
+        merged = self.git("rev-parse", "HEAD").stdout.strip()
+        integration = self.feature_dir / "integration" / round_name
+        integration.mkdir(parents=True)
+        (integration / "candidate.json").write_text(json.dumps({
+            "schema": "agent-dev.feature-candidate/v2", "candidate": candidate,
+            "candidate_tree": tree, "integration_branch": branch,
+            "main_branch": "main", "merged_commit": merged}), encoding="utf-8")
+        with (self.feature_dir / "progress.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"event": "feature-merged", "issue": "feature",
+                                     "commit": merged}) + "\n")
+
+    def test_feature_cleanup_scopes_candidates_by_round(self):
+        # 多轮复用同一 feature 目录：不带 round 拒绝猜测；带 round 只清本轮分支
+        self._promoted_round("2026-11-01", "feat/slug-2026-11-01")
+        self._promoted_round("2026-11-18", "feat/slug-2026-11-18")
+        with self.assertRaisesRegex(pc.CleanupError, "找到 2 个"):
+            pc._feature_candidate(self.repo, self.feature_dir)
+        blocked = pc.make_plan(self.repo, feature_dir=self.feature_dir, intent="close")
+        self.assertFalse(blocked.get("eligible"))
+        self.assertIn("找到 2 个", str(blocked.get("error") or blocked.get("reason")))
+        plan = pc.make_plan(self.repo, feature_dir=self.feature_dir, intent="close", round="2026-11-18")
+        self.assertTrue(plan["eligible"], plan.get("reason"))
+        self.assertEqual(plan["branch"], "feat/slug-2026-11-18")
+        result = self.apply(plan)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["branch_deleted"])
+        self.assertEqual(self.git("rev-parse", "--verify", "feat/slug-2026-11-01", check=False).returncode, 0)
+
     def test_completed_journal_reobserves_remaining_paths(self):
         branch, wt, _, _ = self.merged_worktree()
         plan = self.plan()

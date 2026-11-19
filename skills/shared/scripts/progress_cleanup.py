@@ -556,10 +556,15 @@ def _merge_proof(repo, ticket, branch, branch_oid, target, target_oid):
     return _exact_merge_record(repo, ticket, branch, branch_oid, target, target_oid)
 
 
-def _feature_candidate(repo, feature_dir):
+def _feature_candidate(repo, feature_dir, round_name=None):
     integration = Path(feature_dir) / "integration"
-    direct = integration / "candidate.json"
-    paths = [direct] if direct.is_file() else sorted(integration.glob("*/candidate.json"))
+    if round_name:
+        # 多轮复用同一 feature 目录时只看本轮候选；旧轮次的结论产物保留在原地，
+        # 不得让它们阻塞或顶替本轮清理。
+        paths = [integration / round_name / "candidate.json"]
+    else:
+        direct = integration / "candidate.json"
+        paths = [direct] if direct.is_file() else sorted(integration.glob("*/candidate.json"))
     candidates = []
     for path in paths:
         try:
@@ -569,7 +574,7 @@ def _feature_candidate(repo, feature_dir):
         if value.get("merged_commit"):
             candidates.append((path, value))
     if len(candidates) != 1:
-        raise CleanupError("feature-dir 清理要求唯一、已登记的合并候选；找到 %d 个" % len(candidates))
+        raise CleanupError("feature-dir 清理要求本轮唯一、已登记的合并候选；找到 %d 个" % len(candidates))
     path, candidate = candidates[0]
     required = ("candidate", "candidate_tree", "integration_branch", "main_branch", "merged_commit")
     if any(not isinstance(candidate.get(key), str) or not candidate[key] for key in required):
@@ -691,7 +696,7 @@ def _new_base(repo, intent, subject):
 
 
 def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=None,
-              authorize=True, recovery_authorization=None, authorized_at=None):
+              authorize=True, recovery_authorization=None, authorized_at=None, round=None):
     """Build an immutable close/discard plan; code merge is intentionally absent."""
     repo = Path(repo).resolve()
     if recovery_authorization is not None:
@@ -712,7 +717,8 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
         subject = {"kind": "feature", "id": feature_path.name, "key": feature_path.name,
                    "title": feature_path.name, "status": "feature",
                    "feature": "%s/%s" % (feature_path.parent.name, feature_path.name),
-                   "feature_dir": str(feature_path), "issue_path": None}
+                   "feature_dir": str(feature_path), "issue_path": None,
+                   "round": str(round).strip() if round else None}
         if intent != "close":
             raise CleanupError("feature-dir 只支持 intent=close", code="invalid-intent")
     plan = _new_base(repo, intent, subject)
@@ -783,7 +789,7 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
                 patch_base = base.stdout.strip()
             plan["_patch_base"] = patch_base
         else:
-            candidate = _feature_candidate(repo, subject["feature_dir"])
+            candidate = _feature_candidate(repo, subject["feature_dir"], subject.get("round"))
             branch = candidate["integration_branch"]
             plan["branch"] = branch
             plan["target_branch"] = candidate["main_branch"]
@@ -1499,7 +1505,8 @@ def apply_operation(repo, operation_id, confirm):
             else:
                 rebuilt = make_plan(repo, feature_dir=subject["feature_dir"], intent="close",
                                     operation_id=operation_id, authorize=False,
-                                    authorized_at=auth["authorized_at"])
+                                    authorized_at=auth["authorized_at"],
+                                    round=subject.get("round"))
             if not rebuilt.get("eligible") or rebuilt["confirm"] != confirm:
                 raise StaleOperation("锁内重建计划与确认指纹不同；任何票/config/OID/ignored/dev/runtime 变化都需重新授权")
             return _run_operation(repo, operation_id, resume=False)
