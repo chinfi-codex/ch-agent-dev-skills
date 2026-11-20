@@ -624,6 +624,12 @@ class CandidateVerificationTest(unittest.TestCase):
         config = self.root / "dev/agents-config.md"
         original = config.read_bytes()
         sha = hashlib.sha256(original).hexdigest()
+        v3_path = self.feature / "impl/issue-001/ticket-context.json"
+        v3 = json.loads(v3_path.read_text())
+        v3["schema"] = "agent-dev.ticket-context/v3"
+        v3["architecture_updates"] = []
+        v3["gate2_context_digest"] = tc.context_digest(v3)
+        v3_path.write_text(json.dumps(v3))
         contexts = {p: p.read_bytes() for p in self.feature.glob("impl/*/ticket-context.json")}
         tc.archive_config(self.feature, config, sha)
         config.write_text(CONFIG.replace("python3 -I tests/test_fast.py", "false"))
