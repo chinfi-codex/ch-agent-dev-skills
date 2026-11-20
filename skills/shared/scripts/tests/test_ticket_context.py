@@ -171,6 +171,91 @@ class TicketContextTest(unittest.TestCase):
         self.assertNotEqual(changed_exit["hashes"]["dod"], frozen["hashes"]["dod"])
         self.assertNotEqual(changed_exit["gate2_context_digest"], changed_context["gate2_context_digest"])
 
+    def test_candidate_versions_strict_validation_and_original_bytes(self):
+        self.assertTrue(callable(getattr(tc, "load_candidate_context", None)), "candidate reader required")
+        self.assertEqual(hashlib.sha256(tc.SCHEMA_PATH.with_name(
+            "ticket-context-v3.schema.json").read_bytes()).hexdigest(),
+            "269894d191abaaf4ec687b5a8bdc733637a3d3416244905666f53dc51330602e")
+        for version in ("v3", "v4"):
+            context = tc.create_context(self.issue, self.root)
+            context["schema"] = "agent-dev.ticket-context/" + version
+            if version == "v3":
+                context["architecture_updates"] = ["docs/architecture/core.json"]
+            context["gate2_context_digest"] = tc.context_digest(context)
+            path = self._write_context(context)
+            original = path.read_bytes()
+            self.assertEqual(tc.load_candidate_context(path), context)
+            self.assertEqual(path.read_bytes(), original)
+            if version == "v3":
+                with self.assertRaises(tc.ContextError):
+                    tc.load_context(path)
+            for field, replacement in (("schema", "agent-dev.ticket-context/v5"),
+                                       ("unknown", True), ("target_branch", "../bad"),
+                                       ("config_path", "../config.md"),
+                                       ("gate2_context_digest", "0" * 64)):
+                bad = copy.deepcopy(context)
+                bad[field] = replacement
+                if field != "gate2_context_digest":
+                    bad["gate2_context_digest"] = tc.context_digest(bad)
+                with self.subTest(version=version, field=field), self.assertRaises(tc.ContextError):
+                    tc.load_candidate_context(self._write_context(bad))
+            bad = copy.deepcopy(context)
+            bad["dod"][0]["command"] = "changed"
+            bad["gate2_context_digest"] = tc.context_digest(bad)
+            with self.assertRaisesRegex(tc.ContextError, "DoD hash"):
+                tc.load_candidate_context(self._write_context(bad))
+            if version == "v3":
+                bad = copy.deepcopy(context)
+                bad["architecture_updates"].append("other")
+                with self.assertRaisesRegex(tc.ContextError, "digest"):
+                    tc.load_candidate_context(self._write_context(bad))
+        path.write_text('{"schema": 1, "schema": 2}')
+        with self.assertRaisesRegex(tc.ContextError, "duplicate"):
+            tc.load_candidate_context(path)
+
+    def archive_cli(self, source=None, sha=None):
+        source = source or self.config
+        sha = sha or hashlib.sha256(source.read_bytes()).hexdigest()
+        return subprocess.run([sys.executable, "-I", str(SCRIPT), "archive-config",
+                               "--feature-dir", str(self.feature), "--source", str(source),
+                               "--expected-sha", sha], capture_output=True, text=True)
+
+    def test_archive_config_cli_authentication_idempotency_conflict_and_boundaries(self):
+        self.assertTrue(callable(getattr(tc, "archive_config", None)), "archive registration required")
+        sha = hashlib.sha256(self.config.read_bytes()).hexdigest()
+        original = self.config.read_bytes()
+        result = self.archive_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt, {"source_path": str(self.config.resolve()), "sha256": sha, "size": len(original)})
+        directory = self.feature / "config-snapshots"
+        snapshot = directory / (sha + ".md")
+        receipt_path = directory / (sha + ".receipt.json")
+        receipt_bytes = receipt_path.read_bytes()
+        self.assertEqual(snapshot.read_bytes(), original)
+        self.assertEqual(self.archive_cli().returncode, 0)
+        self.assertEqual(receipt_path.read_bytes(), receipt_bytes)
+        self.assertEqual(self.archive_cli(sha="0" * 64).returncode, 2)
+        invalid = self.feature / "invalid.md"
+        invalid.write_text("invalid config")
+        self.assertEqual(self.archive_cli(source=invalid).returncode, 2)
+        snapshot.write_text("conflict")
+        self.assertEqual(self.archive_cli().returncode, 2)
+        self.assertEqual(snapshot.read_text(), "conflict")
+        snapshot.unlink()
+        snapshot.symlink_to(self.config)
+        self.assertEqual(self.archive_cli().returncode, 2)
+        snapshot.unlink()
+        receipt_path.unlink()
+        receipt_path.symlink_to(self.config)
+        self.assertEqual(self.archive_cli().returncode, 2)
+        receipt_path.unlink()
+        directory.rmdir()
+        directory.symlink_to(self.root / "tests", target_is_directory=True)
+        self.assertEqual(self.archive_cli().returncode, 2)
+        self.assertFalse((self.root / "tests" / (sha + ".md")).exists())
+        self.assertEqual(self.config.read_bytes(), original)
+
     def test_v2_context_is_rejected_without_automatic_migration(self):
         context = tc.create_context(self.issue, self.root)
         context["schema"] = "agent-dev.ticket-context/v2"
