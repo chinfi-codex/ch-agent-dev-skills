@@ -557,11 +557,33 @@ def write_review_binding(host, reviewer, implementer, review, config=None):
 
 
 def _native_role(record):
-    for key in ("role", "subagent_type", "subagentType", "agent_type", "agentType", "agent"):
-        value = record.get(key)
-        if value:
-            return str(value).replace("_", "-").lower()
-    return None
+    """Resolve only documented role declarations; contradictory evidence is fatal."""
+    declarations = [(key, record[key]) for key in (
+        "role", "subagent_type", "subagentType", "agent_type", "agentType", "agent", "agentRole")
+        if key in record]
+    # Do not recursively search metadata or use a title as identity evidence.
+    container = record
+    path = []
+    for key in ("source", "subAgent", "thread_spawn"):
+        if key not in container:
+            break
+        path.append(key)
+        container = container[key]
+        if not isinstance(container, dict):
+            raise HostCapabilityError("原生角色路径必须是对象：" + ".".join(path))
+    else:
+        if "agent_role" in container:
+            declarations.append(("source.subAgent.thread_spawn.agent_role", container["agent_role"]))
+    roles = set()
+    for key, value in declarations:
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            raise HostCapabilityError("原生角色声明必须是字符串：" + key)
+        roles.add(value.replace("_", "-").lower())
+    if len(roles) > 1:
+        raise HostCapabilityError("原生角色声明冲突")
+    return next(iter(roles), None)
 
 
 def _operator_attestation(native_proof):
