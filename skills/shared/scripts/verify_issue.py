@@ -1269,7 +1269,7 @@ def _candidate_context(feature_dir: Path, root: Path, issue_id: str):
         raise VerificationError("missing ticket-context: %s" % path)
     tc = _sibling("ticket_context")
     try:
-        context = tc.load_context(path)
+        context = tc.load_candidate_context(path)
     except (ValueError, OSError) as exc:
         raise VerificationError("cannot load ticket-context %s: %s" % (path, exc))
     if str(context.get("issue_id")) != issue_id:
@@ -1285,13 +1285,16 @@ def _candidate_context(feature_dir: Path, root: Path, issue_id: str):
     if not config_path.is_file():
         raise VerificationError("ticket-context config does not exist: %s" % context["config_path"])
     config_bytes = config_path.read_bytes()
-    if hashlib.sha256(config_bytes).hexdigest() != context["hashes"]["config"]:
-        raise VerificationError("agents-config differs from frozen ticket-context for %s" % issue_id)
     ac = _sibling("agents_config")
     try:
-        config = ac.load(config_path)
+        if hashlib.sha256(config_bytes).hexdigest() != context["hashes"]["config"]:
+            config_path, config = tc.load_archived_config(feature_dir, context["hashes"]["config"])
+        else:
+            config = ac.load(config_path)
     except (ValueError, OSError) as exc:
         raise VerificationError("cannot load frozen agents-config: %s" % exc)
+    print("candidate config %s source=%s sha256=%s" %
+          (issue_id, config_path, context["hashes"]["config"]))
     return context, config
 
 

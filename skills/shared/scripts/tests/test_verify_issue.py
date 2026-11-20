@@ -602,6 +602,76 @@ class CandidateVerificationTest(unittest.TestCase):
     def aggregate(self):
         return json.loads((self.integration / "candidate-verification.json").read_text())
 
+    def test_historical_v3_candidate_preserves_bytes_and_runs_frozen_commands(self):
+        path = self.feature / "impl/issue-001/ticket-context.json"
+        value = self.contexts["issue-001"]
+        value["schema"] = "agent-dev.ticket-context/v3"
+        value["architecture_updates"] = ["docs/architecture/core.json"]
+        value["gate2_context_digest"] = tc.context_digest(value)
+        original = json.dumps(value).encode()
+        path.write_bytes(original)
+        code, out = self.call_candidate()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.aggregate()["all-passed"])
+        self.assertEqual(path.read_bytes(), original)
+        for entry in self.aggregate()["issues"]:
+            document = json.loads((self.integration / entry["verification_path"]).read_text())
+            self.assertEqual([r["id"] for r in document["records"]], ["DoD-1", "fast"])
+            self.assertTrue(all(r["started"] for r in document["records"]))
+
+    def test_candidate_uses_only_authenticated_frozen_config_snapshot(self):
+        self.assertTrue(callable(getattr(tc, "archive_config", None)), "archive registration required")
+        config = self.root / "dev/agents-config.md"
+        original = config.read_bytes()
+        sha = hashlib.sha256(original).hexdigest()
+        v3_path = self.feature / "impl/issue-001/ticket-context.json"
+        v3 = json.loads(v3_path.read_text())
+        v3["schema"] = "agent-dev.ticket-context/v3"
+        v3["architecture_updates"] = []
+        v3["gate2_context_digest"] = tc.context_digest(v3)
+        v3_path.write_text(json.dumps(v3))
+        contexts = {p: p.read_bytes() for p in self.feature.glob("impl/*/ticket-context.json")}
+        tc.archive_config(self.feature, config, sha)
+        config.write_text(CONFIG.replace("python3 -I tests/test_fast.py", "false"))
+        code, out = self.call_candidate()
+        self.assertEqual(code, 0, out)
+        snapshot = self.feature / "config-snapshots" / (sha + ".md")
+        self.assertIn("source=" + str(snapshot.resolve()), out)
+        self.assertIn("sha256=" + sha, out)
+        for entry in self.aggregate()["issues"]:
+            doc = json.loads((self.integration / entry["verification_path"]).read_text())
+            self.assertTrue(all(r["started"] and r["pass"] for r in doc["records"]))
+            self.assertEqual(doc["records"][-1]["command"], "python3 -I tests/test_fast.py")
+        self.assertEqual({p: p.read_bytes() for p in contexts}, contexts)
+        snapshot.write_text("corrupt")
+        self.assertNotEqual(self.call_candidate()[0], 0)
+        snapshot.unlink()
+        self.assertNotEqual(self.call_candidate()[0], 0)
+        snapshot.write_bytes(original)
+        receipt = snapshot.with_suffix(".receipt.json")
+        receipt.unlink()
+        self.assertNotEqual(self.call_candidate()[0], 0)
+        receipt.write_text(json.dumps({"source_path": str(config), "sha256": sha, "size": len(original)}))
+        snapshot.unlink()
+        snapshot.symlink_to(config)
+        self.assertNotEqual(self.call_candidate()[0], 0)
+        snapshot.unlink()
+        # Even an exact content hash and receipt do not waive config validity.
+        invalid = b"invalid config"
+        invalid_sha = hashlib.sha256(invalid).hexdigest()
+        bad_snapshot = snapshot.with_name(invalid_sha + ".md")
+        bad_snapshot.write_bytes(invalid)
+        bad_snapshot.with_suffix(".receipt.json").write_text(json.dumps({
+            "source_path": str(config), "sha256": invalid_sha, "size": len(invalid)}))
+        for path in contexts:
+            value = json.loads(path.read_text())
+            value["hashes"]["config"] = invalid_sha
+            value["gate2_context_digest"] = tc.context_digest(value)
+            path.write_text(json.dumps(value))
+        self.assertNotEqual(self.call_candidate()[0], 0)
+        config.unlink()
+        self.assertNotEqual(self.call_candidate()[0], 0)
+
     def test_two_tickets_really_run_at_candidate_head_and_aggregate(self):
         code, out = self.call_candidate()
         self.assertEqual(code, 0, out)
