@@ -602,6 +602,23 @@ class CandidateVerificationTest(unittest.TestCase):
     def aggregate(self):
         return json.loads((self.integration / "candidate-verification.json").read_text())
 
+    def test_historical_v3_candidate_preserves_bytes_and_runs_frozen_commands(self):
+        path = self.feature / "impl/issue-001/ticket-context.json"
+        value = self.contexts["issue-001"]
+        value["schema"] = "agent-dev.ticket-context/v3"
+        value["architecture_updates"] = ["docs/architecture/core.json"]
+        value["gate2_context_digest"] = tc.context_digest(value)
+        original = json.dumps(value).encode()
+        path.write_bytes(original)
+        code, out = self.call_candidate()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.aggregate()["all-passed"])
+        self.assertEqual(path.read_bytes(), original)
+        for entry in self.aggregate()["issues"]:
+            document = json.loads((self.integration / entry["verification_path"]).read_text())
+            self.assertEqual([r["id"] for r in document["records"]], ["DoD-1", "fast"])
+            self.assertTrue(all(r["started"] for r in document["records"]))
+
     def test_two_tickets_really_run_at_candidate_head_and_aggregate(self):
         code, out = self.call_candidate()
         self.assertEqual(code, 0, out)
