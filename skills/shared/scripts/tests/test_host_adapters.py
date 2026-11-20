@@ -84,6 +84,80 @@ class HostAdapterTest(unittest.TestCase):
         return {"host": host, "session": "review-session", "review": review,
                 "native_hash": hosts._native_digest(record, review)}
 
+    def _codex_role_binding(self, declarations, trust="host-verified", reject=False):
+        reviewer, review = self._reviewer()
+        reviewer["host"] = "codex"
+        implementer = {"session": "impl-session", "agent": "development"}
+        record = dict(declarations, id="review-session")
+        config = {"enforcement": {"review-trust": trust, "require-host-capabilities": False}}
+        proof = self._ndjson_proof("codex", record, review)
+        proof["operator_attestation"] = {
+            "operator": "operator-1", "statement": "independent review confirmed",
+            "confirmed_at": "2026-11-20T00:00:00Z"}
+
+        def call(method, params):
+            if method == "initialize":
+                return {}
+            if method == "thread/read":
+                return {"thread": dict(record)}
+            if method == "thread/name/set":
+                record["name"] = params["name"]
+                return {}
+            self.fail("unexpected native method: " + method)
+
+        with mock.patch("session_title.default_command", return_value=["controlled-native-fixture"]), \
+                mock.patch("session_title.NDJSONClient") as client:
+            client.return_value.__enter__.return_value.call.side_effect = call
+            if reject:
+                with self.assertRaises(hosts.HostCapabilityError):
+                    hosts.write_review_binding("codex", reviewer, implementer, review, config)
+                self.assertNotIn("name", record)
+                # Supply a valid binding/hash so rejection can only come from role evidence.
+                record["review"] = review
+                proof["native_hash"] = hosts._native_digest(record, review)
+                with self.assertRaises(hosts.HostCapabilityError):
+                    hosts.verify_review_session("codex", reviewer, implementer, proof, config)
+            else:
+                result = hosts.write_review_binding("codex", reviewer, implementer, review, config)
+                self.assertTrue(result["written"])
+                proof["native_hash"] = hosts._native_digest(record, review)
+                verified = hosts.verify_review_session("codex", reviewer, implementer, proof, config)
+                self.assertEqual(verified["role"], "supervisor-review")
+                self.assertEqual(verified["verification"], "host-verified")
+
+    def test_codex_native_role_fields_bind_and_verify(self):
+        nested = {"source": {"subAgent": {"thread_spawn": {"agent_role": "supervisor_review"}}}}
+        cases = [{"agentRole": "SUPERVISOR_REVIEW"}, nested,
+                 dict(nested, agentRole="supervisor-review")]
+        for field in ("role", "subagent_type", "subagentType", "agent_type", "agentType", "agent"):
+            cases.extend([{field: "supervisor_review"},
+                          dict(nested, **{field: "supervisor-review", "agentRole": "supervisor-review"})])
+        for declarations in cases:
+            with self.subTest(declarations=declarations):
+                self._codex_role_binding(declarations)
+
+    def test_codex_native_role_conflicts_and_invalid_fields_fail_closed(self):
+        nested = {"source": {"subAgent": {"thread_spawn": {"agent_role": "development"}}}}
+        cases = [{}, {"agentRole": "development"}, {"agentRole": "unknown-role"},
+                 dict(nested, agentRole="supervisor-review"),
+                 {"metadata": {"agentRole": "supervisor-review"}},
+                 {"title": "supervisor-review"}]
+        for field in ("role", "subagent_type", "subagentType", "agent_type", "agentType", "agent"):
+            cases.append({"agentRole": "supervisor-review", field: "development"})
+            for invalid in (False, 0, [], {}, 1):
+                cases.append({"agentRole": "supervisor-review", field: invalid})
+        for invalid in (False, 0, [], {}, 1):
+            cases.extend([{"role": "supervisor-review", "agentRole": invalid},
+                          {"agentRole": "supervisor-review", "source": {
+                              "subAgent": {"thread_spawn": {"agent_role": invalid}}}}])
+        for malformed in (None, [], "supervisor-review", {"subAgent": []},
+                          {"subAgent": {"thread_spawn": "supervisor-review"}}):
+            cases.append({"agentRole": "supervisor-review", "source": malformed})
+        for trust in ("host-verified", "operator-attested"):
+            for declarations in cases:
+                with self.subTest(trust=trust, declarations=declarations):
+                    self._codex_role_binding(declarations, trust, reject=True)
+
     def test_zcode_and_codex_require_real_native_review_session(self):
         for host in ("zcode", "codex"):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
