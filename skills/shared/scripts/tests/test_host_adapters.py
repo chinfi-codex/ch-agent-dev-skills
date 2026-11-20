@@ -118,7 +118,10 @@ class HostAdapterTest(unittest.TestCase):
                 with self.assertRaises(hosts.HostCapabilityError):
                     hosts.verify_review_session("codex", reviewer, implementer, proof, config)
             else:
-                result = hosts.write_review_binding("codex", reviewer, implementer, review, config)
+                try:
+                    result = hosts.write_review_binding("codex", reviewer, implementer, review, config)
+                except hosts.HostCapabilityError as exc:
+                    self.fail("valid native role declaration rejected: " + str(exc))
                 self.assertTrue(result["written"])
                 proof["native_hash"] = hosts._native_digest(record, review)
                 verified = hosts.verify_review_session("codex", reviewer, implementer, proof, config)
@@ -128,7 +131,8 @@ class HostAdapterTest(unittest.TestCase):
     def test_codex_native_role_fields_bind_and_verify(self):
         nested = {"source": {"subAgent": {"thread_spawn": {"agent_role": "supervisor_review"}}}}
         cases = [{"agentRole": "SUPERVISOR_REVIEW"}, nested,
-                 dict(nested, agentRole="supervisor-review")]
+                 dict(nested, agentRole="supervisor-review"),
+                 {"agentRole": "supervisor-review", "role": "", "agent": None}]
         for field in ("role", "subagent_type", "subagentType", "agent_type", "agentType", "agent"):
             cases.extend([{field: "supervisor_review"},
                           dict(nested, **{field: "supervisor-review", "agentRole": "supervisor-review"})])
