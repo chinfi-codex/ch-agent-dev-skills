@@ -79,10 +79,10 @@ node --test skills/shared/dsh-session-title/test_session_title_bridge.mjs
 - `GLOSSARY` -> `./docs/GLOSSARY.md`（项目级唯一术语与数据口径文件，懒创建、原地追加更新）
 - `project memo` -> `./docs/project-memos/project-memo-YYYY-MM-DD.md`
 - `决策卡` -> `./docs/decisions/decision-card-YYYY-MM-DD.md` + 同名 `.html` 可视化渲染（由 `/ceo-office` 产出；md 为源，html 为渲染，状态字段允许原地更新）
-- `feature brief` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
-- `change request` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-change-request-YYYY-MM-DD.md`
-- `PRD` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-prd-YYYY-MM-DD.md`
-- `pd-review-report` -> `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
+- `feature brief` -> `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-feature-brief-YYYY-MM-DD.md`
+- `change request` -> `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-change-request-YYYY-MM-DD.md`
+- `PRD` -> `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-prd-YYYY-MM-DD.md`
+- `pd-review-report` -> `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-pd-review-report-YYYY-MM-DD.md`
 
 命名分工：
 - `feature-module`：稳定、中文、模块级标识，按业务能力域给需求分组（如「交易链路」「性能优化」）；划分与归属由 `/pd-plan` 提议、用户最终确认后登记进 GLOSSARY「feature-module 归档」节
@@ -92,4 +92,4 @@ node --test skills/shared/dsh-session-title/test_session_title_bridge.mjs
 补充规则：
 - 同一需求的后续文档必须沿用同一个 `feature-slug`
 - 同一 `feature-slug` 下允许有多个不同的 `feature-summary`
-- 读取上游文档时，先按类型匹配，再选择最新日期版本，不依赖旧固定文件名
+- 读取上游文档优先沿当前 campaign 的显式引用；未绑定时仅在当前战役内发现并核对修订关系，不跨战役取最新

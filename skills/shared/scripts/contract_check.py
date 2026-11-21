@@ -28,6 +28,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import artifact_scope
+
 GLOSSARY_REL = Path("docs") / "GLOSSARY.md"
 RULES_REL = Path("docs") / "ARCH-CHECK.json"
 GUIDE_REL = Path("docs") / "ARCHITECTURE.md"
@@ -140,7 +142,7 @@ def check_mod1(repo: Path, results: List[Dict[str, str]]) -> None:
 
 
 def find_tech_specs(repo: Path) -> List[Path]:
-    return sorted((repo / "dev" / "features").glob("*/*/*-tech-spec-*.md"))
+    return sorted(artifact_scope.scoped_glob(repo, "*-tech-spec-*.md"))
 
 
 def _supersedes(value: Any) -> List[str]:
@@ -156,7 +158,7 @@ def check_spec1(repo: Path, results: List[Dict[str, str]]) -> None:
     if not specs:
         info(results, "SPEC-1", "无 tech-spec；supersedes 链可跳过")
         return
-    names = {spec.name for spec in specs}
+    names = {spec.resolve() for spec in specs}
     graph: Dict[str, List[str]] = {}
     for spec in specs:
         try:
@@ -165,9 +167,10 @@ def check_spec1(repo: Path, results: List[Dict[str, str]]) -> None:
             fail(results, "SPEC-1", "%s: cannot read frontmatter: %s" % (spec.name, exc))
             continue
         targets = _supersedes(frontmatter.get("supersedes"))
-        graph[spec.name] = targets
+        targets = [(repo / target if target.startswith("dev/") else spec.parent / target).resolve() for target in targets]
+        graph[spec.resolve()] = targets
         for target in targets:
-            if target == spec.name:
+            if target == spec.resolve():
                 fail(results, "SPEC-1", "%s supersedes itself" % spec.name)
             elif target not in names:
                 fail(results, "SPEC-1", "%s supersedes missing tech-spec: %s" % (spec.name, target))

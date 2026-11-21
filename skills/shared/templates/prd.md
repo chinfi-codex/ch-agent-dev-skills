@@ -26,6 +26,7 @@
 doc_type: prd
 feature_module: <feature-module>
 feature_slug: <feature-slug>
+campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 草稿        # 草稿 | 定稿 —— /pd-review 修订完成且结论非阻塞时置「定稿」；定稿后 FR 编号不复用、不重排

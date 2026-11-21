@@ -105,9 +105,23 @@ options:
 - ✗「票置 needs-human。分支 feat/订单-issue-003，证据见 impl/issue-003/」→ ✓「第 3 票（订单超时自动关闭）卡在评审：支付回调重试时可能重复关单，涉及资损口径我不敢自己拍。A 按方案第 4 节加幂等键（推荐，只动订单模块）；B 先回退重试逻辑。想细看：评审与证据在 impl/issue-003/。」
 - ✗「阻塞：feature brief 不存在」→ ✓「写 PRD 还差上游的需求方案：这个需求目录下没找到。要么先跑 /pd-plan 定方案，要么你指给我一份已有的。」
 
+## Campaign 身份与产物连接
+
+- `feature-module / feature-slug` 是稳定业务归属；`campaign-id` 是该需求下的一次独立交付，不替代或改写 feature-slug。新交付从当前入口阶段按需创建 campaign；同一战役的回修、重验、重新冻结仍属于原 campaign。
+- 先用用户给定路径、票、候选或上游引用确定 campaign；有多个候选且无法消歧才问人。已有明确任务范围时可据其摘要命名，不要求再确认目录。不同交付不得因属于同一需求而共用 campaign。
+- 产品产物根为 `docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`；开发产物根为 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`。仅到达相应阶段时创建目录/文件，不补造未经历的 PRD、票或报告。
+- 标准路径可从 brief → PRD → tech-spec → 票组 → 验收；小变更可从 change-request → tech-spec 进入。共享基线 PRD、研究与历史成果通过明确路径引用，不复制、不改其归属。
+- 每份阶段文档记录 `feature_module`、`feature_slug`、`campaign_id` 与 `upstream` 的具体路径；票用 `feature-slug`、`campaign-id`、`tech-spec`。已有引用优先于目录搜索；未绑定输入时只在当前 campaign 内按类型发现，多个版本须确定明确的修订/取代关系，同日或并行文档不能靠“最新”猜。冻结消费使用路径与哈希，不能悄悄切换上游。
+- `acceptance-plan.yaml` 是**每个 campaign 一份**的固定入口，`tech_spec` 指向本战役方案；计划 documents 用仓库相对路径 + SHA256 显式绑定来源。不得回退父需求目录、轮换占位或把其他 campaign 的票/计划纳入本次交付。
+- 所有接受 `--feature-dir` 的开发命令，新流程传当前 **campaign 开发目录**（保留参数名兼容旧工具）。`issues/impl/integration/decisions/progress.jsonl/unattended.md` 均以该目录为根；票号只需在该 campaign 内唯一。命令返回的分支和工作目录为准，不自行按票号拼路径。
+- 默认集成分支为 `feat/<module>/<feature>/<campaign>`，票分支追加 `-<issue-id>`；工作目录为 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/`。配置的 integration-branch 模板中 `<feature-slug>` 在新流程展开为上述完整 `<module>/<feature>/<campaign>` 分支键，稳定票字段不变。分支键中的空格、点和 Git 特殊符号按 UTF-8 百分号编码，中文与字母数字保留，避免有空格的模块名导致非法分支；路径以命令返回值为准。
+- `integration/[round/]` 只区分本 campaign 的候选执行轮次；评审 receipt 的 round 是评审次数。两者均不是 campaign 身份，均不得修改 feature-slug 或切换集成分支。作用域完整性、决策阻塞、授权、复盘与清理只消费当前 campaign。
+- 兼容旧产物：无 campaign 子目录的历史 feature 根仍按旧入口读写；历史 `--round` 分支约定保持。不得自动搬迁、改写冻结 context/digest、复制成新真源或把它们算成新 campaign 的票。新战役一律使用 campaign 子目录；既有在途战役继续原路径，迁移需单独建立显式映射并核对历史引用。
+- 机器字段中的 `feature_dir` / `--feature-dir` 表示交付作用域目录；candidate/receipt/progress 的 `feature` 表示可唯一寻址的作用域键 `module/feature/campaigns/campaign`（旧产物仍为 `module/feature`）。它们不是票的稳定 `feature-slug`。human-decision 保持 `scope.feature=module/feature`，新增 `scope.campaign=campaign-id`；其 CLI `--feature` 使用完整作用域键。
+
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` / `campaign-id` 贯通：
 
 ```text
 ./dev/
@@ -115,47 +129,49 @@ options:
   features/
     <feature-module>/
       <feature-slug>/
-      <feature-summary>-tech-spec-YYYY-MM-DD.md
-      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
-      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
-        <topic>-how-YYYY-MM-DD.md
-        <topic>-why-YYYY-MM-DD.md
-      issues/
-        issue-001-<短名>.md
-      impl/
-        issue-001/
-          ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
-          impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
-          raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
-            artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
-            verification-implementer.json
-            evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
-            logs/                     # 原始命令输出与哈希索引
-      mr/
-        <feature-summary>-mr-issue-001-YYYY-MM-DD.md
-      integration/                # 需求收口（feature-closeout: local-human）产物；复用旧 feature 目录的轮次写 integration/<round>/，round 名 = 票 feature-slug = 集成分支名（建议 <feature-slug>-<YYYY-MM-DD>），结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
-        acceptance-plan.json      #   冻结时的计划快照
-        feature-review.md         #   整需求独立评审报告（main_head..candidate）
-        feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
-        candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
-        evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
-        acceptance-report.md      #   合并前功能验收报告（report 生成）
-        confirmation.md           #   人确认原话 + 候选 tree
-        conformance-feature.md    #   feature 级覆盖核对
-        verify-log.md             #   候选变更与回修轨迹
-        raw/<generation>/
-          artifact-generation-manifest.json
-          <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
-          logs/  screenshots/
-      unattended.md               # 无人值守授权边界（人离场时才产生）
-      decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
-        <decision-id>.json
-      prototypes/
-        <短名>/
-          <原型文件（一次性）>
-          <短名>-verdict-YYYY-MM-DD.md
+        campaigns/
+          <campaign-id>/
+            <feature-summary>-tech-spec-YYYY-MM-DD.md
+            acceptance-plan.yaml         # 本 campaign 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+            research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+              <topic>-how-YYYY-MM-DD.md
+              <topic>-why-YYYY-MM-DD.md
+            issues/
+              issue-001-<短名>.md
+            impl/
+              issue-001/
+                ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
+                impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
+                raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
+                  artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
+                  verification-implementer.json
+                  evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
+                  logs/                     # 原始命令输出与哈希索引
+            mr/
+              <feature-summary>-mr-issue-001-YYYY-MM-DD.md
+            integration/                # 本 campaign 收口产物；可选 integration/<round>/ 为内部执行轮次，不改变 campaign 身份或分支；结构见 shared/templates/feature-closeout.md
+              candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
+              acceptance-plan.json      #   冻结时的计划快照
+              feature-review.md         #   整需求独立评审报告（main_head..candidate）
+              feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
+              candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
+              evidence.md               #   自动证据头
+              business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+              acceptance-report.md      #   合并前功能验收报告（report 生成）
+              confirmation.md           #   人确认原话 + 候选 tree
+              conformance-feature.md    #   feature 级覆盖核对
+              verify-log.md             #   候选变更与回修轨迹
+              raw/<generation>/
+                artifact-generation-manifest.json
+                <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
+                logs/  screenshots/
+            unattended.md               # 无人值守授权边界（人离场时才产生）
+            decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
+              <decision-id>.json
+            prototypes/
+              <短名>/
+                <原型文件（一次性）>
+                <短名>-verdict-YYYY-MM-DD.md
   .salvage/                       # worktree 清场抢救包（见「派发协议」清场序列）
 ```
 
@@ -164,10 +180,10 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；仅复杂、可复用或明确要求的调查独立归档，轻量证据直接进入 spec 2.1；How 按相关实现/依赖/契约及工作区差异复核，Why 按相关来源取证并保留置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（按工作目录深度计算到主工作区 dev/ 的相对目标；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
+- worktree 统一放仓库根 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<module>/<feature>/<campaign>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
@@ -200,7 +216,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `feature-closeout.mode`：
   - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
   - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
-  - `local-human`：每需求独立集成分支；票只做内环并合入集成分支（状态 `merged`）。复用旧 feature 目录（已有收口过的需求）必须换新 round：票 feature-slug、`freeze --round`、集成分支三者同名（建议 `<feature-slug>-<YYYY-MM-DD>`），`delivery start` 拒绝携带非 main 提交的集成分支。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
+  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
 - `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
 - `conformance`：只在 feature 冻结候选上执行一次，不再每票必做。主会话或独立监督会话先反向枚举需求，再打开代码按 tech-spec 全节与全部票覆盖矩阵并集逐条核对；`integration/conformance-feature.md` 必须绑定 candidate/tree、精确覆盖本轮票与 spec hash，空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。票级覆盖矩阵保留在 impl-log 供 feature 核对。
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
@@ -254,7 +270,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 6. **quality-gate**：只配置票级 `fast` 命令，从项目实际测试框架推导后请人确认。实现、自修复、评审回修与 merge / close 都只跑本票 DoD + fast，不设置票级 scoped / full 命令，也不按文件数、LOC 或风险增加票级测试范围
 7. **verify-policy**：`ticket-max-files`（默认 10）/ `ticket-max-loc`（默认 400）是拆票粒度上限；`scope: strict` 冻结所有 changed paths，越界重新确认票，不能登记放行。`deny` 列绝对禁止路径；`test-change` 列允许 TDD 与需求驱动更新的测试路径，必须有 runner 见红 / DoD 映射，票级核对后在 feature 级评审统一复核；`generated-refresh` 每条声明稳定 ID、输出 glob 和唯一生成命令，流程核对重跑生成器比较 tree。`attribution` 默认 quarantine（入册须 base 同签名、owner / 去向 / 首录日期），可选 two-sided；`gate-scope` 默认 non-gating = perf + display，外部依赖用例显式 skip。**完整套件只有 CI full**，本机与任何 worktree 不补跑；每日回归只能由同一 CI workflow schedule / dispatch 触发
 8. **host-budget**：整机测试算力预算只用于 local-human 需求收口的关联选择集与单项归因——真源是机器级 `~/.cache/agent-dev/slots/budget.json`：已存在 → 把取值镜像进 agents-config 并用大白话告诉用户当前预算，不问人；不存在 → 推荐默认 `total = ncpu - 2`、`max-runs = 2`、`queue-timeout = 1200`，确认后用 `python3 ../shared/scripts/test_slots.py budget --total ... --max-runs ... --queue-timeout ...` 写入机器级文件并镜像进配置。必须提示人：这是整机预算，同机各仓 / 各会话共享一份，改动对全部项目生效。票级 fast 与 CI full 不使用这份本机预算
-9. **feature-closeout**：默认 `server-enforced`，只有 Step 0 已在线证明服务端能力才可选，并填写 `ci: {provider, base-url, repository, workflow, artifact, token-env}`；CI API 可用但无完整分支保护时可显式选 `cooperative-ci`，报告必须注明无服务端强制；选择 `local-human` 时确认独立集成分支、验收计划、runtime 与可选 Prod 配置，`ci` 必须为 null；并向人说明复用旧 feature 目录的轮次必须换新 round（票 feature-slug、freeze --round、集成分支三者同名，建议 `<feature-slug>-<YYYY-MM-DD>`）。main / 候选前进后一律重新 freeze，没有 main-drift-ignore。选择基建只用于需求集成候选，不是票级交付门
+9. **feature-closeout**：默认 `server-enforced`，只有 Step 0 已在线证明服务端能力才可选，并填写 `ci: {provider, base-url, repository, workflow, artifact, token-env}`；CI API 可用但无完整分支保护时可显式选 `cooperative-ci`，报告必须注明无服务端强制；选择 `local-human` 时确认独立集成分支、验收计划、runtime 与可选 Prod 配置，`ci` 必须为 null；并说明每次新交付使用独立 campaign 目录与集成分支，feature-slug 保持稳定，round 只作本战役内部执行轮次；历史根目录沿用原约定。main / 候选前进后一律重新 freeze，没有 main-drift-ignore。选择基建只用于需求集成候选，不是票级交付门
 10. **enforcement**：选择评审信任 `host-verified`（宿主真实回执）或 `operator-attested`（人工另开独立对话的协作证明）；宿主无法证明时不得选前者。server-enforced 必须 require-protected-branch + require-expected-sha，其他模式不得冒称这些保证
 11. **max-fix-rounds**：默认 99，可调
 12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督、feature 独立评审与符合性核对；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及 feature 评审 BLOCKER 后的修复票。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified

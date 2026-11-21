@@ -7,10 +7,10 @@
 |---|---|
 | feature-slug | `<feature-slug>` |
 | issue | `<issue-id>` |
-| 分支 | `feat/<feature-slug>-<issue-id>` |
+| 分支 | `feat/<module>/<feature>/<campaign>-<issue-id>` |
 | ticket context | `impl/<issue-id>/ticket-context.json` |
 | 冻结 base / target | `<完整 base commit>` / `<target branch>@<完整 target commit>` |
-| worktree | `.worktrees/<issue-id>/` |
+| worktree | `.worktrees/<module>/<feature>/<campaign>/<issue-id>/` |
 | 状态 | `in-progress` / `mr-submitted` / `needs-human` |
 
 ## 做了什么

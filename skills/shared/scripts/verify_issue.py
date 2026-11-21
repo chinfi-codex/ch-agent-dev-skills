@@ -1240,6 +1240,10 @@ def _candidate_document(path: Path, data=None):
         if ident in seen:
             raise VerificationError("candidate.issues contains duplicate id %s" % ident)
         seen.add(ident)
+    scope = _sibling("artifact_scope")
+    feature_dir, _ = _candidate_location(path)
+    if scope.campaign_id(feature_dir) and value.get("feature") != scope.scope_key(feature_dir):
+        raise VerificationError("candidate belongs to another campaign directory")
     return value, plan_sha
 
 
@@ -1275,6 +1279,11 @@ def _candidate_context(feature_dir: Path, root: Path, issue_id: str):
     if str(context.get("issue_id")) != issue_id:
         raise VerificationError("ticket-context issue_id %r does not match %s" %
                                 (context.get("issue_id"), issue_id))
+    if (root / context["feature_dir"]).resolve() != feature_dir.resolve():
+        raise VerificationError("ticket-context belongs to another feature/campaign")
+    issue_path = (root / context["issue_path"]).resolve()
+    if issue_path.parent != (feature_dir / "issues").resolve():
+        raise VerificationError("ticket-context issue_path is outside this campaign")
     if not isinstance(context.get("dod"), list) or not context["dod"]:
         raise VerificationError("ticket-context %s has no frozen DoD" % issue_id)
     config_path = (root / str(context["config_path"])).resolve()

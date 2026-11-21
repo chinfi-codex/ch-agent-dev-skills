@@ -1,6 +1,6 @@
 # 需求收口产物模板（feature-closeout: local-human）
 
-功能验收计划的唯一真源是需求目录 `acceptance-plan.yaml`，结构见 `shared/templates/acceptance-plan.yaml`。其余产物写**主工作区** `./dev/features/<feature-module>/<feature-slug>/integration/[round/]`，不写集成 worktree、不提交到集成分支。`feature_closeout.py freeze` 冻结代码候选、票组、merged commit 与计划哈希；票只须 `merged` 或 `done`，不再要求每票 conformance。`check` 对候选评审、候选复跑、feature conformance、计划、实际结果、人工确认和报告逐条对账；`finalize` 在 feature-merged 后写 accepted/done 并清理。
+功能验收计划的唯一真源是当前 campaign 目录 `acceptance-plan.yaml`，结构见 `shared/templates/acceptance-plan.yaml`。其余产物写**主工作区** `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/integration/[round/]`，不写集成 worktree、不提交到集成分支。`feature_closeout.py freeze` 冻结代码候选、票组、merged commit 与计划哈希；票只须 `merged` 或 `done`，不再要求每票 conformance。`check` 对候选评审、候选复跑、feature conformance、计划、实际结果、人工确认和报告逐条对账；`finalize` 在 feature-merged 后写 accepted/done 并清理。
 
 ## 0. 候选级门（freeze 之后、report 之前各做一次）
 

@@ -37,6 +37,8 @@ allowed-tools:
 
 {{COMPLETION_STATUS}}
 
+{{CAMPAIGN_CONTEXT}}
+
 {{DOC_WRITING_RULES}}
 
 # /issue
@@ -75,9 +77,9 @@ allowed-tools:
 默认读取顺序：
 
 1. 最新 `project memo`
-2. 对应 `feature-slug` 的最新 `feature brief`
-3. 对应 `feature-slug` 的最新 `PRD`
-4. 对应 `feature-slug` 的最新 `pd-review-report`
+2. 当前 campaign 明确引用的 `feature brief`
+3. 当前 campaign 明确引用的 `PRD`
+4. 当前 campaign 明确引用的 `pd-review-report`
 5. 当前变更相关的 issue、反馈、数据观察、用户投诉、设计稿或截图
 
 如果无法定位唯一 `feature-slug`，不得擅自新建需求目录。应返回：

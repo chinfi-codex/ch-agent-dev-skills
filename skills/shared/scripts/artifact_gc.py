@@ -121,7 +121,10 @@ def discover_generations(root):
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
         dirnames[:] = [name for name in dirnames
                        if name not in (".git", ".salvage", ".staging")
-                       and not (Path(directory) / name).is_symlink()]
+                       and not (Path(directory) / name).is_symlink()
+                       and not (Path(directory) == root and name == "campaigns"
+                                and root.parent.parent.name == "features"
+                                and root.parent.parent.parent.name == "dev")]
         if MANIFEST_NAME not in filenames:
             continue
         path = Path(directory) / MANIFEST_NAME

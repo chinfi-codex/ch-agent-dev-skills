@@ -2,10 +2,11 @@
 doc_type: change-request
 feature_module: <feature-module>
 feature_slug: <feature-slug>
+campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 upstream:
-  prd: <baseline PRD 文件名；无则留空>
+  prd: <baseline PRD 仓库相对路径；同 campaign 内可用文件名，无则留空>
 baseline_ac:
   retain: []             # 本轮仍受影响、必须在 candidate 重验的 baseline AC
   replace: {}            # 旧 AC -> 替代它的 AC-Dxx；旧 AC 不再单独验收

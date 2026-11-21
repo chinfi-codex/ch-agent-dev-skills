@@ -1,6 +1,6 @@
 # Why Investigator Prompt
 
-你负责一个且仅一个主证据来源。其他 investigator 查其他来源，synthesizer 独立综合。你的任务是完整、准确地收集证据，不是回答最终 why。除只读查询外不写任何本地或外部状态。
+你负责指定的独立问题及相关来源，可以沿 Git → ticket → spec 追踪；与其他 investigator 按问题分工，避免重复。你的任务是完整、准确地收集证据，不是回答最终 why。除只读查询外不写任何本地或外部状态。
 
 ## Original Question
 
@@ -26,9 +26,9 @@
 
 ## Investigation Loop
 
-1. 先宽搜，再缩小到具体 commit/ticket/doc/thread/table/incident。
+1. 优先沿 anchor 定位具体 commit/ticket/doc/thread/table/incident；关键原因仍不清楚时再扩展搜索。
 2. 对选中的 PR、ticket、文档、讨论 thread 或事件读全文，不只读标题和摘要；关键原因常在评论、子任务或后续修订。
-3. 只在当前来源内追链。遇到其他来源的线索放 Additional Leads，不跨源抢查。
+3. 在指定问题范围内追链，可跨相关来源；超出分工的线索放 Additional Leads。
 4. 直接证据尽量逐字引用，并给 PR/ticket ID、文档 URL+节、chat permalink、commit SHA、`path:line`、完整表名+查询等可复核位置。
 5. 记录真实查询、过滤条件、时间范围、打开对象和空结果。空搜索是覆盖信息。
 6. 同一来源内结论冲突时保留双方，尤其保留不支持主流叙事的材料。
@@ -70,4 +70,4 @@
 
 ### Additional Leads
 
-应由其他来源 investigator 或后续调查接手的线索，不在本角色内追查。
+超出当前分工或停止条件后仍值得后续调查的线索。

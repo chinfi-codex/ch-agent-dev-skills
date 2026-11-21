@@ -52,10 +52,12 @@ from typing import Any, Dict, List, Optional, Tuple
 # Python versions; scripts in this directory intentionally form one package-less
 # standard-library contract layer.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 
 import agents_config
 import json_schema
 from state_store import atomic_json_write
+from process_check import InputError as PlanInputError
 
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "ticket-context.schema.json"
@@ -65,6 +67,13 @@ _OID = re.compile(r"^[0-9a-f]{40}$")
 
 class ContextError(ValueError):
     """A ticket, Git identity, path, or frozen context is invalid."""
+
+
+def _validate_scope(directory, frontmatter):
+    try:
+        artifact_scope.validate_ticket(directory, frontmatter)
+    except ValueError as exc:
+        raise ContextError(str(exc)) from exc
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -195,11 +204,17 @@ def target_branch(config: Dict[str, Any], frontmatter: Dict[str, Any],
                 use_integration = False
         if use_integration:
             pattern = str(closeout.get("integration-branch") or "feat/<feature-slug>")
+            if (feature_dir is not None and artifact_scope.campaign_id(feature_dir)
+                    and "<feature-slug>" not in pattern):
+                raise ContextError("campaign integration-branch must contain <feature-slug> for isolation")
             slug = str(frontmatter.get("feature-slug") or "").strip()
             if not slug and feature_dir is not None:
                 slug = Path(feature_dir).resolve().name
             if "<feature-slug>" in pattern and not slug:
                 raise ContextError("local-human target requires feature-slug or feature_dir")
+            if feature_dir is not None:
+                _validate_scope(feature_dir, frontmatter)
+                slug = artifact_scope.branch_key(feature_dir, slug)
             branch = pattern.replace("<feature-slug>", slug)
         else:
             branch = str(config.get("main-branch") or "").strip()
@@ -290,6 +305,8 @@ def _find_spec(frontmatter: Dict[str, Any], text: str, root: Path,
     else:
         candidate = feature_dir / relative
     resolved, _ = _inside(root, candidate, "tech-spec")
+    if artifact_scope.campaign_id(feature_dir) and resolved.parent != feature_dir.resolve():
+        raise ContextError("campaign ticket must reference its own campaign tech-spec")
     return resolved
 
 
@@ -379,6 +396,7 @@ def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, prima
     except (agents_config.ConfigError, OSError) as exc:
         raise ContextError("invalid agents config: %s" % exc)
     feature_dir = issue.parent.parent
+    _validate_scope(feature_dir, frontmatter)
     feature_relative = feature_dir.resolve().relative_to(primary).as_posix()
     spec = _find_spec(frontmatter, issue_text, primary, feature_dir)
     spec_relative = spec.relative_to(primary).as_posix()
@@ -515,6 +533,7 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         try:
             parsed = parse_issue(candidate)
             fm = parsed["frontmatter"]
+            _validate_scope(feature, fm)
             ident = str(fm.get("issue-id") or "")
             if not re.fullmatch(r"issue-[0-9]+[a-z]?", ident):
                 raise ContextError("%s has invalid/missing issue-id" % candidate.name)
@@ -603,7 +622,7 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         plan_spec_name = str(plan.get("tech_spec") or "")
         if plan_spec_name != spec.name:
             errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
-    except (ImportError, ValueError, OSError, TypeError) as exc:
+    except (ImportError, ValueError, OSError, TypeError, PlanInputError) as exc:
         errors.append("acceptance plan validation failed: %s" % exc)
     summary = [{"issue_id": ident, "status": all_statuses.get(ident),
                 "blocked_by": dependencies.get(ident, []), "declared_scope": scopes.get(ident, [])}

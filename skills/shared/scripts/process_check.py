@@ -940,7 +940,7 @@ def _load_receipt(rep, impl_dir, issue, repo):
 def _check_human_decisions(rep, root, context, issue_id):
     try:
         module = _sibling("human_decision")
-        feature = "/".join(Path(context["feature_dir"]).parts[-2:])
+        feature = _sibling("artifact_scope").scope_key(root / context["feature_dir"])
         active = module.active_for_issue(root, feature, issue_id)
         if active:
             rep.add("human-decision", "FAIL", "active human decision package blocks close")

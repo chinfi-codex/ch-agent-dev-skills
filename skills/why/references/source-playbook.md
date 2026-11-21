@@ -1,6 +1,6 @@
 # Why Source Playbooks
 
-每个 investigator 只读取并使用自己主来源对应的 playbook。示例工具名不是强制接口；先检查真实 MCP schema，适配同类别来源。
+按当前未决问题读取相关来源的 playbook；同一调查者可沿关联线索跨来源追踪。示例工具名不是强制接口；先检查真实 MCP schema，适配同类别来源。
 
 | Category | Playbook | Typical sources |
 | --- | --- | --- |
@@ -12,4 +12,4 @@
 | Error / exception tracking | `sources/sentry.md` | Sentry、Rollbar、Bugsnag |
 | Product analytics warehouse | `sources/databricks.md` | Databricks、Snowflake、BigQuery、ClickHouse |
 
-防御性目标额外读取 `sources/incident-postmortem.md`，但仍只在自己的来源内查 incident 线索。
+有事故线索或风险需要时读取 `sources/incident-postmortem.md`，按分配的范围追查相关记录。

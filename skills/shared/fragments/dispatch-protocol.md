@@ -47,10 +47,10 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 
 ```bash
 # 默认只预检，返回 operation_id 与 confirm
-python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <issue-id>
+python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <本战役票的完整路径>
 
 # 只有预检内容与真实授权一致才执行
-python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <issue-id> \
+python3 ../shared/scripts/progress.py close-and-clean --repo <主工作区> --issue <本战役票的完整路径> \
   --apply --operation-id <预检ID> --confirm <完整指纹>
 
 # 每轮监督先只读对账；只恢复已有授权 journal 或已证明 merged 的残留

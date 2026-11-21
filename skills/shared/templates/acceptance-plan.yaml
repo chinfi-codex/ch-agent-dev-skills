@@ -1,4 +1,4 @@
-# 功能验收计划唯一真源。技术方案 §5.1 只放本文件的可读摘要，不另维护第二份分工。
+# 每个 campaign 的功能验收计划唯一真源。技术方案 §5.1 只放本文件的可读摘要，不另维护第二份分工。
 # cases 使用 AC 编号为键，便于 freeze / check 确定性对账；steps / evidence 使用内联列表。
 #
 # 完整测试 case 契约：
@@ -14,11 +14,11 @@ schema: agent-dev.feature-acceptance/v2
 tech_spec: <tech-spec 文件名>
 documents:
   prd:
-    path: docs/features/<feature-module>/<feature-slug>/<PRD 文件名>
+    path: docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<PRD 文件名>
     sha256: <PRD 文件的 64 位 SHA256>
   # 小变更路径必须登记 change_request；有 baseline PRD 时同时保留 prd。
   # change_request:
-  #   path: docs/features/<feature-module>/<feature-slug>/<change-request 文件名>
+  #   path: docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<change-request 文件名>
   #   sha256: <change-request 文件的 64 位 SHA256>
 cases:
   AC-01:

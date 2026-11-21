@@ -14,7 +14,7 @@
 
 {EXPLORER_FINDINGS_ALL}
 
-Simple 模式没有 explorer 输入：你自己沿窄问题读取必要代码并完成同一输出契约。
+此提示词用于需要综合或独立核查的调查；轻量问题由主会话直接回答，无须加载。没有 explorer 输入时只核查指定关键链路。
 
 ## Synthesis Contract
 
@@ -57,4 +57,4 @@ Simple 模式没有 explorer 输入：你自己沿窄问题读取必要代码并
 
 ### Files Read / Coverage
 
-汇总 explorer 与自己实际读取的文件、各角度覆盖和失败角色；重复路径合并。
+汇总关键已读文件、必要角度与限制；不要求记录无关阅读过程。

@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 from state_store import FileLock, atomic_json_write as _shared_atomic_json_write
 
 try:
@@ -182,29 +183,31 @@ def normalize_binding(repo, target=None, feature=None, issue=None, role=None, wo
         target_path.relative_to(repo)
         parts = target_path.relative_to(repo).parts
         if len(parts) >= 4 and parts[:2] == ("docs", "features"):
-            feature = clean_relative(target_path.relative_to(repo))
+            feature = clean_relative(Path("docs/features") / Path(*parts[2:6] if len(parts) >= 6 and parts[4] == "campaigns" else parts[2:4]))
         elif len(parts) >= 5 and parts[:2] == ("dev", "features"):
             if "issues" in parts:
                 issue = clean_relative(target_path.relative_to(repo))
             else:
-                feature = clean_relative(Path("docs/features") / Path(*parts[2:4]))
+                feature = clean_relative(Path("docs/features") / Path(*parts[2:6] if len(parts) >= 6 and parts[4] == "campaigns" else parts[2:4]))
         else:
             raise SessionTitleError("绑定目标必须位于 docs/features 或 dev/features 下")
     if issue:
         issue_path = (repo / issue).resolve()
         issue_path.relative_to(repo)
         parts = issue_path.relative_to(repo).parts
-        if len(parts) < 6 or parts[:2] != ("dev", "features") or parts[-2] != "issues":
+        if (len(parts) not in (6, 8) or parts[:2] != ("dev", "features") or parts[-2] != "issues"
+                or (len(parts) == 8 and parts[4] != "campaigns")):
             raise SessionTitleError("issue 绑定必须是 dev/features/<module>/<slug>/issues/<票>.md")
-        feature = clean_relative(Path("docs/features") / Path(*parts[2:4]))
+        feature = clean_relative(Path("docs/features") / Path(*parts[2:6] if len(parts) >= 6 and parts[4] == "campaigns" else parts[2:4]))
         issue = clean_relative(issue_path.relative_to(repo))
     if not feature:
         raise SessionTitleError("缺少 feature 或 issue 绑定")
     feature_path = (repo / feature).resolve()
     feature_path.relative_to(repo)
     parts = feature_path.relative_to(repo).parts
-    if len(parts) != 4 or parts[:2] != ("docs", "features"):
+    if len(parts) not in (4, 6) or parts[:2] != ("docs", "features") or (len(parts) == 6 and parts[4] != "campaigns"):
         raise SessionTitleError("feature 绑定必须是 docs/features/<module>/<slug>")
+    artifact_scope.validate_key("/".join(parts[2:]))
     result = {
         "repo": str(repo),
         "repo_root": str(repo),
@@ -489,7 +492,12 @@ def infer_handoff_binding(event, repo):
     if not roots.is_dir():
         return None
     candidates = []
-    for slug_dir in roots.glob("*/" + slug):
+    campaign_match = re.search(r"campaign-id\s*(?:=|：|:)\s*[`'\"]?([^`'\"\s，,；;]+)", prompt)
+    for slug_dir in artifact_scope.scopes(repo):
+        if artifact_scope.feature_root(slug_dir).name != slug:
+            continue
+        if campaign_match and artifact_scope.campaign_id(slug_dir) != campaign_match.group(1):
+            continue
         if not slug_dir.is_dir():
             continue
         for path in slug_dir.glob("issues/{}-*.md".format(issue_id)):
@@ -517,7 +525,7 @@ def infer_binding(event, repo):
     if match:
         issue_id = match.group(1)
     if issue_id:
-        for path in (repo / "dev" / "features").glob("*/*/issues/{}-*.md".format(issue_id)) if (repo / "dev" / "features").is_dir() else []:
+        for path in artifact_scope.scoped_glob(repo, "issues/{}-*.md".format(issue_id)) if (repo / "dev" / "features").is_dir() else []:
             try:
                 candidates.append(normalize_binding(repo, target=str(path), role=role or "implementation"))
             except SessionTitleError:

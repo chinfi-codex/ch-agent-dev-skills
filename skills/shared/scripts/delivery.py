@@ -34,6 +34,7 @@ from types import SimpleNamespace
 
 # Package-less sibling contract modules must remain available under ``-I``.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 
 SCHEMA = "agent-dev.delivery-result/v2"
 OPERATION_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "delivery-operation.schema.json"
@@ -196,7 +197,7 @@ def _source_branch(context: dict, issue: Path) -> str:
     slug = str(fm.get("feature-slug") or Path(context["feature_dir"]).name).strip()
     if not slug or "/" in slug or slug.startswith("."):
         raise DeliveryError("feature-slug is required to derive the ticket source branch")
-    return "feat/%s-%s" % (slug, context["issue_id"])
+    return "feat/%s-%s" % (artifact_scope.branch_key(issue.parent.parent, slug), context["issue_id"])
 
 
 def _worktrees(root: Path):
@@ -275,8 +276,9 @@ def start(issue_path, repo) -> dict:
         if target != expected_target:
             raise DeliveryError("local-human ticket target must be the feature integration branch: %s != %s" % (
                 target, expected_target))
-    branch = "feat/%s-%s" % (str(fm.get("feature-slug") or feature_dir.name), issue_id)
-    worktree = root / ".worktrees" / issue_id
+    artifact_scope.validate_ticket(feature_dir, fm)
+    branch = "feat/%s-%s" % (artifact_scope.branch_key(feature_dir, str(fm.get("feature-slug") or feature_dir.name)), issue_id)
+    worktree = artifact_scope.worktree_path(root, feature_dir, issue_id)
     output = root / context_relative(fm, issue, root) / "impl" / issue_id / "ticket-context.json"
     branch_exists = _git(root, "rev-parse", "--verify", "-q", "refs/heads/" + branch, check=False).returncode == 0
     status = str(fm.get("status") or "")
@@ -331,7 +333,7 @@ def start(issue_path, repo) -> dict:
         raise DeliveryError("ticket worktree contains a real dev entry; refusing to replace it")
     if not dev.is_symlink():
         try:
-            os.symlink("../../dev", dev)
+            os.symlink(os.path.relpath(root / "dev", worktree), dev)
         except OSError as exc:
             raise DeliveryError("cannot create required dev symlink to main dev: %s" % exc) from exc
     if dev.resolve() != (root / "dev").resolve():
@@ -765,7 +767,7 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
         merge_commit = (steps.get("merge", {}).get("observed") or {}).get("merge_commit")
         result = {"schema": SCHEMA, "operation": "reconcile", "operation_id": journal.operation_id,
                   "state": "completed", "replayed": True, "status": status,
-                  "retained": {"worktree": str(root / ".worktrees" / context["issue_id"]),
+                  "retained": {"worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
                                "branch": _source_branch(context, issue)}}
         if merge_commit:
             result["merge_commit"] = merge_commit
@@ -814,7 +816,7 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
     if "cleanup" in steps and steps["cleanup"]["status"] != "done":
         cleanup_expected = dict(verify_expected, issue_id=context["issue_id"])
         journal.advance("cleanup", expected=cleanup_expected)
-        retained = {"retained": True, "worktree": str(root / ".worktrees" / context["issue_id"]),
+        retained = {"retained": True, "worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
                     "branch": _source_branch(context, issue),
                     "reason": "feature finalize owns acceptance cleanup"}
         journal.advance("cleanup", expected=cleanup_expected, observed=retained)
@@ -824,7 +826,7 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
         raise DeliveryError("ticket status after record is neither merged nor done: %r" % status)
     result = {"schema": SCHEMA, "operation": "merge", "operation_id": journal.operation_id,
               "merge_commit": merge_commit, "status": status, "state": "completed",
-              "retained": {"worktree": str(root / ".worktrees" / context["issue_id"]),
+              "retained": {"worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
                            "branch": _source_branch(context, issue)}}
     if _config(root, context).get("tracker") == "gitlab":
         mode = (_config(root, context).get("feature-closeout") or {}).get("mode")
@@ -1389,10 +1391,10 @@ def discover_operations(repo, operation_id=None) -> dict:
     """Read all ticket/rebase/feature delivery journals without side effects."""
     root = Path(repo).resolve()
     feature_root = root / "dev" / "features"
-    paths = set(feature_root.glob("*/*/impl/*/delivery-operation.json"))
-    paths.update(feature_root.glob("*/*/impl/*/rebase-operation-*.json"))
-    paths.update(feature_root.glob("*/*/integration/**/delivery-promote.json"))
-    paths.update(feature_root.glob("*/*/integration/**/delivery-promote-*.json"))
+    paths = set(artifact_scope.scoped_glob(root, "impl/*/delivery-operation.json"))
+    paths.update(artifact_scope.scoped_glob(root, "impl/*/rebase-operation-*.json"))
+    paths.update(artifact_scope.scoped_glob(root, "integration/**/delivery-promote.json"))
+    paths.update(artifact_scope.scoped_glob(root, "integration/**/delivery-promote-*.json"))
     operations = []
     for path in sorted(paths):
         try:

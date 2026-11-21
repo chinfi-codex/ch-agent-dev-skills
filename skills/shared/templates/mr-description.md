@@ -4,7 +4,7 @@
 |---|---|
 | feature-slug | `<feature-slug>` |
 | issue | `<issue-id>`（tracker 模式附 IID / URL） |
-| 源分支 | `feat/<feature-slug>-<issue-id>` → `<ticket-context.target_branch>` |
+| 源分支 | `feat/<module>/<feature>/<campaign>-<issue-id>` → `<ticket-context.target_branch>` |
 | 状态 | ready（票级内环通过，由主会话合入集成分支） |
 
 ## 变更摘要

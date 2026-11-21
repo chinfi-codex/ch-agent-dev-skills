@@ -208,7 +208,8 @@ window.__ModuleLoader__.load({
       if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + ' MB'
       return (n / 1024 ** 3).toFixed(2) + ' GB'
     }
-    const nodeKey = (n) => n.kind + ':' + (n.slug || n.key || n.name)
+    const nodeKey = (n) => n.kind + ':' + (n.key || n.slug || n.name)
+    const featureLabel = (f) => f.campaign ? `${f.slug} · ${f.campaign}` : f.slug
     const depthOf = (n) => Math.round(n.prefix.length / 3)
     const hasKids = (list, i) => i + 1 < list.length && depthOf(list[i + 1]) > depthOf(list[i])
     const canCleanup = (n) => (n.kind === 'ticket' || (n.kind === 'branch' && n.resolved_key)) && !n.protected && n.cleanup_eligible !== false
@@ -316,7 +317,7 @@ window.__ModuleLoader__.load({
         lines.push('评审对话进行中')
       }
       const drill = () => {
-        const text = `读 ${n.repo || '当前仓库'} 里 ${n.id} 的 impl-log、评审报告与票文件，用大白话讲这张票现在到哪一步、有没有卡住、下一步是什么`
+        const text = `读 ${n.repo || '当前仓库'} 里 ${n.issue_path || `dev/features/${n.feature}/issues/${n.key}.md`} 对应的 impl-log、评审报告与票文件，用大白话讲这张票现在到哪一步、有没有卡住、下一步是什么`
         navigator.clipboard?.writeText(text).catch(() => {})
       }
       return h('div', { className: 'cpp-detail' },
@@ -639,10 +640,10 @@ window.__ModuleLoader__.load({
         const total = f.counts.total || 1
         const cls = 'sw-lane' + (f.active ? '' : ' is-ctx') + (isSel ? ' is-sel' : '') + (isRel ? ' is-rel' : '')
         return h('section', { key: f.id, className: cls, style: { height: l.height + 'px' } },
-          h('button', { className: 'sw-hit', 'aria-label': (effSelected === f.id ? '取消选择 ' : '选择需求 ') + f.slug, onClick: () => selectFeature(f.id) }),
-          h('div', { className: 'sw-labell', style: { width: scene.labelW + 'px' }, title: `${f.module}/${f.slug}` },
+          h('button', { className: 'sw-hit', 'aria-label': (effSelected === f.id ? '取消选择 ' : '选择需求 ') + featureLabel(f), onClick: () => selectFeature(f.id) }),
+          h('div', { className: 'sw-labell', style: { width: scene.labelW + 'px' }, title: f.id },
             h('div', { className: 'sw-lrow' },
-              h('span', { className: 'cpp-fname' }, f.slug),
+              h('span', { className: 'cpp-fname' }, featureLabel(f)),
               h('span', { className: 'sw-lcount' }, `${f.counts.done || 0}/${f.counts.total}`)),
             h('div', { className: 'sw-lmeta' }, `${f.module} · ${f.active ? '开发中' : (FSTATE_LABEL[f.fstate] || '依赖上下文')}`),
             h('div', { className: 'sw-prog', 'aria-label': `已完结 ${f.counts.done || 0}，在制 ${activeN}，共 ${f.counts.total} 票` },
@@ -653,7 +654,7 @@ window.__ModuleLoader__.load({
               isSel
                 ? h('span', null, '全部高亮')
                 : h('button', {
-                    className: 'sw-expand', 'aria-label': (l.expanded ? '收起 ' : '展开 ') + f.slug,
+                    className: 'sw-expand', 'aria-label': (l.expanded ? '收起 ' : '展开 ') + featureLabel(f),
                     onClick: (ev) => {
                       ev.stopPropagation()
                       setExtra((m) => { const nx = new Set(m); if (nx.has(f.id)) nx.delete(f.id); else nx.add(f.id); return nx })
@@ -696,8 +697,8 @@ window.__ModuleLoader__.load({
         }).length
         const drill = () => {
           const text = selIss
-            ? `读 ${repo} 里 ${selIss.id} 的 impl-log、评审报告与票文件，用大白话讲这张票现在到哪一步、有没有卡住、下一步是什么`
-            : `读 ${repo} 里需求「${f.slug}」的全部在制票 impl-log 与票文件，讲各票进度与卡点`
+            ? `读 ${repo} 里 ${selIss.issue_path} 对应的 impl-log、评审报告与票文件，用大白话讲这张票现在到哪一步、有没有卡住、下一步是什么`
+            : `读 ${repo} 里dev/features/${f.id}/ 下本次交付的全部在制票 impl-log 与票文件，讲各票进度与卡点`
           navigator.clipboard?.writeText(text).catch(() => {})
         }
         const acts = []
@@ -708,7 +709,7 @@ window.__ModuleLoader__.load({
             title: '按开发收尾规则预检；是否可执行以预检为准' }, '清理'))
         }
         detail = [
-          h('div', { key: 't', className: 'cpp-dtitle' }, selIss ? `${selIss.id} · ${selIss.title}` : `${f.slug} · 已选择整个需求`),
+          h('div', { key: 't', className: 'cpp-dtitle' }, selIss ? `${selIss.id} · ${selIss.title}` : `${featureLabel(f)} · 已选择整个交付`),
           h('div', { key: 's', className: 'cpp-dline' }, selIss
             ? `${selIss.feature} · ${SW_STATUS[selIss.status] || selIss.status}`
             : `${f.module} · 本需求全部 issue 已展开并高亮`),

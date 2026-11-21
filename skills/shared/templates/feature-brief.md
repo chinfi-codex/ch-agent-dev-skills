@@ -39,6 +39,7 @@
 doc_type: feature-brief
 feature_module: <feature-module>
 feature_slug: <feature-slug>
+campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 待写PRD      # 待写PRD | 待验证 | 不进入 —— 与「衔接建议」一致；/prd 以 status = 待写PRD 为开工门禁

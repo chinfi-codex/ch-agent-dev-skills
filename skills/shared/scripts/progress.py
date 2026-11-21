@@ -30,6 +30,7 @@ from pathlib import Path
 
 # Isolated Python (-I) must still resolve the standard-library sibling layer.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 JOURNAL_NAME = "progress.jsonl"
 STALL_DEFAULT_MIN = 30
 GIT_WORKERS = 8
@@ -156,14 +157,8 @@ def find_features(repo):
     root = Path(repo) / "dev" / "features"
     if not root.is_dir():
         return []
-    out = []
-    for module_dir in sorted(root.iterdir()):
-        if not module_dir.is_dir():
-            continue
-        for slug_dir in sorted(module_dir.iterdir()):
-            if (slug_dir / "issues").is_dir():
-                out.append(slug_dir)
-    return out
+    return [directory for directory in artifact_scope.scopes(repo)
+            if (directory / "issues").is_dir()]
 
 
 # ---------- 事件流折叠 ----------
@@ -177,7 +172,7 @@ def last_event(events, issue, *names):
 
 def decision_projection(repo, feature_dir, issue_id, status):
     """Project the sole active human-decision packet, never a needs-human note."""
-    feature = f"{Path(feature_dir).parent.name}/{Path(feature_dir).name}"
+    feature = artifact_scope.scope_key(feature_dir)
     if status != "needs-human" and not (Path(feature_dir) / "decisions").is_dir():
         return {"decision": None, "contract_error": None, "human_note": ""}
     if status == "needs-human" and not (Path(feature_dir) / "decisions").is_dir():
@@ -342,12 +337,12 @@ def load_issues(repo, feature_dir, events, wt_index=None):
         title = fm.get("title") or (f.stem[m.end():].lstrip("-_") if m else f.stem)
         it = {
             "id": iid,
-            "key": f.stem,
+            "key": artifact_scope.scope_key(feature_dir) + "/" + f.stem if artifact_scope.campaign_id(feature_dir) else f.stem,
             "issue_path": str(f),
             "title": title,
             "status": st,
             "closed_as": closed_as,
-            "feature": f"{feature_dir.parent.name}/{feature_dir.name}",
+            "feature": artifact_scope.scope_key(feature_dir),
             "blocked_by": fm.get("blocked-by") or [],
             "verify_fails": fm.get("verify-fails", 0) or 0,
             "fm": fm,
@@ -366,7 +361,9 @@ def load_issues(repo, feature_dir, events, wt_index=None):
             ents = (wt_index or {}).get(it["id"], ())
             # 票号撞号消歧：优先本 feature（模块/slug）名出现在分支名或路径里的 worktree
             pref = [e for e in ents
-                    if feature_dir.parent.name in e["hint"] or feature_dir.name in e["hint"]]
+                    if ((artifact_scope.branch_key(feature_dir) + "-" + it["id"]) in e["hint"]
+                        if artifact_scope.campaign_id(feature_dir) else
+                        feature_dir.parent.name in e["hint"] or feature_dir.name in e["hint"])]
             it["probe"] = probe_issue(repo, feature_dir, it["id"], pref or ents)
         projection = decision_projection(repo, feature_dir, it["id"], it["status"])
         it.update(projection)
@@ -522,7 +519,7 @@ def render_project(name, repo, stall_min, now):
                    "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(s, "other")
             cf[key] += 1
             c[key] += 1
-        slug = f"{feat.parent.name}/{feat.name}"
+        slug = artifact_scope.scope_key(feat)
         lines = []
         for it in sorted(issues, key=lambda x: (STATUS_ORDER.index(x["status"]) if x["status"] in STATUS_ORDER else 99, x["id"])):
             if it["status"] == "done":
@@ -716,6 +713,10 @@ def resolve_ticket(tix_multi, iid, hint):
     cands = tix_multi.get(iid) or []
     if len(cands) <= 1:
         return cands[0] if cands else None
+    if any("/campaigns/" in c["feature"] for c in cands):
+        matches = [c for c in cands if (artifact_scope.branch_key(Path("dev/features") / c["feature"]) + "-" + iid) in hint
+                   or (c["feature"] + "/issues/" + iid) in hint]
+        return matches[0] if len(matches) == 1 else None
     for c in cands:
         if c["feature"].split("/")[0] in hint or c["feature"].split("/")[-1] in hint:
             return c
@@ -966,7 +967,7 @@ def replay_command(args):
                 shown.append(ev)
             if not shown:
                 continue
-            slug = f"{feat.parent.name}/{feat.name}"
+            slug = artifact_scope.scope_key(feat)
             span = ""
             if shown[0]["_ts"] and shown[-1]["_ts"]:
                 a = datetime.fromtimestamp(shown[0]["_ts"]).strftime("%m-%d %H:%M")
@@ -1292,7 +1293,7 @@ def build_tree_payload(repo, stall_min, now=None):
         for it in issues:
             tix_multi.setdefault(it["id"], []).append(it)
         features.append((feat, events, issues))
-    all_slugs = [feat.name for feat, _, _ in features]
+    all_slugs = [(artifact_scope.scope_key(feat) if artifact_scope.campaign_id(feat) else feat.name) for feat, _, _ in features]
     bindings = load_session_bindings(repo)
 
     mb = branches.pop(main, None)
@@ -1304,7 +1305,7 @@ def build_tree_payload(repo, stall_min, now=None):
              "resolved_key": it["key"] if it else None, "status": it["status"] if it else None,
              "ahead": b["ahead"], "behind": b["behind"], "dirty": b["dirty"], "ts": b["ts"],
              "worktree": bool(b["worktree"]), "worktree_path": b["worktree"],
-             "feature": (it["feature"].split("/")[-1] if it else None) or (next((s for s in all_slugs if s in name), None))}
+             "feature": (it["feature"] if it and "/campaigns/" in it["feature"] else it["feature"].split("/")[-1] if it else None) or (next((s for s in all_slugs if (artifact_scope.branch_key(Path("dev/features") / s) if "/campaigns/" in s else s) in name), None))}
         if name.startswith(("backup/", "codex/preserve")):
             r["hint"] = "residue"
             r["protected"] = True
@@ -1350,7 +1351,7 @@ def build_tree_payload(repo, stall_min, now=None):
 
     fnodes = []
     for feat, events, issues in features:
-        slug = feat.name
+        slug = artifact_scope.scope_key(feat) if artifact_scope.campaign_id(feat) else feat.name
         inflight = [it for it in issues if it["status"] in CANON_S]
         fbrs = [r for r in brows if r["feature"] == slug]
         if not inflight and not fbrs:
@@ -1388,7 +1389,7 @@ def build_tree_payload(repo, stall_min, now=None):
                  "mr-submitted": "mr", "needs-human": "human", "confirmed": "ready"}.get(it["status"])
             if k:
                 counts[k] += 1
-        agents = sorted({b["host"] for b in bindings if not b["paused"] and b["feature"].split("/")[-1] == slug})
+        agents = sorted({b["host"] for b in bindings if not b["paused"] and (b["feature"] if artifact_scope.campaign_id(feat) else b["feature"].split("/")[-1]) == slug})
         # 需求态与「开发中」视图同一判定：无在制票即非开发中，呈现时须弱化并标明原因
         retired = sum(1 for it in issues if it.get("closed_as"))
         if inflight:
@@ -1403,7 +1404,7 @@ def build_tree_payload(repo, stall_min, now=None):
         def ticket_node(it, r):
             p = (it.get("probe") or {})
             return {"kind": "ticket", "id": it["id"], "key": it["key"], "title": it["title"][:44],
-                    "feature": it["feature"],
+                    "feature": it["feature"], "issue_path": it["issue_path"],
                     "status": it["status"], "age_ts": p.get("ts"), "round": (p.get("round") or "")[:56],
                     "verify_fails": it["verify_fails"], "review_rounds": it.get("review_rounds", 0),
                     "human_note": it.get("human_note", ""), "decision": it.get("decision"),
@@ -1553,7 +1554,7 @@ def build_swim_payload(repo, now=None, sessions=None):
         sessions = load_session_bindings(repo)
     meta, tix_multi = [], {}
     for feat in find_features(repo):
-        feature_id = f"{feat.parent.name}/{feat.name}"
+        feature_id = artifact_scope.scope_key(feat)
         events = load_events(feat)
         rows = load_issues(repo, feat, events, {})  # 空 wt_index：泳道不做 worktree 探针，零额外 git 开销
         meta.append((feature_id, feat, events, rows))
@@ -1663,7 +1664,7 @@ def build_swim_payload(repo, now=None, sessions=None):
             fstate = "ready"
         else:
             fstate = "done"
-        features_out.append({"id": feature_id, "module": feat.parent.name, "slug": feat.name,
+        features_out.append({"id": feature_id, "module": artifact_scope.feature_root(feat).parent.name, "slug": artifact_scope.feature_root(feat).name, "campaign": artifact_scope.campaign_id(feat),
                              "active": active, "fstate": fstate,
                              "counts": counts, "agents": feature_agents, "issues": fissues})
 
@@ -1878,7 +1879,7 @@ def find_ticket(repo, issue, key=None):
     matches = []
     for feat in find_features(repo):
         for item in load_issues(repo, feat, load_events(feat), {}):
-            if item["id"] != issue and item["key"] != issue:
+            if item["id"] != issue and item["key"] != issue and str(Path(item["issue_path"]).resolve()) != str((Path(repo) / issue).resolve()):
                 continue
             if key and item["key"] != key:
                 continue
@@ -1906,7 +1907,7 @@ def cleanup_plan(repo, branch=None, issue=None, feature_dir=None, intent="close"
         candidates = []
         for feat in find_features(repo):
             for item in load_issues(repo, feat, load_events(feat), {}):
-                if item["id"] in branch and any(part in branch for part in item["feature"].split("/")):
+                if pc._branch_matches(dict(item, feature_dir=str(feat)), branch):
                     value = dict(item)
                     value["feature_dir"] = str(feat)
                     candidates.append(value)

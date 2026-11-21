@@ -1,11 +1,11 @@
 ---
 name: how
-version: 0.1.0
+version: 0.2.0
 description: |
   Explain how a subsystem, mechanism, or code path actually works. Use before
-  changing ownership, layering, public contracts, or unfamiliar code. Complex
-  questions use 2-4 parallel explorers and one independent explainer; use /why
-  for historical motivation rather than runtime mechanics.
+  changing ownership, layering, public contracts, or unfamiliar code. Start with
+  focused inline investigation; scale depth to risk. Use /why for historical
+  motivation rather than runtime mechanics.
 allowed-tools:
   - Read
   - Write
@@ -17,57 +17,39 @@ allowed-tools:
 
 {{COMPLETION_STATUS}}
 
+{{CAMPAIGN_CONTEXT}}
+
 # /how
 
 你负责回答“**X 现在如何工作**”，建立足以安全修改系统的运行时心智模型。你不回答“为什么当初这样设计”；动机、阈值来源和取舍交给 `/why`。
 
 ## 不可破坏的边界
 
-- 除调用方明确要求的 `dev/features/<feature-module>/<feature-slug>/research/` 调查报告外，不写任何文件，不改代码、票、配置、架构规则或外部状态。
+- 除调用方明确要求的 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/research/`（尚未进入具体交付的调查可用需求根的 `research/`，后续显式引用） 调查报告外，不写任何文件，不改代码、票、配置、架构规则或外部状态。
 - 事实必须来自实际读取的代码和文档，逐条给 `path:symbol` 或 `path:line`；推断和未追踪完整的部分单独标注。
 - 范围含糊时先声明自己的解释并继续，不因可消歧的小问题阻塞；用户可随时纠正范围。
 - 不复制 pstack 的模型 slug。默认继承当前宿主模型；调用方显式指定的模型被宿主拒绝时，回退继承并披露。若宿主提供实时模型列表，可在同一模型族内选最接近的有效项；无法确认时该角色记 gap，不跨宿主套模型、不静默换族。
 
-## Step 1：判断复杂度
+## Step 1：按问题与风险选择深度
 
-- **Simple**：单模块、小工具、窄函数或窄问题。不启动 explorer；启动一个 explainer，在同一 pass 内读代码并解释。使用 `references/explainer-prompt.md`，去掉 explorer-findings 输入，直接进入 Step 4。
-- **Complex**：跨文件/服务、横切特性、子系统或完整架构概览。进入 Step 2。
-- 难以判断时走 Simple，避免把窄问题扩大成昂贵调查。
+- **轻量（默认）**：窄问题、局部修改或证据明确。主会话直接查相关实现、调用点和测试，输出结论、引用与未知项；不启动子代理，不要求完整章节。
+- **标准**：跨模块行为且存在关键未知。围绕问题选择入口/数据流、状态/失败路径等必要角度；可自行调查，也可委派互不重复的角度。仅跨文件不构成升级理由。
+- **深度**：公共契约、数据迁移、并发共享状态等高风险调整，重大证据冲突，或用户明确要求全面调查。先确定影响决策的问题；有可独立调查的角度时并行探索，并对关键结论安排独立核查。
+- 难以判断时从轻量开始，遇到影响结论的缺口再升级，不预先扩大范围。
 
-## Step 2：Complex 并行探索
+## Step 2：追踪必要链路
 
-1. 把问题拆成 **2–4 个互不重复的调查角度**，例如入口与调用链、状态与数据流、边界与失败路径、实现归属与测试。每个角度必须是一个独立 slice，不是让多人重复读同一份代码。
-2. 在同一轮并行启动全部 explorer。Claude Code 使用 `Task(subagent_type=general-purpose, readonly=true)`；其他宿主映射为自身只读子代理原语，不支持的参数省略但保持只读语义。
-3. 每个 explorer 的提示词必须完整包含 `references/explorer-prompt.md`、原始问题、自己的角度和仓库根；不得只看主会话摘要。
-4. explorer 只读，不写报告文件；结果返回主会话。一个 explorer 失败时记录其角度和缺口，不把其他角度的结果冒充全覆盖。
+从真实入口沿调用、数据转换和状态变化追踪，覆盖与问题相关的主路径、失败路径、边界及测试。关键事实给代码位置；未闭合链路、实现与测试冲突明确记录。
 
-宿主没有子代理能力时，由主会话按同一角度逐个执行角色，并在报告中披露“顺序降级”；不得跳过角度或把单次泛读称为并行探索。
+需要委派时读取 `references/explorer-prompt.md`，传入原始问题、范围、仓库根和分工；代理只读。数量由独立问题决定，不固定人数。需要独立核查或综合时读取 `references/explainer-prompt.md`，提供原始结果与证据，重点核查冲突和承重链路，不重复全量搜索。无子代理能力时主会话完成必要调查，说明缺少独立核查的限制，不模拟多角色走流程。
 
-## Step 3：独立综合
+主会话可直接综合或重写表达，但必须保留证据、矛盾和未知项，不得提高未经核实的结论置信度。
 
-全部 explorer 返回后，启动一个 explainer，输入：
+## Step 3：停止、呈现与归档
 
-- `references/explainer-prompt.md`；
-- 原始问题与范围解释；
-- 每一份 explorer 原始结果，包括空结果、冲突和 open questions。
-
-explainer 必须只读核查冲突和关键缺口，合并重叠描述，不任选一方、不重新做一遍无差别搜索。主会话不代替 explainer 综合。
-
-## Step 4：呈现与可选持久化
-
-呈现 explainer 的结果，只允许轻度澄清和补充当前对话上下文，**不做实质性重写**。章节按适用性保留：
-
-```text
-Overview
-Key Concepts
-How It Works
-Where Things Live
-Gotchas
-Open Questions
-```
-
-- `How It Works` 是最长部分，写清触发点、函数级步骤、数据/控制流、决策点和失败路径。
-- 多组件或数据变换有助于理解时画 Mermaid；简单关系用 ASCII；纯装饰图不画。宿主无图形能力时 Mermaid 源码本身就是兜底。
-- 所有 explorer 的 Files Read 汇总为覆盖清单；未读取、未追踪、角色失败和范围假设进入 Open Questions，不能消失。
-- 调用方提供 feature-module/slug 或明确要求落盘时，按 `shared/templates/how-report.md` 写入 `dev/features/<feature-module>/<feature-slug>/research/<topic>-how-YYYY-MM-DD.md`。报告保留 explainer 正文和覆盖信息；否则只返回对话结果。
-- 供 `/tech-spec` 使用时，末尾增加 `Design Facts / Constraints / Unknowns` 三栏，只抽取已有证据，不在这里选择新架构。
+- 影响本次决策的关键问题已有证据、相关冲突已处理、剩余未知及其影响已说明时停止。影响安全修改的关键缺口仍须补查或明确限制；不为凑章节穷举文件与调用。
+- 轻量输出用结论、关键流程/引用、未知项即可。较大调查可按需使用 Overview / Key Concepts / How It Works / Where Things Live / Gotchas / Open Questions；图只在帮助理解时使用。
+- 覆盖信息列实际读取的关键文件、调查范围与限制，不逐文件记录无关阅读过程。
+- 默认只返回对话结果；供 `/tech-spec` 使用时可直接提供现状事实、约束和未知，纳入 spec 2.1。仅提供 feature-module/slug 不自动触发独立报告。
+- 调用方明确要求归档（包括 tech-spec 为复杂或可复用调查选择归档）时，按 `shared/templates/how-report.md` 写入 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/research/<topic>-how-YYYY-MM-DD.md`，章节按需保留。
+- 归档记录 source HEAD、相关文件/符号及工作区未提交差异。复用按同一问题与范围、相关实现/依赖/契约是否变化判断；HEAD 不同不自动失效，HEAD 相同也须检查未提交变化。只补查受变化影响的链路，保留复核依据。

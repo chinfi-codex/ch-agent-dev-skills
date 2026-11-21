@@ -44,7 +44,7 @@ allowed-tools:
 
 产出 design / spec / doc 后：总结「若获批将实现什么」但不实现 → 明确请求批准 → 停止等待。未获批准，不得写任何源码、测试、脚手架、配置变更。
 
-本 skill 的文档产物有两个额外例外：允许写当前需求目录 `./dev/features/*/*/acceptance-plan.yaml`，以及执行只读设计校验 `python3 ../shared/scripts/arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 和 `render check`。前者是结构化功能验收计划，后者只校验规则与指南结构；其他源码、测试与配置限制不变。
+本 skill 的文档产物有两个额外例外：允许写当前需求目录 `./dev/features/*/*/campaigns/*/acceptance-plan.yaml`（历史在途 feature 根入口仍兼容），以及执行只读设计校验 `python3 ../shared/scripts/arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 和 `render check`。前者是结构化功能验收计划，后者只校验规则与指南结构；其他源码、测试与配置限制不变。
 
 ## 术语与数据口径（GLOSSARY）
 
@@ -196,9 +196,23 @@ options:
 - ✗「票置 needs-human。分支 feat/订单-issue-003，证据见 impl/issue-003/」→ ✓「第 3 票（订单超时自动关闭）卡在评审：支付回调重试时可能重复关单，涉及资损口径我不敢自己拍。A 按方案第 4 节加幂等键（推荐，只动订单模块）；B 先回退重试逻辑。想细看：评审与证据在 impl/issue-003/。」
 - ✗「阻塞：feature brief 不存在」→ ✓「写 PRD 还差上游的需求方案：这个需求目录下没找到。要么先跑 /pd-plan 定方案，要么你指给我一份已有的。」
 
+## Campaign 身份与产物连接
+
+- `feature-module / feature-slug` 是稳定业务归属；`campaign-id` 是该需求下的一次独立交付，不替代或改写 feature-slug。新交付从当前入口阶段按需创建 campaign；同一战役的回修、重验、重新冻结仍属于原 campaign。
+- 先用用户给定路径、票、候选或上游引用确定 campaign；有多个候选且无法消歧才问人。已有明确任务范围时可据其摘要命名，不要求再确认目录。不同交付不得因属于同一需求而共用 campaign。
+- 产品产物根为 `docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`；开发产物根为 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`。仅到达相应阶段时创建目录/文件，不补造未经历的 PRD、票或报告。
+- 标准路径可从 brief → PRD → tech-spec → 票组 → 验收；小变更可从 change-request → tech-spec 进入。共享基线 PRD、研究与历史成果通过明确路径引用，不复制、不改其归属。
+- 每份阶段文档记录 `feature_module`、`feature_slug`、`campaign_id` 与 `upstream` 的具体路径；票用 `feature-slug`、`campaign-id`、`tech-spec`。已有引用优先于目录搜索；未绑定输入时只在当前 campaign 内按类型发现，多个版本须确定明确的修订/取代关系，同日或并行文档不能靠“最新”猜。冻结消费使用路径与哈希，不能悄悄切换上游。
+- `acceptance-plan.yaml` 是**每个 campaign 一份**的固定入口，`tech_spec` 指向本战役方案；计划 documents 用仓库相对路径 + SHA256 显式绑定来源。不得回退父需求目录、轮换占位或把其他 campaign 的票/计划纳入本次交付。
+- 所有接受 `--feature-dir` 的开发命令，新流程传当前 **campaign 开发目录**（保留参数名兼容旧工具）。`issues/impl/integration/decisions/progress.jsonl/unattended.md` 均以该目录为根；票号只需在该 campaign 内唯一。命令返回的分支和工作目录为准，不自行按票号拼路径。
+- 默认集成分支为 `feat/<module>/<feature>/<campaign>`，票分支追加 `-<issue-id>`；工作目录为 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/`。配置的 integration-branch 模板中 `<feature-slug>` 在新流程展开为上述完整 `<module>/<feature>/<campaign>` 分支键，稳定票字段不变。分支键中的空格、点和 Git 特殊符号按 UTF-8 百分号编码，中文与字母数字保留，避免有空格的模块名导致非法分支；路径以命令返回值为准。
+- `integration/[round/]` 只区分本 campaign 的候选执行轮次；评审 receipt 的 round 是评审次数。两者均不是 campaign 身份，均不得修改 feature-slug 或切换集成分支。作用域完整性、决策阻塞、授权、复盘与清理只消费当前 campaign。
+- 兼容旧产物：无 campaign 子目录的历史 feature 根仍按旧入口读写；历史 `--round` 分支约定保持。不得自动搬迁、改写冻结 context/digest、复制成新真源或把它们算成新 campaign 的票。新战役一律使用 campaign 子目录；既有在途战役继续原路径，迁移需单独建立显式映射并核对历史引用。
+- 机器字段中的 `feature_dir` / `--feature-dir` 表示交付作用域目录；candidate/receipt/progress 的 `feature` 表示可唯一寻址的作用域键 `module/feature/campaigns/campaign`（旧产物仍为 `module/feature`）。它们不是票的稳定 `feature-slug`。human-decision 保持 `scope.feature=module/feature`，新增 `scope.campaign=campaign-id`；其 CLI `--feature` 使用完整作用域键。
+
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` / `campaign-id` 贯通：
 
 ```text
 ./dev/
@@ -206,47 +220,49 @@ options:
   features/
     <feature-module>/
       <feature-slug>/
-      <feature-summary>-tech-spec-YYYY-MM-DD.md
-      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
-      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
-        <topic>-how-YYYY-MM-DD.md
-        <topic>-why-YYYY-MM-DD.md
-      issues/
-        issue-001-<短名>.md
-      impl/
-        issue-001/
-          ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
-          impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
-          raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
-            artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
-            verification-implementer.json
-            evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
-            logs/                     # 原始命令输出与哈希索引
-      mr/
-        <feature-summary>-mr-issue-001-YYYY-MM-DD.md
-      integration/                # 需求收口（feature-closeout: local-human）产物；复用旧 feature 目录的轮次写 integration/<round>/，round 名 = 票 feature-slug = 集成分支名（建议 <feature-slug>-<YYYY-MM-DD>），结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
-        acceptance-plan.json      #   冻结时的计划快照
-        feature-review.md         #   整需求独立评审报告（main_head..candidate）
-        feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
-        candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
-        evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
-        acceptance-report.md      #   合并前功能验收报告（report 生成）
-        confirmation.md           #   人确认原话 + 候选 tree
-        conformance-feature.md    #   feature 级覆盖核对
-        verify-log.md             #   候选变更与回修轨迹
-        raw/<generation>/
-          artifact-generation-manifest.json
-          <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
-          logs/  screenshots/
-      unattended.md               # 无人值守授权边界（人离场时才产生）
-      decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
-        <decision-id>.json
-      prototypes/
-        <短名>/
-          <原型文件（一次性）>
-          <短名>-verdict-YYYY-MM-DD.md
+        campaigns/
+          <campaign-id>/
+            <feature-summary>-tech-spec-YYYY-MM-DD.md
+            acceptance-plan.yaml         # 本 campaign 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+            research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+              <topic>-how-YYYY-MM-DD.md
+              <topic>-why-YYYY-MM-DD.md
+            issues/
+              issue-001-<短名>.md
+            impl/
+              issue-001/
+                ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
+                impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
+                raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
+                  artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
+                  verification-implementer.json
+                  evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
+                  logs/                     # 原始命令输出与哈希索引
+            mr/
+              <feature-summary>-mr-issue-001-YYYY-MM-DD.md
+            integration/                # 本 campaign 收口产物；可选 integration/<round>/ 为内部执行轮次，不改变 campaign 身份或分支；结构见 shared/templates/feature-closeout.md
+              candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
+              acceptance-plan.json      #   冻结时的计划快照
+              feature-review.md         #   整需求独立评审报告（main_head..candidate）
+              feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
+              candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
+              evidence.md               #   自动证据头
+              business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+              acceptance-report.md      #   合并前功能验收报告（report 生成）
+              confirmation.md           #   人确认原话 + 候选 tree
+              conformance-feature.md    #   feature 级覆盖核对
+              verify-log.md             #   候选变更与回修轨迹
+              raw/<generation>/
+                artifact-generation-manifest.json
+                <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
+                logs/  screenshots/
+            unattended.md               # 无人值守授权边界（人离场时才产生）
+            decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
+              <decision-id>.json
+            prototypes/
+              <短名>/
+                <原型文件（一次性）>
+                <短名>-verdict-YYYY-MM-DD.md
   .salvage/                       # worktree 清场抢救包（见「派发协议」清场序列）
 ```
 
@@ -255,10 +271,10 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；仅复杂、可复用或明确要求的调查独立归档，轻量证据直接进入 spec 2.1；How 按相关实现/依赖/契约及工作区差异复核，Why 按相关来源取证并保留置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（按工作目录深度计算到主工作区 dev/ 的相对目标；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
+- worktree 统一放仓库根 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<module>/<feature>/<campaign>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
@@ -291,7 +307,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `feature-closeout.mode`：
   - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
   - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
-  - `local-human`：每需求独立集成分支；票只做内环并合入集成分支（状态 `merged`）。复用旧 feature 目录（已有收口过的需求）必须换新 round：票 feature-slug、`freeze --round`、集成分支三者同名（建议 `<feature-slug>-<YYYY-MM-DD>`），`delivery start` 拒绝携带非 main 提交的集成分支。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
+  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
 - `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
 - `conformance`：只在 feature 冻结候选上执行一次，不再每票必做。主会话或独立监督会话先反向枚举需求，再打开代码按 tech-spec 全节与全部票覆盖矩阵并集逐条核对；`integration/conformance-feature.md` 必须绑定 candidate/tree、精确覆盖本轮票与 spec hash，空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。票级覆盖矩阵保留在 impl-log 供 feature 核对。
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
@@ -314,6 +330,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - 架构契约的唯一机器真源是 `docs/ARCH-CHECK.json`；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览 + 规则附录，禁止手改。
 - 编码前先读 `docs/ARCHITECTURE.md`：1–10 节的系统结构、组件、存储、集成、部署、安全、测试与演进，以及附录 A–E 的分层、组、依赖、放置和阈值。AI 的上下文里没有这些事实就不会遵守。
 - `init` 只生成空规则与 11 节骨架；首次出现架构影响时由 `/tech-spec` 3.2 按代码与 How/Why 证据补全总览基线，不能留空跳过。后续技术方案只更新受影响节，不重写无关节。
+- 补全 `overview.structure` 时必须按真实目录展开到 2–3 层子目录与关键文件；只列顶层目录视为未完成，生成时用目录清单核对，不凭记忆。
 - **票级不设架构门**：`delivery.start`、`ticket_context.check_plan`、`process_check --phase ticket` 都不做架构检查。架构检查只在 feature candidate 的 `freeze / check` 强制运行；本地 pre-push hook 只做提前预警，权威门仍是 candidate。
 - 规则变更（新增、删除、放宽、改阈值）必须写进 tech-spec 3.2 和承接票 `declared-scope`，并重新 `render write`；ai-review 把“删除 / 放宽规则”当作高风险项审查。
 - 总览与规则冲突时以代码事实修正总览、以 tech-spec 讨论规则；不得为了绕过错误而改总览或放宽规则。
@@ -351,12 +368,12 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
-- 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
-- 标准路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；3.2 架构影响须与之对齐）→ 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
+- 先判定需求输入路径：当前 campaign 明确绑定 change-request 为输入时走**小变更路径**；否则走**标准路径**
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；3.2 架构影响须与之对齐）→ 当前 campaign 显式绑定的 PRD → 该 PRD 对应的 pd-review-report → 显式引用的 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或该 PRD `status` ≠ `定稿`，或该 PRD 对应的 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
 - 存量文档缺 frontmatter：先从正文对应字段（PRD「文档信息」/ 报告「交付结论」）誊抄补全表头——只加 frontmatter 不动正文，再执行门禁判定；正文与誊抄值冲突时报用户裁决
 - 补读 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（如有）：按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛出命中规则，作为「已知坑」进入约束与假设清单或失败路径检查；规则与本次方案证据冲突时以方案证据为准，冲突点记入待确认项
-- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（同上）→ 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
-- 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
+- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（同上）→ 当前 campaign 显式绑定的 change-request → 显式引用的基线 PRD（如存在）→ 显式引用的 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
+- 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
 ---
@@ -370,13 +387,13 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 ### Step 1：How 现状建模 + Why 历史约束
 
-先完成调查，再设计方案。调查不能由“读过几个文件”或主会话即兴摘要替代。
+先建立足够支撑本次方案的现状与约束证据，默认轻量；调查深度随风险和关键未知升级。
 
-1. **How 默认必做**：对每个受影响子系统调用 `/how`，形成组件、函数级主/失败流程、数据与控制流、边界、共享状态、文件覆盖和开放问题。真正 greenfield 且没有周边系统时才可豁免，并在 2.1 写明理由。只列文件名、只读 `ARCHITECTURE.md` 或只引用 agent 自述都不算 How。
-2. **Why 按承重问题触发**：改变 ownership / layering / 公共契约、删除或替代既有实现、处理防御性代码、采用数值阈值，或 How 留下 `why-lead` 时，必须调用 `/why`。它从共同 code anchor 出发，覆盖 Git、ticket、长文档、chat、infra、error、analytics 七类来源，保留空结果和不可用来源，按 Direct / Supported / Inferred / Speculative / Unknown 分级。
-3. 两份调查写入 `research/` 并作为 dated spec 的上游证据。How 复用要求同一问题、范围和 source HEAD；代码已变化就重查。Why 可复用同一 target/question 的历史报告，但必须核 Sources Consulted 和新增证据，覆盖不足就补查。
-4. 把 Why 的 **Preserve / Change / Avoid / Risk** 转成设计输入：Direct/Supported 可形成约束；Inferred 只能形成待验证假设；Speculative/Unknown 进入待确认或 Risk，不能写成既定事实。用户问题中的假设同样接受证据核验。
-5. 既有约定（AGENTS.md / CLAUDE.md / REVIEW.md）、`ARCHITECTURE.md` / `ARCH-CHECK.json` 和代码事实仍需自己查证，逐条带代码位置；能从代码和历史查到的**不问用户**。只有实验和历史无法回答的产品/偏好决策才进入提问。
+1. **现状查证必做，完整 `/how` 按需**：主会话已读取的相关实现、调用点、测试和边界可直接作为证据写入 2.1；不要求逐子系统另开调查。跨模块且存在关键未知时用标准调查；高风险契约、迁移、共享状态或重大冲突时用深度调查。仅跨文件不构成升级理由。greenfield 说明实际存在的周边约束即可。
+2. **`/why` 按决策相关性触发**：历史原因尚不清楚，且答案可能改变本次方案或回归风险判断时调查。ownership / layering / 公共契约、防御代码、旧实现替换、阈值与 why-lead 是风险线索，不自动触发完整历史调查。直接证据已解释原因时可内联记录；必要未知沿 Git 和关联文档扩查，不机械覆盖七类来源。
+3. **research 按需归档与增量复用**：轻量调查直接写入 spec 2.1；复杂、需跨任务复用或用户要求的调查才写 `research/`，不强制成对产出 How/Why。How 记录 source HEAD、相关文件/符号和未提交差异；复用检查相关实现、依赖与契约，仅补查变化链路。无关 HEAD 变化不使报告失效，相同 HEAD 也不替代工作区检查。Why 复用同一 target/question，检查相关新增证据、反证与约束时效。
+4. **证据纪律保留**：按需把 Why 的 Preserve / Change / Avoid / Risk 转成设计输入。Direct/Supported 经当前适用性核验可形成约束；Inferred 只作待验证假设；Speculative/Unknown 进入风险，不把代码行为当历史动机。采纳的事实、引用和约束进入正式 spec，issue/implement 仍以冻结 spec 为契约。
+5. **停止条件**：影响本次决策的关键问题已有证据、相关冲突已处理、剩余未知及影响已说明，就进入设计。阻碍安全设计的缺口继续补查或明确限制；不为来源数量、代理数量或章节完整性扩查。AGENTS.md / CLAUDE.md / REVIEW.md、架构规则和相关代码事实仍需查证；可自行查明的事实不问用户，只有无法从证据裁决的产品/偏好决策才提问。
 
 ### Step 2：候选方案设计与综合
 
@@ -412,9 +429,9 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 ### Step 4：共识确认与产出
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
-2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
+2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
 3. 若 3.2 声明层 / 组 / 规则变更，运行 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 做只读校验；层 / 组 / 规则的写入由承接票在 `/implement` 阶段完成。不得直接手改 `docs/ARCHITECTURE.md`。
-4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
+4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。`overview.structure` 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成；补全时用目录清单核对。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
 5. 本轮确定的新术语立即回写 GLOSSARY
 6. 架构影响落 3.2：按模板写 `层 / 组 | 动作(new|modify|retire) | 路径 / 规则 ID | 说明 | 验证方式`，并写“架构总览基线”行（首次补全 / 更新哪些节 / 不适用理由）。涉及 `docs/ARCH-CHECK.json` 的层 / 组 / 规则变更时，明确由哪张承接票更新规则并 `render write`；该票 `declared-scope` 必须包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`。不新建 `docs/architecture` 图谱，也不写 `architecture-updates`。
 

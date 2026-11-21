@@ -1,5 +1,6 @@
 ---
 feature-slug: <feature-slug>
+campaign-id: <campaign-id>
 issue-id: issue-001
 title: <一句话标题，动词开头>
 type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5

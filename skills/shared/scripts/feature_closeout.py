@@ -28,6 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 from process_check import (  # noqa: E402  共享解析与 git 辅助，不另写第二份
     InputError, Report, git, parse_yaml_subset, read_first_yaml_block, read_frontmatter,
     md_section, _table_rows, _evidence_pointer_problem, _placeholder,
@@ -208,7 +209,11 @@ def validate_plan_sources(feature_dir: Path, plan: dict) -> list:
         return [str(exc)]
     documents = plan.get("documents") or {}
     cases = plan.get("cases") or {}
-    docs_root = (repo / "docs" / "features" / feature_dir.parent.name / feature_dir.name).resolve()
+    if artifact_scope.campaign_id(feature_dir):
+        spec = str(plan.get("tech_spec") or "")
+        if not spec or Path(spec).name != spec or not (feature_dir / spec).is_file():
+            errors.append("campaign plan must name an existing tech-spec in its own directory")
+    docs_root = (repo / "docs" / "features" / artifact_scope.feature_key(feature_dir)).resolve()
     resolved = {}
     for alias, item in documents.items():
         try:
@@ -243,6 +248,11 @@ def validate_plan_sources(feature_dir: Path, plan: dict) -> list:
                 errors.append("change-request 声明 upstream.prd，但 documents.prd 未登记")
             if "prd" in resolved and (not upstream_prd or Path(upstream_prd).name != resolved["prd"].name):
                 errors.append("change-request upstream.prd 与 documents.prd.path 不一致")
+            if artifact_scope.campaign_id(feature_dir) and "prd" in resolved and upstream_prd:
+                declared_prd = (repo / upstream_prd if upstream_prd.startswith("docs/")
+                                else change_path.parent / upstream_prd).resolve()
+                if declared_prd != resolved["prd"]:
+                    errors.append("campaign change-request upstream.prd must bind the exact documents.prd.path")
             baseline = frontmatter.get("baseline_ac") or {}
             if not isinstance(baseline, dict) or any(key not in baseline for key in ("retain", "replace", "retire")):
                 errors.append("baseline_ac.retain/replace/retire 必须全部显式声明")
@@ -408,7 +418,7 @@ def _active_decision_records(feature_dir: Path, issue_id=None):
         hd = None
     if hd is not None:
         try:
-            feature = f"{feature_dir.parent.name}/{feature_dir.name}"
+            feature = artifact_scope.scope_key(feature_dir)
             root = repo_root_of(feature_dir)
             if issue_id is not None and hasattr(hd, "active_for_issue"):
                 value = hd.active_for_issue(root, feature, issue_id)
@@ -430,7 +440,7 @@ def _active_decision_records(feature_dir: Path, issue_id=None):
                     break
         except (ValueError, OSError) as exc:
             raise InputError(f"人工决策状态不可可靠读取，fail closed：{exc}")
-    for path in sorted(feature_dir.rglob("*.json")):
+    for path in sorted((feature_dir / "decisions").glob("*.json")):
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -442,8 +452,8 @@ def _active_decision_records(feature_dir: Path, issue_id=None):
             if item.get("status") not in ("pending", "waiting", "answered", "routing", "expired"):
                 continue
             scope = item.get("scope") or {}
-            feature = f"{feature_dir.parent.name}/{feature_dir.name}"
-            if scope.get("feature") not in (None, feature):
+            feature = artifact_scope.scope_key(feature_dir)
+            if scope.get("feature") is not None and artifact_scope.decision_key(scope) != feature:
                 continue
             if issue_id is not None and scope.get("issue") not in (None, issue_id):
                 continue
@@ -594,7 +604,10 @@ def freeze(args) -> Report:
     for error in plan_errors:
         rep.add("plan", "FAIL", error)
 
-    slug = args.round or fdir.name
+    if (artifact_scope.campaign_id(fdir)
+            and "<feature-slug>" not in str((cfg.get("feature-closeout") or {}).get("integration-branch") or "feat/<feature-slug>")):
+        rep.add("config", "FAIL", "campaign integration-branch must contain <feature-slug> for isolation")
+    slug = artifact_scope.branch_key(fdir) if artifact_scope.campaign_id(fdir) else (args.round or fdir.name)
     requested = None
     if args.issues is not None:
         tokens = [item.strip() for item in str(args.issues).split(",")]
@@ -647,7 +660,11 @@ def freeze(args) -> Report:
             continue
         merged_commit = merged.get(iid)
         ticket_slug = str(fm.get("feature-slug") or "").strip() or fdir.name
-        if ticket_slug != slug:
+        try:
+            artifact_scope.validate_ticket(fdir, fm)
+        except ValueError as exc:
+            rep.add("issues", "FAIL", f"{iid}: {exc}")
+        if not artifact_scope.campaign_id(fdir) and ticket_slug != slug:
             in_main = False
             if isinstance(merged_commit, str) and re.fullmatch(r"[0-9a-f]{40}", merged_commit):
                 try:
@@ -691,7 +708,7 @@ def freeze(args) -> Report:
     old = load_json(integ / "candidate.json")
     digest = sha256_file(plan_source(fdir))
     cand = {
-        "schema": CANDIDATE_SCHEMA, "feature": f"{fdir.parent.name}/{fdir.name}", "round": args.round,
+        "schema": CANDIDATE_SCHEMA, "feature": artifact_scope.scope_key(fdir), "round": args.round,
         "mode": mode, "integration_branch": branch, "candidate_ref": "refs/heads/" + branch,
         "main_branch": main, "main_head": main_head, "merge_base": merge_base,
         "candidate": head, "candidate_tree": tree, "frozen_at": datetime.now(timezone.utc).isoformat(),
@@ -1493,6 +1510,11 @@ def check(args) -> Report:
         _strict_datetime(cand.get("frozen_at"), "candidate.frozen_at")
     except InputError as exc:
         rep.add("candidate", "FAIL", str(exc))
+    if artifact_scope.campaign_id(fdir):
+        if cand.get("feature") != artifact_scope.scope_key(fdir):
+            rep.add("candidate", "FAIL", "candidate belongs to another campaign")
+        if cand.get("integration_branch") != integration_branch(cfg, artifact_scope.branch_key(fdir)):
+            rep.add("candidate", "FAIL", "candidate integration branch differs from campaign")
     tree = cand.get("candidate_tree")
     head, head_tree = head_info(repo)
     if head != cand.get("candidate") or head_tree != tree:
@@ -1746,8 +1768,8 @@ def _ticket_identity(fdir: Path, issue: Path, iid: str) -> dict:
     fm = read_frontmatter(issue)
     return {
         "id": iid, "key": issue.stem, "title": str(fm.get("title") or iid), "status": "done",
-        "feature": f"{fdir.parent.name}/{fdir.name}", "feature_dir": str(fdir.resolve()),
-        "issue_path": str(issue.resolve()),
+        "feature": artifact_scope.scope_key(fdir), "feature_dir": str(fdir.resolve()),
+        "issue_path": str(issue.resolve()), "fm": fm,
     }
 
 
@@ -1755,7 +1777,7 @@ def _cleanup_ticket(rep: Report, repo: Path, fdir: Path, iid: str, issue: Path):
     try:
         pc = importlib.import_module("progress_cleanup")
         progress = importlib.import_module("progress")
-        ticket = progress.find_ticket(repo, iid) or _ticket_identity(fdir, issue, iid)
+        ticket = progress.find_ticket(repo, str(issue.resolve())) or _ticket_identity(fdir, issue, iid)
         resources = pc.discover_resources(repo)
         branch = next((name for name in resources["local_branches"]
                        if pc._branch_matches(ticket, name)), None)
@@ -2068,12 +2090,12 @@ def main(argv=None) -> int:
     pt = sub.add_parser("target", help="打印票的目标分支")
     pt.add_argument("--issue", required=True, help="主工作区内的票文件路径")
     pv = sub.add_parser("validate-plan", help="校验功能验收计划")
-    pv.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
+    pv.add_argument("--feature-dir", required=True, help="主工作区 campaign 目录 dev/features/<module>/<feature>/campaigns/<campaign-id>；兼容历史 feature 根")
     pv.add_argument("--json", help="结果 JSON 写入路径")
     for name in ("freeze", "check", "report", "run-ac"):
         p = sub.add_parser(name)
-        p.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
-        p.add_argument("--round", help="同一 feature 目录下的一轮需求名：产物写 integration/<round>/，集成分支按 <round> 代入；建议 <feature-slug>-<YYYY-MM-DD>，本轮票 feature-slug 须与其一致")
+        p.add_argument("--feature-dir", required=True, help="主工作区 campaign 目录 dev/features/<module>/<feature>/campaigns/<campaign-id>；兼容历史 feature 根")
+        p.add_argument("--round", help="campaign 内的执行轮次，写 integration/<round>/，不改变分支；历史 feature 根保留旧 round 分支规则")
         p.add_argument("--repo", required=True, help="集成 worktree")
         if name == "freeze":
             p.add_argument("--issues", help="--round 时本轮票清单，逗号分隔（如 issue-031,issue-039）")
@@ -2087,7 +2109,7 @@ def main(argv=None) -> int:
             p.add_argument("--ac", required=True, help="冻结计划中的 command AC 编号")
             p.add_argument("--timeout", type=float, default=120.0)
     pf = sub.add_parser("finalize", help="feature-merged 后转 done 并清理票/feature 资源")
-    pf.add_argument("--feature-dir", required=True, help="主工作区 dev/features/<feature-module>/<feature-slug>")
+    pf.add_argument("--feature-dir", required=True, help="主工作区 campaign 目录 dev/features/<module>/<feature>/campaigns/<campaign-id>；兼容历史 feature 根")
     pf.add_argument("--round", help="同一 feature 目录下的一轮需求名")
     pf.add_argument("--repo", required=True, help="主工作区")
     pf.add_argument("--no-cleanup", action="store_true", dest="no_cleanup",

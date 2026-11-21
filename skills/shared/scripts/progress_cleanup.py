@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_scope
 from state_store import (FileLock, LockError, OperationJournal, StateError,
                          append_event_once, atomic_json_write, atomic_write)
 
@@ -478,13 +479,15 @@ def _expected_branch(ticket):
     explicit = str((ticket.get("fm") or {}).get("branch") or "").strip()
     if explicit:
         return explicit
-    return "feat/%s-%s" % (Path(ticket["feature_dir"]).name, ticket["id"])
+    return "feat/%s-%s" % (artifact_scope.branch_key(ticket["feature_dir"], (ticket.get("fm") or {}).get("feature-slug")), ticket["id"])
 
 
 def _branch_matches(ticket, name):
     if name == _expected_branch(ticket):
         return True
     if ticket["id"] not in name:
+        return False
+    if artifact_scope.campaign_id(ticket["feature_dir"]):
         return False
     module, slug = ticket["feature"].split("/", 1)
     return slug in name or module in name
@@ -643,7 +646,7 @@ def _feature_candidate(repo, feature_dir, round_name=None):
     candidate["main_head"] = main_before
     # Another feature sharing this integration branch is a shared requirement;
     # candidate validity for one feature never authorizes deleting the other's line.
-    for other in (Path(repo) / "dev" / "features").glob("*/*/integration/**/candidate.json"):
+    for other in artifact_scope.scoped_glob(repo, "integration/**/candidate.json"):
         try:
             if other.resolve() == path.resolve():
                 continue
@@ -716,7 +719,7 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
         feature_path = Path(feature_dir).resolve()
         subject = {"kind": "feature", "id": feature_path.name, "key": feature_path.name,
                    "title": feature_path.name, "status": "feature",
-                   "feature": "%s/%s" % (feature_path.parent.name, feature_path.name),
+                   "feature": artifact_scope.scope_key(feature_path),
                    "feature_dir": str(feature_path), "issue_path": None,
                    "round": str(round).strip() if round else None}
         if intent != "close":

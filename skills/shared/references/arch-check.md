@@ -95,7 +95,7 @@
 
 | 节 | 字段 | 内容 |
 | --- | --- | --- |
-| 1 项目结构 | `overview.structure` | 仓库目录树与各目录职责，纯文本 |
+| 1 项目结构 | `overview.structure` | 仓库目录树（展开到 2–3 层子目录与关键文件）与各目录职责，纯文本 |
 | 2 高层系统图 | `overview.diagram` | Mermaid 源，`flowchart` / `graph` 等 |
 | 3 核心组件 | `overview.components[]` | `name` / `description` / `technologies` / `deployment` |
 | 4 数据存储 | `overview.data_stores[]` | `name` / `type` / `purpose` / `keys` |
@@ -108,7 +108,7 @@
 | 11 术语与缩写 | — | 固定指向 `docs/GLOSSARY.md`，不复制 |
 | 不适用说明 | `overview.notes.<节名>` | 该节无对应对象时写“不适用”及理由，替代“未登记”占位 |
 
-`notes` 的键与节字段同名：`structure` / `diagram` / `components` / `data_stores` / `integrations` / `deployment` / `security` / `development` / `roadmap` / `project`。`structure` 与 `diagram` 内不得含三反引号；其余字段只写现行事实，不写候选方案、历史迁移过程或逐票实现细节。没有该类对象时必须在对应 `notes` 写明理由，不得留“未登记”或删节。
+`notes` 的键与节字段同名：`structure` / `diagram` / `components` / `data_stores` / `integrations` / `deployment` / `security` / `development` / `roadmap` / `project`。`structure` 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成；补全时用目录清单核对，不凭记忆。`structure` 与 `diagram` 内不得含三反引号；其余字段只写现行事实，不写候选方案、历史迁移过程或逐票实现细节。没有该类对象时必须在对应 `notes` 写明理由，不得留“未登记”或删节。
 
 规则要求：
 

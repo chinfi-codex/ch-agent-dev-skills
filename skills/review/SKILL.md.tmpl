@@ -36,6 +36,8 @@ allowed-tools:
 
 {{COMPLETION_STATUS}}
 
+{{CAMPAIGN_CONTEXT}}
+
 {{ASK_FORMAT}}
 
 {{DOC_WRITING_RULES}}
@@ -64,7 +66,7 @@ allowed-tools:
 按顺序执行，任一项不过即停：
 
 1. 确定唯一 `feature-module`、`feature-slug`（沿用匹配规则）与本次 `feature-summary`；`NO_MATCH` 返回 `需补充上下文`
-2. 读取 `./dev/features/<feature-module>/<feature-slug>/issues/` 下全部票的 frontmatter：
+2. 读取 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/issues/` 下全部票的 frontmatter：
    - 全部 `status: done` → 继续
    - 存在未完成票 → 列出未完成票清单，状态 `阻塞`；仅当用户明确要求「部分复盘」时继续，并在报告「复盘对象」节显式标注
    - `issues/` 目录不存在 → 该 feature 未走 dev 阶段，状态 `阻塞`
@@ -76,8 +78,8 @@ allowed-tools:
 
 ### Step 1：全量读取
 
-- `./docs/features/<feature-module>/<feature-slug>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**全部版本**（版本数本身 = 返工次数，要计数）
-- `./dev/features/<feature-module>/<feature-slug>/`：最新 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
+- `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`：`feature-brief` / `prd` / `change-request` / `pd-review-report` 的**本战役全部版本**（按显式修订/取代关系统计返工，不把不同阶段、不同战役或仅日期变化计为返工）
+- `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`：本战役票明确引用的 tech-spec、`issues/` 全部票、`impl/` 全部 impl-log 与 evidence、`reviews/` 全部报告、`mr/` 全部文件、`prototypes/` 全部 verdict（如有；不可拷打问题的验证记录）
 - `./docs/EXPERIENCE.md`（需求阶段 + 开发阶段两节）与 `~/.pd-workflow/general-experience.md`（如存在；Step 4 去重、引入、晋升、退役要用）
 - 合并日期可用 `git log` 只读查询补充（如 `git log --merges --grep='<feature-slug>'`）
 - 小变更路径（只有 change-request，无 PRD / pd-review-report）：缺失阶段标「无（小变更路径）」，不阻塞
@@ -129,7 +131,7 @@ allowed-tools:
 
 ### Step 5：落盘与交付
 
-- 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
+- 复盘报告写入 `./docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-retro-YYYY-MM-DD.md`，格式见 `../shared/templates/retro-report.md`
 - 交付语言按「完成状态协议 · 对人表达」：先说复盘结论（这个需求做得顺不顺、最大的教训是什么），再说需求侧与开发侧最重要的发现各三条（每条说人话：发生了什么、下次该怎么办），然后经验库变化（新增 / 合并 / 晋升 / 引入 / 退役各几条、最值钱的一条是什么）与规则级改进建议条数，最后给报告路径
 
 ## 硬约束

@@ -11,6 +11,7 @@ const fragmentsDir = join(rootDir, "shared", "fragments");
 
 const fragmentMap: Record<string, string> = {
   PREAMBLE: "preamble.md",
+  CAMPAIGN_CONTEXT: "campaign-context.md",
   MODE_GUARD: "mode-guard.md",
   ASK_FORMAT: "ask-format.md",
   COMPLETION_STATUS: "completion-status.md",

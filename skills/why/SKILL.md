@@ -1,12 +1,10 @@
 ---
 name: why
-version: 0.1.0
+version: 0.2.0
 description: |
-  Investigate why code, an interface, a threshold, or an architectural decision
-  has its current shape. Builds a code anchor, covers seven evidence categories,
-  uses independent source investigators and a citation-checking synthesizer,
-  and separates Direct/Supported/Inferred/Speculative/Unknown claims. Use /how
-  for current runtime mechanics.
+  Investigate historical reasons for code, interfaces, thresholds, or design
+  decisions. Start with targeted evidence and expand when uncertainty affects
+  the decision. Separate facts, inference, and unknowns; use /how for mechanics.
 allowed-tools:
   - Read
   - Write
@@ -43,6 +41,20 @@ allowed-tools:
 - ✗「票置 needs-human。分支 feat/订单-issue-003，证据见 impl/issue-003/」→ ✓「第 3 票（订单超时自动关闭）卡在评审：支付回调重试时可能重复关单，涉及资损口径我不敢自己拍。A 按方案第 4 节加幂等键（推荐，只动订单模块）；B 先回退重试逻辑。想细看：评审与证据在 impl/issue-003/。」
 - ✗「阻塞：feature brief 不存在」→ ✓「写 PRD 还差上游的需求方案：这个需求目录下没找到。要么先跑 /pd-plan 定方案，要么你指给我一份已有的。」
 
+## Campaign 身份与产物连接
+
+- `feature-module / feature-slug` 是稳定业务归属；`campaign-id` 是该需求下的一次独立交付，不替代或改写 feature-slug。新交付从当前入口阶段按需创建 campaign；同一战役的回修、重验、重新冻结仍属于原 campaign。
+- 先用用户给定路径、票、候选或上游引用确定 campaign；有多个候选且无法消歧才问人。已有明确任务范围时可据其摘要命名，不要求再确认目录。不同交付不得因属于同一需求而共用 campaign。
+- 产品产物根为 `docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`；开发产物根为 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`。仅到达相应阶段时创建目录/文件，不补造未经历的 PRD、票或报告。
+- 标准路径可从 brief → PRD → tech-spec → 票组 → 验收；小变更可从 change-request → tech-spec 进入。共享基线 PRD、研究与历史成果通过明确路径引用，不复制、不改其归属。
+- 每份阶段文档记录 `feature_module`、`feature_slug`、`campaign_id` 与 `upstream` 的具体路径；票用 `feature-slug`、`campaign-id`、`tech-spec`。已有引用优先于目录搜索；未绑定输入时只在当前 campaign 内按类型发现，多个版本须确定明确的修订/取代关系，同日或并行文档不能靠“最新”猜。冻结消费使用路径与哈希，不能悄悄切换上游。
+- `acceptance-plan.yaml` 是**每个 campaign 一份**的固定入口，`tech_spec` 指向本战役方案；计划 documents 用仓库相对路径 + SHA256 显式绑定来源。不得回退父需求目录、轮换占位或把其他 campaign 的票/计划纳入本次交付。
+- 所有接受 `--feature-dir` 的开发命令，新流程传当前 **campaign 开发目录**（保留参数名兼容旧工具）。`issues/impl/integration/decisions/progress.jsonl/unattended.md` 均以该目录为根；票号只需在该 campaign 内唯一。命令返回的分支和工作目录为准，不自行按票号拼路径。
+- 默认集成分支为 `feat/<module>/<feature>/<campaign>`，票分支追加 `-<issue-id>`；工作目录为 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/`。配置的 integration-branch 模板中 `<feature-slug>` 在新流程展开为上述完整 `<module>/<feature>/<campaign>` 分支键，稳定票字段不变。分支键中的空格、点和 Git 特殊符号按 UTF-8 百分号编码，中文与字母数字保留，避免有空格的模块名导致非法分支；路径以命令返回值为准。
+- `integration/[round/]` 只区分本 campaign 的候选执行轮次；评审 receipt 的 round 是评审次数。两者均不是 campaign 身份，均不得修改 feature-slug 或切换集成分支。作用域完整性、决策阻塞、授权、复盘与清理只消费当前 campaign。
+- 兼容旧产物：无 campaign 子目录的历史 feature 根仍按旧入口读写；历史 `--round` 分支约定保持。不得自动搬迁、改写冻结 context/digest、复制成新真源或把它们算成新 campaign 的票。新战役一律使用 campaign 子目录；既有在途战役继续原路径，迁移需单独建立显式映射并核对历史引用。
+- 机器字段中的 `feature_dir` / `--feature-dir` 表示交付作用域目录；candidate/receipt/progress 的 `feature` 表示可唯一寻址的作用域键 `module/feature/campaigns/campaign`（旧产物仍为 `module/feature`）。它们不是票的稳定 `feature-slug`。human-decision 保持 `scope.feature=module/feature`，新增 `scope.campaign=campaign-id`；其 CLI `--feature` 使用完整作用域键。
+
 # /why
 
 你负责回答“**是什么力量让代码/设计成为今天这样**”。`/how` 回答当前机制；`/why` 查历史动机、外部约束、事故、业务依据、数据阈值和取舍。
@@ -51,10 +63,10 @@ allowed-tools:
 
 ## 权限、模型与来源边界
 
-- 除调用方明确要求的 `dev/features/<feature-module>/<feature-slug>/research/` 报告外，不写本地或外部状态；不提交、不评论 PR/ticket/chat、不运行写 SQL。
+- 除调用方明确要求的 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/research/`（尚未进入具体交付的调查可用需求根的 `research/`，后续显式引用） 报告外，不写本地或外部状态；不提交、不评论 PR/ticket/chat、不运行写 SQL。
 - investigator 和 synthesizer 使用 general-purpose **agent mode，而非会剥离 MCP 的 readonly/Ask mode**。这是为了保留证据工具和引用抽查；提示词仍禁止一切写入。宿主能同时保留 MCP 和只读权限时优先只读。
 - 默认继承当前宿主模型。显式模型被拒绝时回退继承并披露；有实时列表时可选同族最近有效项。不得复制 pstack slug、跨宿主套模型或静默换族。
-- 无子代理能力时，主会话逐角色顺序执行并披露；不能因为降级而减少证据类别。
+- 仅在需要委派时使用子代理；无子代理能力时主会话查证，说明缺少独立核查的限制，不模拟多角色流程。
 - 本地无 PR 路径下，Git、本地 issue/change-request、PRD/tech-spec/review/prototype verdict 都是正式一手来源；`gh`、外部 PR 和外部 MCP 只在真实存在时使用，不是开工前提。
 
 ## Step 1：确定 Target 与 Question
@@ -63,22 +75,17 @@ target 可以是代码段、接口、模式、阈值、ARCH-CHECK 组 / 规则 I
 
 指代含糊时结合当前文件、近期改动和对话给出最短范围解释并继续，让用户可纠正。用户问题中自带的假设只是待验证 hypothesis，不是结论。
 
-## Step 2：建立共同 Code Anchor
+## Step 2：按风险选择调查深度
 
-在启动 investigator 前，主会话内联完成：
+- **轻量（默认）**：主会话定位目标代码、相关测试/注释，查询针对性的 Git 历史及直接关联的 ticket/spec。明确原因已有证据时直接回答，不必启动代理或填写七类来源表。
+- **标准**：关键原因不明、涉及跨模块取舍时，沿现有证据线索扩展相关来源。一个调查者可以追踪 Git → ticket → spec 的完整证据链；可委派独立问题，不按来源机械拆分。
+- **深度**：高风险公共契约、迁移、事故调查、重大历史证据冲突，或用户明确要求全面调查。评估下列七类来源的相关性，按必要角度并行调查，并独立核查承重结论；评估不等于七类都要查询。
 
-- 目标 `path:line`、关键符号、ARCH-CHECK 组 / 规则 ID、相关测试与文档；
-- `git blame -L <start>,<end> <file>`；
-- `git log --follow -p -- <file>` 追踪重命名和补丁；
-- `git log --oneline -20 -- <file>` 扩大近期历史；
-- 对实质提交运行 `git show --stat --patch <commit>` 和 `git log -1 --format=%B <commit>`；
-- 从提交和本地文档提取 ticket ID、spec/PRD 锚点、外部 PR 编号。只有真实存在且 `gh` 可用时才读取 PR body/review，不把无 PR 当作缺口。
+建立与问题相称的 code anchor：目标文件/符号、相关记录和关键提交。按需使用 `git blame -L`、有范围的 `git log`、`git log -S/-G` 定位形成当前行为的提交，再用 `git show` 检查相关补丁与说明；不默认扫描文件全历史补丁。最近提交只是线索，不自动代表最初原因。无 Git 历史时披露限制，继续查询其他一手记录。
 
-同一 anchor 必须交给每个 investigator 和 synthesizer。最近提交只是线索，不自动拥有最终解释权。
+## Step 3：沿证据扩展，按问题停止
 
-## Step 3：建立七类来源覆盖图并并行调查
-
-先检查实际工具/MCP 列表和本地资源，记录 `available / unavailable / ambiguous / queried / empty / failed`。本地无 PR 路径仍必须覆盖下表；不能因为缺外部 MCP 就静默缩范围。
+七类来源是检索菜单。优先 Git 和直接关联的本地文档；仅当来源可能回答关键未决问题时扩展，不因存在 MCP 就查询。按需读取 `references/source-playbook.md` 中对应 playbook。
 
 | 类别 | 本地正式来源 | 外部来源示例 | 最擅长回答 |
 | --- | --- | --- | --- |
@@ -90,54 +97,25 @@ target 可以是代码段、接口、模式、阈值、ARCH-CHECK 组 / 规则 I
 | Error / exception tracking | 仓内错误报告和复盘 | Sentry、Rollbar、Bugsnag | 防御代码对应的异常轨迹 |
 | Product analytics warehouse | 仓内数据报告 | Databricks、Snowflake、BigQuery、ClickHouse | 阈值、实验、使用量和迁移依据 |
 
-执行规则：
 
-1. Source control **始终调查**。其他类别只要存在本地来源或匹配 MCP，就启动对应 investigator。
-2. 每类默认一个 investigator，且只拥有一个主来源/MCP；不得让一个 agent 混合多个来源。额外的同类来源记为覆盖项或独立后续任务。
-3. 全部 investigator 在同一轮并行启动。提示词完整包含 `references/investigator-prompt.md`、共同 anchor、原始问题、对应 `references/source-playbook.md` 指向的类别 playbook。
-4. 防御性代码（null guard、retry、timeout、rate limit、feature flag、egress/OOM guard）额外附 `references/sources/incident-postmortem.md`。
-5. investigator 只收集证据，不作最终结论；空搜索、矛盾、查询原文和 Additional Leads 都必须返回。
-6. 只有“没有任何对应来源”或“可证明无关”才能跳过，理由写入 Sources Consulted。不可访问、保留期、认证失败都记 gap，不记“没有相关事实”。
-7. 单提交琐碎目标只有在确认七类可用来源均冗余时才可 inline 回答，并明确说明；这是罕见例外。
+- 防御性行为只有在事故线索或风险需要时读取 `references/sources/incident-postmortem.md`，不因存在 null guard 就开启事故调查。
+- 委派时读取 `references/investigator-prompt.md`，传入原始问题、共同 anchor、负责的问题与来源范围；共享已查证结果避免重复调查。代理只读。
+- 深度调查或关键证据存在争议时，使用 `references/synthesizer-prompt.md` 独立核查原始引用；其余由主会话综合。不得通过改写提升置信度或隐藏冲突。
+- 记录实际查询过的来源、关键对象和影响结论的空结果/失败。未查询不等于无事实；只披露与当前问题相关的来源缺口。深度调查额外记录七类相关性及选择/跳过理由。
+- **停止条件**：影响本次决策的关键问题已有证据、相关冲突已处理、剩余未知及影响已说明。答案明确后不为完成来源清单扩查；找不到历史原因可给出有搜索边界的 Unknown，不无限追查，也不将未解决的关键风险说成已解决。
 
-## Step 4：独立综合与引用抽查
+## Step 4：输出与规划约束
 
-启动一个 synthesizer，输入：
+轻量回答保留结论、证据、置信度和未知项。较大调查按需使用 The Question / The Code in Question / What We Found / What We Can Reasonably Infer / Competing Hypotheses / What We Don't Know / Sources Consulted / Confidence Summary；没有竞争假设或推断时不凑章节。
 
-1. 全部 investigator 原始结果，包括 null、empty、failed 和 skipped reason；
-2. 共同 code anchor、原始问题和覆盖图；
-3. `references/epistemics.md` 与 `references/synthesizer-prompt.md`。
-
-synthesizer 必须抽查不确定或承重引用，合并重复来源、保留矛盾、逐条校准 Direct / Supported / Inferred / Speculative / Unknown。主会话只能轻度编辑，不得重写置信度语言或把 Unknown 改成确定答案。
-
-## Step 5：输出与规划约束
-
-固定保留以下语义章节：
-
-```text
-The Question
-The Code in Question
-What We Found
-What We Can Reasonably Infer
-Competing Hypotheses
-What We Don't Know
-Sources Consulted
-Confidence Summary
-```
-
-- Sources Consulted 每类一行，包含实际查询、打开对象、empty/failed/skipped 原因；不能只列有发现的来源。
-- 若调查是为了修改代码，之后追加 **Preserve / Change / Avoid / Risk**：
-  - Preserve：证据支持必须维持的行为/约束；
-  - Change：本次允许改变且有证据覆盖的部分；
-  - Avoid：历史上已证实会导致回归或违背外部约束的做法；
-  - Risk：未知、来源缺口、可能已过期约束和需要进一步验证的假设。
-- 每条规划约束回链证据和置信度；Unknown 不得自动升级为 Preserve，只能成为 Risk/待确认项。
-- 调用方提供 feature-module/slug 或明确要求落盘时，按 `shared/templates/why-report.md` 写入 `dev/features/<feature-module>/<feature-slug>/research/<topic>-why-YYYY-MM-DD.md`。
+- 全程区分 Direct / Supported / Inferred / Speculative / Unknown；五级是判断纪律，不要求每次填满五栏。
+- 修改前置调查按适用性提取 **Preserve / Change / Avoid / Risk**，每条回链证据和置信度。Unknown 只能进入 Risk/待验证，不自动变成 Preserve；历史动机是否仍适用也须单独判断。
+- 默认对话返回或由 tech-spec 将必要结论写入 2.1。仅提供 feature-module/slug 不自动归档；调用方明确要求归档（含复杂、可复用调查）时，按 `shared/templates/why-report.md` 写入 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/research/<topic>-why-YYYY-MM-DD.md`。
+- 复用相同 target/question 的历史证据，只检查相关新增记录、反证及约束是否过期；没有变化不重复搜索所有来源。
 
 ## 常见失败
 
-- Recency bias：只读最近提交，不追溯形成当前形状的更早决策。
-- Rationalization：因为设计今天合理，就替历史作者补一个合理动机。
-- Sycophancy：用户猜“为了性能”，就只搜支持性能的证据。
-- Coverage laundering：外部 MCP 不存在时不搜索本地票/文档，也不披露缺口。
-- Confidence laundering：把多个间接线索写成 Direct，或把未知阈值写成既定约束。
+- 用当前代码行为替历史作者补动机，或只找支持用户猜测的证据。
+- 只看最近提交，漏掉形成当前行为的更早决策。
+- 将空搜索当反证，将间接线索升为 Direct，将 Unknown 写成既定约束。
+- 因工具可用扩大范围，或为了固定章节、代理数量、来源覆盖继续调查。

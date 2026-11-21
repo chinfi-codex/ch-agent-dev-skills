@@ -25,6 +25,8 @@ allowed-tools:
 
 {{COMPLETION_STATUS}}
 
+{{CAMPAIGN_CONTEXT}}
+
 {{DEV_ARTIFACT_PATHS}}
 
 {{DEV_CONFIG}}
@@ -94,7 +96,7 @@ ocr review --from <candidate.main_head> --to <candidate.candidate> \
 票级门禁已由 `process_check --phase ticket` 在每票合入前执行；本步不重复票级 grep / 数文件，只做整需求语义复核：
 
 - **需求覆盖**：PRD / change-request 的全部端到端 AC 与 tech-spec 行为点是否都有实现和可执行验收；跨票拼接是否形成完整主路径与失败路径。
-- **架构总览**：`docs/ARCHITECTURE.md` 的 1–10 节（项目结构、系统图、组件、存储、集成、部署、安全、开发测试、演进、项目标识）与真实代码、部署和测试配置是否一致；首次架构影响后不得仍是骨架，已失真的节由本次 feature 修正并留证。
+- **架构总览**：`docs/ARCHITECTURE.md` 的 1–10 节（项目结构、系统图、组件、存储、集成、部署、安全、开发测试、演进、项目标识）与真实代码、部署和测试配置是否一致；项目结构树只列顶层、未展开到 2–3 层子目录与关键文件即不合格。首次架构影响后不得仍是骨架，已失真的节由本次 feature 修正并留证。
 - **接口与契约**：附录 A–E 的分层 / 组 / 依赖规则与真实代码是否一致；跨模块调用、错误语义、ownership、并发/异步契约是否被票级切分破坏。
 - **架构规则**：candidate 上 `arch_check.py check` 无 error；规则变更（尤其删除、放宽、提高阈值）是否有 tech-spec / impl-log 依据；`docs/ARCHITECTURE.md` 是否由 `render write` 生成且无手改。
 - **测试更新**：既有测试修改是否逐条映射真实 DoD / spec 锚点，且只改相关断言 / 夹具；新增测试是否有 runner 见红；跨票是否删除了彼此依赖的覆盖。

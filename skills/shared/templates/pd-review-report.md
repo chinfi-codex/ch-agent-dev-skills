@@ -9,6 +9,7 @@
 doc_type: pd-review-report
 feature_module: <feature-module>
 feature_slug: <feature-slug>
+campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 verdict: 可交付     # 可交付 | 可交付但有风险 | 阻塞 —— 必须与正文「交付结论」一致；/tech-spec 的开工门禁字段

@@ -128,9 +128,23 @@ options:
 - ✗「票置 needs-human。分支 feat/订单-issue-003，证据见 impl/issue-003/」→ ✓「第 3 票（订单超时自动关闭）卡在评审：支付回调重试时可能重复关单，涉及资损口径我不敢自己拍。A 按方案第 4 节加幂等键（推荐，只动订单模块）；B 先回退重试逻辑。想细看：评审与证据在 impl/issue-003/。」
 - ✗「阻塞：feature brief 不存在」→ ✓「写 PRD 还差上游的需求方案：这个需求目录下没找到。要么先跑 /pd-plan 定方案，要么你指给我一份已有的。」
 
+## Campaign 身份与产物连接
+
+- `feature-module / feature-slug` 是稳定业务归属；`campaign-id` 是该需求下的一次独立交付，不替代或改写 feature-slug。新交付从当前入口阶段按需创建 campaign；同一战役的回修、重验、重新冻结仍属于原 campaign。
+- 先用用户给定路径、票、候选或上游引用确定 campaign；有多个候选且无法消歧才问人。已有明确任务范围时可据其摘要命名，不要求再确认目录。不同交付不得因属于同一需求而共用 campaign。
+- 产品产物根为 `docs/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`；开发产物根为 `dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/`。仅到达相应阶段时创建目录/文件，不补造未经历的 PRD、票或报告。
+- 标准路径可从 brief → PRD → tech-spec → 票组 → 验收；小变更可从 change-request → tech-spec 进入。共享基线 PRD、研究与历史成果通过明确路径引用，不复制、不改其归属。
+- 每份阶段文档记录 `feature_module`、`feature_slug`、`campaign_id` 与 `upstream` 的具体路径；票用 `feature-slug`、`campaign-id`、`tech-spec`。已有引用优先于目录搜索；未绑定输入时只在当前 campaign 内按类型发现，多个版本须确定明确的修订/取代关系，同日或并行文档不能靠“最新”猜。冻结消费使用路径与哈希，不能悄悄切换上游。
+- `acceptance-plan.yaml` 是**每个 campaign 一份**的固定入口，`tech_spec` 指向本战役方案；计划 documents 用仓库相对路径 + SHA256 显式绑定来源。不得回退父需求目录、轮换占位或把其他 campaign 的票/计划纳入本次交付。
+- 所有接受 `--feature-dir` 的开发命令，新流程传当前 **campaign 开发目录**（保留参数名兼容旧工具）。`issues/impl/integration/decisions/progress.jsonl/unattended.md` 均以该目录为根；票号只需在该 campaign 内唯一。命令返回的分支和工作目录为准，不自行按票号拼路径。
+- 默认集成分支为 `feat/<module>/<feature>/<campaign>`，票分支追加 `-<issue-id>`；工作目录为 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/`。配置的 integration-branch 模板中 `<feature-slug>` 在新流程展开为上述完整 `<module>/<feature>/<campaign>` 分支键，稳定票字段不变。分支键中的空格、点和 Git 特殊符号按 UTF-8 百分号编码，中文与字母数字保留，避免有空格的模块名导致非法分支；路径以命令返回值为准。
+- `integration/[round/]` 只区分本 campaign 的候选执行轮次；评审 receipt 的 round 是评审次数。两者均不是 campaign 身份，均不得修改 feature-slug 或切换集成分支。作用域完整性、决策阻塞、授权、复盘与清理只消费当前 campaign。
+- 兼容旧产物：无 campaign 子目录的历史 feature 根仍按旧入口读写；历史 `--round` 分支约定保持。不得自动搬迁、改写冻结 context/digest、复制成新真源或把它们算成新 campaign 的票。新战役一律使用 campaign 子目录；既有在途战役继续原路径，迁移需单独建立显式映射并核对历史引用。
+- 机器字段中的 `feature_dir` / `--feature-dir` 表示交付作用域目录；candidate/receipt/progress 的 `feature` 表示可唯一寻址的作用域键 `module/feature/campaigns/campaign`（旧产物仍为 `module/feature`）。它们不是票的稳定 `feature-slug`。human-decision 保持 `scope.feature=module/feature`，新增 `scope.campaign=campaign-id`；其 CLI `--feature` 使用完整作用域键。
+
 ## Dev Artifact 路径约定
 
-`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` 贯通：
+`./docs/` 树（产品阶段）延伸出 `./dev/` 树（开发阶段），两棵树由同一 `feature-module` / `feature-slug` / `campaign-id` 贯通：
 
 ```text
 ./dev/
@@ -138,47 +152,49 @@ options:
   features/
     <feature-module>/
       <feature-slug>/
-      <feature-summary>-tech-spec-YYYY-MM-DD.md
-      acceptance-plan.yaml         # 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
-      research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
-        <topic>-how-YYYY-MM-DD.md
-        <topic>-why-YYYY-MM-DD.md
-      issues/
-        issue-001-<短名>.md
-      impl/
-        issue-001/
-          ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
-          impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
-          raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
-            artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
-            verification-implementer.json
-            evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
-            logs/                     # 原始命令输出与哈希索引
-      mr/
-        <feature-summary>-mr-issue-001-YYYY-MM-DD.md
-      integration/                # 需求收口（feature-closeout: local-human）产物；复用旧 feature 目录的轮次写 integration/<round>/，round 名 = 票 feature-slug = 集成分支名（建议 <feature-slug>-<YYYY-MM-DD>），结构见 shared/templates/feature-closeout.md
-        candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
-        acceptance-plan.json      #   冻结时的计划快照
-        feature-review.md         #   整需求独立评审报告（main_head..candidate）
-        feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
-        candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
-        evidence.md               #   自动证据头
-        business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
-        acceptance-report.md      #   合并前功能验收报告（report 生成）
-        confirmation.md           #   人确认原话 + 候选 tree
-        conformance-feature.md    #   feature 级覆盖核对
-        verify-log.md             #   候选变更与回修轨迹
-        raw/<generation>/
-          artifact-generation-manifest.json
-          <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
-          logs/  screenshots/
-      unattended.md               # 无人值守授权边界（人离场时才产生）
-      decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
-        <decision-id>.json
-      prototypes/
-        <短名>/
-          <原型文件（一次性）>
-          <短名>-verdict-YYYY-MM-DD.md
+        campaigns/
+          <campaign-id>/
+            <feature-summary>-tech-spec-YYYY-MM-DD.md
+            acceptance-plan.yaml         # 本 campaign 功能验收计划唯一真源：AC / 执行方式 / 最终判定 / 人工原因
+            research/                   # How 现状机制与 Why 历史动机调查；tech-spec 的 dated 证据输入
+              <topic>-how-YYYY-MM-DD.md
+              <topic>-why-YYYY-MM-DD.md
+            issues/
+              issue-001-<短名>.md
+            impl/
+              issue-001/
+                ticket-context.json          # 开工冻结的 base / target / scope / 输入哈希
+                impl-log-issue-001.md        # 含票级覆盖矩阵，供 feature conformance 汇总
+                raw/<generation>/            # 每次 implementer 验证独立代际；成功新代际使前代 superseded
+                  artifact-generation-manifest.json  # 本代 candidate / supersedes / 全部产物哈希
+                  verification-implementer.json
+                  evidence-issue-001.md        # 由本代 verification JSON 生成，不手写通过结论
+                  logs/                     # 原始命令输出与哈希索引
+            mr/
+              <feature-summary>-mr-issue-001-YYYY-MM-DD.md
+            integration/                # 本 campaign 收口产物；可选 integration/<round>/ 为内部执行轮次，不改变 campaign 身份或分支；结构见 shared/templates/feature-closeout.md
+              candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
+              acceptance-plan.json      #   冻结时的计划快照
+              feature-review.md         #   整需求独立评审报告（main_head..candidate）
+              feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
+              candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
+              evidence.md               #   自动证据头
+              business-results.json     #   每条 AC 的实际执行、AI 判定 + 人工结果
+              acceptance-report.md      #   合并前功能验收报告（report 生成）
+              confirmation.md           #   人确认原话 + 候选 tree
+              conformance-feature.md    #   feature 级覆盖核对
+              verify-log.md             #   候选变更与回修轨迹
+              raw/<generation>/
+                artifact-generation-manifest.json
+                <issue>/verification-supervisor.json  # 候选复跑证据，不覆盖票级 impl
+                logs/  screenshots/
+            unattended.md               # 无人值守授权边界（人离场时才产生）
+            decisions/                  # human-decision 决策包唯一真源，主会话与恢复共用
+              <decision-id>.json
+            prototypes/
+              <短名>/
+                <原型文件（一次性）>
+                <短名>-verdict-YYYY-MM-DD.md
   .salvage/                       # worktree 清场抢救包（见「派发协议」清场序列）
 ```
 
@@ -187,10 +203,10 @@ options:
 - `agents-config.md` 是 dev 阶段唯一配置文件（tracker / 主分支 / 质量门 / 红线 / 仓库等级），由 `/setup-dev` 产出，人可手工修订
 - `issues/` 票文件是 issue 的**本地真源**；GitLab 等外部 tracker 只是发布面，票文件内同步记录 IID / URL
 - `prototypes/` 归档 `/prototype` 的一次性原型与 verdict：原型代码只进此目录，不进产品源码；verdict 是 /pd-plan、/prd、/tech-spec 的上游输入
-- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；How 绑定 source HEAD，Why 保留七类来源覆盖和置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
+- `research/` 归档 `/how` 的当前机制解释和 `/why` 的历史证据调查；仅复杂、可复用或明确要求的调查独立归档，轻量证据直接进入 spec 2.1；How 按相关实现/依赖/契约及工作区差异复核，Why 按相关来源取证并保留置信度。tech-spec 把采纳结论、引用和约束收进正式方案，issue/implement 仍以冻结 spec 为契约，不直接追随一份可漂移的研究文件
 - `unattended.md` 是无人值守授权记录；`decisions/*.json` 是需要人裁决的问题、回答和路由状态的唯一真源。`progress.jsonl` 只保存不可变事件历史，不再使用 `decisions.md` / `progress.md` 自由文本双真源
-- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（仓库根 `.worktrees/<issue-id>/` 下用相对目标 `../../dev`；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
-- worktree 统一放仓库根 `.worktrees/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<feature-slug>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
+- dev/ 产物（票文件 / impl-log / evidence / 评审报告及其引用的捕获物）一律写**主工作区**的 dev/ 树——worktree 是独立 checkout，写进它的 dev/ 清场即丢；worktree 内只放代码与 `.logs/` 等临时产物。**worktree 内不得出现 dev/ 实体副本**（每票一份完整副本 = 磁盘随票线性膨胀，清场还可能丢真源）：建 worktree 后立即把 `<worktree>/dev` 软链到主工作区 dev/（按工作目录深度计算到主工作区 dev/ 的相对目标；宿主自管沙箱改用主工作区 dev/ 的绝对路径），此后 worktree 内对 `./dev/` 的读写自动落主工作区；软链建不成即停止，当前仅支持具备 POSIX 文件锁与软链能力的 macOS / Linux；不得复制 dev/ 实体目录，也不把主工作区绝对路径回退当作等效能力。架构契约只编辑 `docs/ARCH-CHECK.json`（11 节 `architecture.overview` + 规则）；`docs/ARCHITECTURE.md` 只能由 `arch_check.py render write` 确定性重生成并随契约提交，任何开发阶段均不得手工编辑。
+- worktree 统一放仓库根 `.worktrees/<module>/<feature>/<campaign>/<issue-id>/` 并加入 `.gitignore`；宿主自管会话沙箱（如 Codex）时以沙箱为隔离、不嵌套开此目录，但分支名仍按 `feat/<module>/<feature>/<campaign>-<issue-id>`——清场一律按分支名发现（见「派发协议」），不按路径猜
 - 命名与版本规则沿用 `./docs/` 树约定；读取模式匹配：`*-tech-spec-*`、`issues/issue-*`、`*-mr-issue-*`、`prototypes/*-verdict-*`、`research/*-how-*`、`research/*-why-*`
 
 ## 留存与体积控制（dev/ 防膨胀）
@@ -222,7 +238,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 
 ## 启动前校验
 
-1. 确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；产物归档到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/`
+1. 确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；产物归档到 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/prototypes/<短名>/`
 2. 把本次要回答的**那一个问题**逐字写下来——它将放在原型与 verdict 的顶部；答错问题 = 纯浪费
 3. 补读触发来源（哪份文档的哪一节 / 哪一轮拷打的哪一题）与该 slug 下既有 verdict，避免重复验证
 
@@ -258,13 +274,13 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 ## 捕获（收口）
 
 1. 请用户上手操作，收集裁决（一句话结论 +「不应该可能」类发现逐条）
-2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-module>/<feature-slug>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
+2. 按模板 `shared/templates/prototype-verdict.md`（相对本 SKILL.md 为 `../shared/templates/prototype-verdict.md`）写 verdict 到 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/prototypes/<短名>/<短名>-verdict-YYYY-MM-DD.md`；写作前必须先读取该模板
 3. 若裁决产出了比散文更精确编码决策的片段（状态机 / reducer / schema / type shape），裁剪到决策相关部分收入 verdict「决策性片段」节——这是 tech-spec「3.5」节唯一允许内联的代码来源
 4. 用大白话向用户说清：原型回答的那个问题、你的一句话裁决、建议把这个结论写回哪份文档；原型与 verdict 路径放在最后（冠以「想细看：」）
 
 ## 硬约束
 
-- 只写 `./dev/features/<feature-module>/<feature-slug>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
+- 只写 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/prototypes/**`；不碰产品源码、测试、配置；不改任何上游文档
 - 一个原型只回答一个问题；问题没逐字写清不动手
 - 原型代码只存在于 `prototypes/` 目录；决策回收以 verdict 为准，原型文件留档作证据
 - 用词遵循 GLOSSARY 标准术语；状态面板、按钮、场景描述一律用领域语言

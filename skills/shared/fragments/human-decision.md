@@ -7,10 +7,10 @@
 决策包唯一路径：
 
 ```text
-dev/features/<feature-module>/<feature-slug>/decisions/<decision-id>.json
+dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/decisions/<decision-id>.json
 ```
 
-包的 `schema` 固定为 `ch-agent.human-decision/v1`，结构与跨字段约束由 `shared/references/human-decision.schema.json` 和 `shared/scripts/human_decision.py` 共同校验。`scope.feature` 是 `<feature-module>/<feature-slug>`，`scope.issue` 是稳定票号；`scope.repo` 只能是 `.` 或仓库标签，不能代替 API 的仓库根参数，也不能存绝对路径。
+包的 `schema` 固定为 `ch-agent.human-decision/v1`，结构与跨字段约束由 `shared/references/human-decision.schema.json` 和 `shared/scripts/human_decision.py` 共同校验。`scope.feature` 是 `<feature-module>/<feature-slug>`，`scope.campaign` 是当前 campaign-id（历史根目录包省略），`scope.issue` 是战役内稳定票号；CLI/API 的 feature 定位参数传 `module/feature/campaigns/campaign-id`；`scope.repo` 只能是 `.` 或仓库标签，不能代替 API 的仓库根参数，也不能存绝对路径。
 
 | 角色 | 能做什么 | 不能做什么 |
 | --- | --- | --- |

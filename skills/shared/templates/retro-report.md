@@ -12,6 +12,7 @@
 
 ## 复盘对象
 
+- **campaign-id**：
 - **feature-slug**：
 - **feature-summary**：
 - **发布确认**：（人确认的结论：已发布 / 已验收未发布；确认时间）

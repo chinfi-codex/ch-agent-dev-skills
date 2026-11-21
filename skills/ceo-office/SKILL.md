@@ -44,8 +44,8 @@ allowed-tools:
 ## 前置说明
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
-- 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 和当前 `campaign-id`，按显式 upstream 读取上游文档
+- 读取顺序（需求级取当前 campaign 明确绑定版本；不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 已绑定的 `feature brief` → 已绑定的 `PRD` → 对应的 `pd-review-report`
 - 经验库读法：只读 `EXPERIENCE.md` 的「需求阶段经验」节；按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛行，命中即带进上下文，不读「开发阶段经验」节，不读通用级文件，不全量读
 - 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
 - 经验库回流：命中的规则要落到本技能的具体动作——提问维度、假设清单、评审或文档检查点；不重复踩已记录的坑；规则与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
@@ -57,7 +57,7 @@ allowed-tools:
 
 `feature-module` 是大功能块级分组标识（默认中文，如「交易链路」「性能优化」），命名与 `feature-slug` 同规：项目内唯一、稳定、一经建立不因标题调整而改变。需求级文档一律按 `./docs/features/<feature-module>/<feature-slug>/` 两级归档；一个 `feature-slug` 恰好归属一个 `feature-module`，先有模块、后有 slug。模块划分与归属登记在 `./docs/GLOSSARY.md` 的「feature-module 归档」节，模块发现 = 读该节 + `./docs/features/` 目录一层。
 
-- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录
+- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录，但可在已确定需求下按当前交付创建 campaign 子目录
 - 归属判据是主价值归属：砍掉该需求，哪块业务能力受损最大就归哪个模块；跨模块大需求在 issue 层拆，不动模块归属
 
 ## `feature-slug` 识别规则
@@ -78,7 +78,7 @@ allowed-tools:
 ## `feature-summary` 使用规则
 
 - `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
-- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；向用户说明文档归档位置时三者一起用自然句说清，不贴占位符
+- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 、`campaign-id` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；向用户说明文档归档位置时三者一起用自然句说清，不贴占位符
 
 ## Artifact 路径约定
 
@@ -97,12 +97,14 @@ allowed-tools:
     decision-card-YYYY-MM-DD.html
   features/
     <feature-module>/
-      <feature-slug>/
-        <feature-summary>-feature-brief-YYYY-MM-DD.md
-        <feature-summary>-prd-YYYY-MM-DD.md
-        <feature-summary>-change-request-YYYY-MM-DD.md
-        <feature-summary>-pd-review-report-YYYY-MM-DD.md
-        <feature-summary>-retro-YYYY-MM-DD.md
+      <feature-slug>/              # 稳定需求及共享基线
+        campaigns/
+          <campaign-id>/           # 本次交付，阶段文件按需产生
+            <feature-summary>-feature-brief-YYYY-MM-DD.md
+            <feature-summary>-prd-YYYY-MM-DD.md
+            <feature-summary>-change-request-YYYY-MM-DD.md
+            <feature-summary>-pd-review-report-YYYY-MM-DD.md
+            <feature-summary>-retro-YYYY-MM-DD.md
 ```
 
 路径使用规则：
@@ -110,8 +112,8 @@ allowed-tools:
 - `GLOSSARY.md`、`EXPERIENCE.md`、`project memo` 为项目级唯一文件：懒创建、原地追加更新，不加日期后缀；`EXPERIENCE.md` 由 `/review` 维护
 - `docs/ARCH-CHECK.json` 是架构总览与分层 / 组 / 依赖 / 代码规则的唯一机器真源；`docs/ARCHITECTURE.md` 是 `arch_check.py render write` 确定性生成的 11 节架构总览（规则在附录），禁止手改。旧 `docs/architecture/*.json` 不再读取。规则与巡检见 `shared/references/arch-check.md`、`contract-check.md`。
 - `decisions/` 由 `/ceo-office` 维护、懒创建：决策卡 md 为源、同名 html 为渲染，内容逐字段一致；卡的「状态」字段允许原地更新（dated-file 约定的唯一例外），判断内容变化走新文件
-- 需求级文档统一按 `<feature-module>/<feature-slug>` 两级归档（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
-- 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；读取先按文档类型模式匹配（`*-feature-brief-*`、`*-prd-*`、`*-change-request-*`、`*-pd-review-report-*`、`*-retro-*`），再取日期最新
+- 需求归档根统一按 `<feature-module>/<feature-slug>` 两级定位，交付文档落其 `campaigns/<campaign-id>/` 子结构（均为稳定标识，默认中文，一经建立不因标题调整而改变；一个 slug 只归属一个模块，规则见「feature-module 归档规则」），文件名 = `<feature-summary>-<类型>-YYYY-MM-DD.md`，类型见上方树形
+- 文档更新用「新文件 + 日期后缀」，不覆盖旧文件；消费先走当前 campaign 的显式 upstream，未绑定时才按类型发现并核对修订关系；同日修订增加明确修订号，不从其他 campaign 取最新。
 - 文件命名保持稳定、可搜索、可比较，不用 `final-v2-latest` 类含糊名称
 
 ## 术语与数据口径（GLOSSARY）

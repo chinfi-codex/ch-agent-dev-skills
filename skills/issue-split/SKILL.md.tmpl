@@ -39,6 +39,8 @@ allowed-tools:
 
 {{COMPLETION_STATUS}}
 
+{{CAMPAIGN_CONTEXT}}
+
 {{DEV_ARTIFACT_PATHS}}
 
 {{DEV_CONFIG}}
@@ -73,12 +75,12 @@ allowed-tools:
 ## 上游读取规则
 
 - `./dev/agents-config.md` 不存在 → 提示先 `/setup-dev`，状态置 `阻塞`；存在时先运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，旧版本或非法配置不得继续
-- 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；读取该目录下最新 `*-tech-spec-*` 文档
-- **复用旧 feature 目录必须换新 round**：该 feature 目录下已有收口过的需求（存在 `integration/` 结论产物或已 `done` 票）时，本轮所有票的 `feature-slug` 一律写新 round 名 `<原feature-slug>-<YYYY-MM-DD>`，tech-spec/PRD/计划放同目录；不得沿用旧 slug——旧集成分支若残留会被 `delivery start` 新鲜度门拒绝，旧候选也会阻塞 finalize 清理。首轮需求维持 slug = 目录名不变
+- 必须先确定唯一 `feature-module` 与 `feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）；确定当前 campaign，读取其明确绑定的 `*-tech-spec-*` 文档
+- **每次独立交付使用独立 campaign**：票的 `feature-slug` 保持需求目录名，`campaign-id` 等于所在战役目录名。tech-spec、计划与票组只在本 campaign 内连接；历史在途根目录不自动迁移。
 - tech-spec 不存在，或 frontmatter `status` ≠ `已确认（待拆解）` → 直接 `阻塞`；存量 tech-spec 缺 frontmatter：先按正文表头誊抄补全（只加 frontmatter 不动正文）再判定
-- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时作为拆票对齐基线）、该 feature-slug 最新 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
+- 补读：`./docs/GLOSSARY.md`、`docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；tech-spec 3.2 列出总览 / 层 / 组 / 规则变更时作为拆票对齐基线）、本 campaign 显式引用的 PRD（意图与稳定 AC 编号）、同目录 `acceptance-plan.yaml`（需求级功能验收分工）
 - 读取 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（如有）：按「适用模块」与「触发场景」筛出拆票 / 粒度 / 依赖 / declared-scope 类命中规则，补进拆票检查清单与粒度红线；规则与 tech-spec 冲突时以 tech-spec 为准，冲突点记入待确认项
-- 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
+- 开工前运行 `python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir ./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>`：计划不存在、AC 结构 / 执行方式 / 判定归属 / 人工原因 / 自动断言不合法时停止拆票，退回 `/tech-spec` 补齐；不得由本 skill 代改计划
 
 ---
 

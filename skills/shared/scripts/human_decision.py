@@ -239,14 +239,20 @@ def _inside(root: Path, candidate: Path, label: str) -> Path:
     return resolved
 
 
+def _scope_key(scope):
+    try:
+        return _sibling("artifact_scope").decision_key(scope)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 def _feature_dir(repo: Any, feature: str) -> Path:
     root = _repo_root(repo)
-    if not isinstance(feature, str) or not _FEATURE.fullmatch(feature):
-        raise ValidationError("feature must be exactly <module>/<slug> with safe path segments")
-    module, slug = feature.split("/")
-    if module in (".", "..") or slug in (".", ".."):
-        raise ValidationError("feature path traversal is forbidden")
-    return _inside(root, root / "dev" / "features" / module / slug, "feature")
+    try:
+        _sibling("artifact_scope").validate_key(feature)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    return _inside(root, root / "dev" / "features" / feature, "feature")
 
 
 def packet_path(repo: Any, feature: str, decision_id: str) -> Path:
@@ -453,13 +459,14 @@ def _semantic_validate(packet: Mapping[str, Any], repo: Any = None,
     scope = packet.get("scope", {})
     if not _FEATURE.fullmatch(scope.get("feature", "")) or not _ISSUE.fullmatch(scope.get("issue", "")):
         raise ValidationError("invalid feature/issue scope")
+    _scope_key(scope)
     repo_name = scope.get("repo")
     if repo_name != "." and (not isinstance(repo_name, str) or not _REPO_NAME.fullmatch(repo_name)
                              or repo_name in (".", "..")):
         raise ValidationError("scope.repo must be '.' or a repository label, never a filesystem path")
     root = _repo_root(repo) if repo is not None else None
     if root is not None:
-        packet_path(root, scope["feature"], packet["id"])
+        packet_path(root, _scope_key(scope), packet["id"])
     for item in packet.get("evidence", []):
         if root is not None:
             path = _relative_evidence(root, item["path"])
@@ -534,7 +541,7 @@ def _load(path: Path, repo: Any = None) -> Dict[str, Any]:
         raise ValidationError("cannot load decision packet %s: %s" % (path, exc)) from exc
     packet = _validate_packet(data, repo=repo)
     if repo is not None:
-        expected = packet_path(repo, packet["scope"]["feature"], packet["id"])
+        expected = packet_path(repo, _scope_key(packet["scope"]), packet["id"])
         if path.resolve(strict=False) != expected.resolve(strict=False):
             raise ValidationError("decision packet path does not match its scope/id")
     return packet
@@ -545,7 +552,7 @@ def _save(path: Path, packet: Mapping[str, Any]) -> None:
 
 
 def _issue_path(repo: Any, packet: Mapping[str, Any]) -> Path:
-    feature_dir = _feature_dir(repo, packet["scope"]["feature"])
+    feature_dir = _feature_dir(repo, _scope_key(packet["scope"]))
     issue_id = packet["scope"]["issue"]
     issues_dir = _inside(_repo_root(repo), feature_dir / "issues", "issues")
     candidates = sorted(path for path in issues_dir.glob("*.md") if not path.is_symlink())
@@ -651,7 +658,7 @@ def _event_base(packet: Mapping[str, Any], state: str, timestamp: str,
 
 
 def _append_event(repo: Any, packet: Mapping[str, Any], event: Dict[str, Any], key: str) -> None:
-    _store().append_event_once(_progress_path(repo, packet["scope"]["feature"]), event, key)
+    _store().append_event_once(_progress_path(repo, _scope_key(packet["scope"])), event, key)
 
 
 def _append_needs_human(repo: Any, packet: Mapping[str, Any]) -> None:
@@ -770,7 +777,7 @@ def request(repo: Any, envelope: Mapping[str, Any], *, main_session: bool = Fals
     """
     _require_main(main_session)
     candidate = validate_request(envelope, repo=repo, now=now)
-    feature = candidate["scope"]["feature"]
+    feature = _scope_key(candidate["scope"])
     with _store().FileLock(_lock_path(repo, feature)):
         path = packet_path(repo, feature, candidate["id"])
         if path.exists():
@@ -843,7 +850,7 @@ def list(repo: Any, feature: Optional[str] = None, issue: Optional[str] = None,
         _feature_dir(root, feature)
     else:
         features = sorted({path.parent.parent.relative_to(root / "dev" / "features").as_posix()
-                           for path in (root / "dev" / "features").glob("*/*/decisions/*.json")})
+                           for path in _sibling("artifact_scope").scoped_glob(root, "decisions/*.json")})
     result = []
     for feature_name in features:
         for packet in _feature_packets(root, feature_name):
@@ -856,7 +863,7 @@ def list(repo: Any, feature: Optional[str] = None, issue: Optional[str] = None,
             if active is False and packet["status"] in ACTIVE_STATUSES:
                 continue
             result.append(packet)
-    result.sort(key=lambda packet: (packet["scope"]["feature"], packet["scope"]["issue"],
+    result.sort(key=lambda packet: (_scope_key(packet["scope"]), packet["scope"]["issue"],
                                     packet["timestamps"]["created_at"], packet["id"]))
     return result
 
@@ -1307,7 +1314,7 @@ def _supersede_from_link(repo: Any, old: Dict[str, Any], new: Mapping[str, Any],
     old["timestamps"]["superseded_at"] = new["timestamps"]["created_at"]
     old["timestamps"]["updated_at"] = new["timestamps"]["created_at"]
     _validate_packet(old, repo=repo)
-    _save(packet_path(repo, old["scope"]["feature"], old["id"]), old)
+    _save(packet_path(repo, _scope_key(old["scope"]), old["id"]), old)
     repairs.append("superseded %s by linked replacement %s" % (old["id"], new["id"]))
     return old
 
@@ -1348,9 +1355,9 @@ def classify(repo: Any, feature: Optional[str] = None) -> Dict[str, Any]:
     if feature is None:
         feature_root = root / "dev" / "features"
         issue_features = {path.parent.relative_to(feature_root).as_posix()
-                          for path in feature_root.glob("*/*/issues") if path.is_dir()}
+                          for path in _sibling("artifact_scope").scoped_glob(root, "issues") if path.is_dir()}
         decision_features = {path.parent.parent.relative_to(feature_root).as_posix()
-                             for path in feature_root.glob("*/*/decisions/*.json")}
+                             for path in _sibling("artifact_scope").scoped_glob(root, "decisions/*.json")}
         features = sorted(issue_features | decision_features)
     else:
         features = [feature]
@@ -1426,9 +1433,9 @@ def reconcile(repo: Any, feature: Optional[str] = None, *, main_session: bool = 
     if feature is None:
         feature_root = root / "dev" / "features"
         issue_features = {path.parent.relative_to(feature_root).as_posix()
-                          for path in feature_root.glob("*/*/issues") if path.is_dir()}
+                          for path in _sibling("artifact_scope").scoped_glob(root, "issues") if path.is_dir()}
         decision_features = {path.parent.parent.relative_to(feature_root).as_posix()
-                             for path in feature_root.glob("*/*/decisions/*.json")}
+                             for path in _sibling("artifact_scope").scoped_glob(root, "decisions/*.json")}
         features = sorted(issue_features | decision_features)
     else:
         features = [feature]

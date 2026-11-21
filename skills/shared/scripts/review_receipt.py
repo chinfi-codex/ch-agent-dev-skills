@@ -550,10 +550,7 @@ def _feature_name(feature_dir: Path, candidate):
     value = candidate.get("feature") if isinstance(candidate, dict) else None
     if isinstance(value, str) and value.strip():
         return value.strip()
-    parts = feature_dir.parts
-    if len(parts) >= 2:
-        return parts[-2] + "/" + parts[-1]
-    return feature_dir.name
+    return _sibling("artifact_scope").scope_key(feature_dir)
 
 
 def _load_feature_config(repo: Path, feature_dir: Path):
@@ -561,7 +558,7 @@ def _load_feature_config(repo: Path, feature_dir: Path):
         ac = _sibling("agents_config")
     except ImportError as exc:
         raise ReceiptError("agents_config is required: %s" % exc)
-    features = feature_dir.resolve().parent.parent
+    features = _sibling("artifact_scope").feature_root(feature_dir.resolve()).parent.parent
     if features.name != "features" or features.parent.name != "dev":
         raise ReceiptError("feature receipts require a dev/features/<module>/<slug> directory")
     workspace = features.parent.parent
@@ -957,6 +954,9 @@ def _feature_finding_errors(receipt):
 def _feature_binding_errors(receipt, candidate, repo: Path, feature_dir: Path):
     errors = []
     if candidate is not None:
+        if (_sibling("artifact_scope").campaign_id(feature_dir)
+                and candidate.get("feature") != _sibling("artifact_scope").scope_key(feature_dir)):
+            errors.append("candidate belongs to another campaign directory")
         feature = candidate.get("feature")
         if isinstance(feature, str) and feature and receipt["feature"] != feature:
             errors.append("receipt feature differs from candidate.feature")

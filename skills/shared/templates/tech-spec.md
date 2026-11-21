@@ -2,6 +2,7 @@
 doc_type: tech-spec
 feature_module: <feature-module>
 feature_slug: <feature-slug>
+campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 草稿        # 草稿 | 已确认（待拆解）—— /issue-split 以 status = 已确认（待拆解） 为开工门禁
@@ -23,12 +24,14 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 
 ### 2.1 How / Why 调查与证据边界
 
-| 类型 | 报告 / source HEAD 或目标提交 | 覆盖与主要结论 | 未决项 |
+轻量调查直接在此记录事实、引用、约束与未知；下表按需使用，不强制生成独立报告或成对填写 How/Why。
+
+| 类型 | 内联证据或报告 / 相关版本 | 覆盖与主要结论 | 未决项 |
 | --- | --- | --- | --- |
 | How | `research/<topic>-how-YYYY-MM-DD.md` / `<SHA>` | 组件、流程、边界、共享状态 | Open Questions |
 | Why | `research/<topic>-why-YYYY-MM-DD.md` / `<目标SHA>` | Preserve / Change / Avoid / Risk 与置信度 | Sources gap / Unknown |
 
-真正 greenfield 豁免 How 时在此写明周边系统不存在的证据；Why 的 Direct / Supported 才能形成确定约束，Inferred 进入假设，Speculative / Unknown 进入待确认或风险。
+说明调查范围与关键缺口；历史原因不影响本次决策时无需单独 Why。归档 How 记录相关文件/符号和未提交差异，复用只补查相关变化。Why 的 Direct / Supported 经当前适用性核验才形成确定约束，Inferred 进入假设，Speculative / Unknown 进入风险。
 
 ## 3. 方案设计
 
@@ -52,6 +55,7 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 <!-- 说明本需求对架构契约的影响：11 节总览中哪些节需要补全或更新，以及新增 / 修改 / 退役哪些层、组、依赖方向或代码规则。
      契约唯一机器真源是 docs/ARCH-CHECK.json；docs/ARCHITECTURE.md 只能由 arch_check.py render write 生成。
      首次出现架构影响时，必须补全 architecture.overview 的 1–10 节（没有该类对象在 overview.notes.<节名> 写“不适用”及理由），由本 skill 写入并 render write；
+     overview.structure 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成，补全时用目录清单核对；
      层 / 组 / 规则变更仍由恰好一张承接票更新并重新 render，该票 declared-scope 必须包含这两个文件。
      没有架构影响时保留表头并写“无”；不写稳定 ID 或 architecture-updates。 -->
 

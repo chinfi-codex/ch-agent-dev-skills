@@ -68,7 +68,7 @@
 
 ### Sources Consulted
 
-七类来源逐类一行，不论有无发现：
+标准调查仅列实际查询的来源及相关缺口；深度调查额外说明以下七类的相关性与选择/跳过理由，不强制全部查询：
 
 - Source control history
 - Issue / ticket tracker
@@ -78,7 +78,7 @@
 - Error / exception tracking
 - Product analytics warehouse
 
-每行列实际查询、打开对象、空结果、失败或跳过理由。Source control 不应无解释缺失。
+每行列实际查询、打开对象、空结果、失败或跳过理由。无 Git 历史时说明限制，不阻止使用其他一手证据。
 
 ### Confidence Summary
 

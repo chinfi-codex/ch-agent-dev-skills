@@ -28,7 +28,7 @@ allowed-tools:
 
 {{MODE_GUARD}}
 
-本 skill 的文档产物有两个额外例外：允许写当前需求目录 `./dev/features/*/*/acceptance-plan.yaml`，以及执行只读设计校验 `python3 ../shared/scripts/arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 和 `render check`。前者是结构化功能验收计划，后者只校验规则与指南结构；其他源码、测试与配置限制不变。
+本 skill 的文档产物有两个额外例外：允许写当前需求目录 `./dev/features/*/*/campaigns/*/acceptance-plan.yaml`（历史在途 feature 根入口仍兼容），以及执行只读设计校验 `python3 ../shared/scripts/arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 和 `render check`。前者是结构化功能验收计划，后者只校验规则与指南结构；其他源码、测试与配置限制不变。
 
 {{GLOSSARY}}
 
@@ -37,6 +37,8 @@ allowed-tools:
 {{GRILLING}}
 
 {{COMPLETION_STATUS}}
+
+{{CAMPAIGN_CONTEXT}}
 
 {{DEV_ARTIFACT_PATHS}}
 
@@ -66,12 +68,12 @@ allowed-tools:
 
 - 若 `./dev/agents-config.md` 不存在，提示先运行 `/setup-dev`，状态置 `阻塞`
 - 必须先确定唯一 `feature-module`、`feature-slug`（沿用 `./docs/features/` 的最多两层匹配规则：模块层 / slug 层）与本次 `feature-summary`
-- 先判定需求输入路径：该 feature-slug 下存在 change-request，且其日期晚于最新 PRD（或用户明确以变更单为输入）时走**小变更路径**；否则走**标准路径**
-- 标准路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；3.2 架构影响须与之对齐）→ 该 feature-slug 最新 PRD → 最新 pd-review-report → 最新 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或最新 PRD `status` ≠ `定稿`，或最新 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
+- 先判定需求输入路径：当前 campaign 明确绑定 change-request 为输入时走**小变更路径**；否则走**标准路径**
+- 标准路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（11 节架构总览与规则附录；3.2 架构影响须与之对齐）→ 当前 campaign 显式绑定的 PRD → 该 PRD 对应的 pd-review-report → 显式引用的 feature brief → 代码库现状；上游门禁按 frontmatter 机器判定：PRD 不存在，或该 PRD `status` ≠ `定稿`，或该 PRD 对应的 pd-review-report `verdict` = `阻塞` → 直接 `阻塞`，不写 tech-spec
 - 存量文档缺 frontmatter：先从正文对应字段（PRD「文档信息」/ 报告「交付结论」）誊抄补全表头——只加 frontmatter 不动正文，再执行门禁判定；正文与誊抄值冲突时报用户裁决
 - 补读 `./docs/EXPERIENCE.md` 的「开发阶段经验」节（如有）：按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛出命中规则，作为「已知坑」进入约束与假设清单或失败路径检查；规则与本次方案证据冲突时以方案证据为准，冲突点记入待确认项
-- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（同上）→ 该 feature-slug 最新 change-request → 最新 PRD（如存在，仅作现状基线）→ 最新 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
-- 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
+- 小变更路径读取顺序：`./docs/GLOSSARY.md` → 读 `docs/ARCHITECTURE.md` 与 `docs/ARCH-CHECK.json`（同上）→ 当前 campaign 显式绑定的 change-request → 显式引用的基线 PRD（如存在）→ 显式引用的 feature brief → 代码库现状；本路径不要求 pd-review-report；change-request 不存在时直接 `阻塞`
+- 两条路径均补读 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/prototypes/` 下全部 verdict（如有）：已裁决的不可拷打问题结论进入方案输入边界，决策性片段按模板「3.5」规则收录
 - 一份 tech-spec 只对应一种需求输入：小变更路径下方案范围以变更单的「本次改动范围」为界，原 PRD 仅作基线引用，不混写、不扩大
 
 ---
@@ -85,13 +87,13 @@ allowed-tools:
 
 ### Step 1：How 现状建模 + Why 历史约束
 
-先完成调查，再设计方案。调查不能由“读过几个文件”或主会话即兴摘要替代。
+先建立足够支撑本次方案的现状与约束证据，默认轻量；调查深度随风险和关键未知升级。
 
-1. **How 默认必做**：对每个受影响子系统调用 `/how`，形成组件、函数级主/失败流程、数据与控制流、边界、共享状态、文件覆盖和开放问题。真正 greenfield 且没有周边系统时才可豁免，并在 2.1 写明理由。只列文件名、只读 `ARCHITECTURE.md` 或只引用 agent 自述都不算 How。
-2. **Why 按承重问题触发**：改变 ownership / layering / 公共契约、删除或替代既有实现、处理防御性代码、采用数值阈值，或 How 留下 `why-lead` 时，必须调用 `/why`。它从共同 code anchor 出发，覆盖 Git、ticket、长文档、chat、infra、error、analytics 七类来源，保留空结果和不可用来源，按 Direct / Supported / Inferred / Speculative / Unknown 分级。
-3. 两份调查写入 `research/` 并作为 dated spec 的上游证据。How 复用要求同一问题、范围和 source HEAD；代码已变化就重查。Why 可复用同一 target/question 的历史报告，但必须核 Sources Consulted 和新增证据，覆盖不足就补查。
-4. 把 Why 的 **Preserve / Change / Avoid / Risk** 转成设计输入：Direct/Supported 可形成约束；Inferred 只能形成待验证假设；Speculative/Unknown 进入待确认或 Risk，不能写成既定事实。用户问题中的假设同样接受证据核验。
-5. 既有约定（AGENTS.md / CLAUDE.md / REVIEW.md）、`ARCHITECTURE.md` / `ARCH-CHECK.json` 和代码事实仍需自己查证，逐条带代码位置；能从代码和历史查到的**不问用户**。只有实验和历史无法回答的产品/偏好决策才进入提问。
+1. **现状查证必做，完整 `/how` 按需**：主会话已读取的相关实现、调用点、测试和边界可直接作为证据写入 2.1；不要求逐子系统另开调查。跨模块且存在关键未知时用标准调查；高风险契约、迁移、共享状态或重大冲突时用深度调查。仅跨文件不构成升级理由。greenfield 说明实际存在的周边约束即可。
+2. **`/why` 按决策相关性触发**：历史原因尚不清楚，且答案可能改变本次方案或回归风险判断时调查。ownership / layering / 公共契约、防御代码、旧实现替换、阈值与 why-lead 是风险线索，不自动触发完整历史调查。直接证据已解释原因时可内联记录；必要未知沿 Git 和关联文档扩查，不机械覆盖七类来源。
+3. **research 按需归档与增量复用**：轻量调查直接写入 spec 2.1；复杂、需跨任务复用或用户要求的调查才写 `research/`，不强制成对产出 How/Why。How 记录 source HEAD、相关文件/符号和未提交差异；复用检查相关实现、依赖与契约，仅补查变化链路。无关 HEAD 变化不使报告失效，相同 HEAD 也不替代工作区检查。Why 复用同一 target/question，检查相关新增证据、反证与约束时效。
+4. **证据纪律保留**：按需把 Why 的 Preserve / Change / Avoid / Risk 转成设计输入。Direct/Supported 经当前适用性核验可形成约束；Inferred 只作待验证假设；Speculative/Unknown 进入风险，不把代码行为当历史动机。采纳的事实、引用和约束进入正式 spec，issue/implement 仍以冻结 spec 为契约。
+5. **停止条件**：影响本次决策的关键问题已有证据、相关冲突已处理、剩余未知及影响已说明，就进入设计。阻碍安全设计的缺口继续补查或明确限制；不为来源数量、代理数量或章节完整性扩查。AGENTS.md / CLAUDE.md / REVIEW.md、架构规则和相关代码事实仍需查证；可自行查明的事实不问用户，只有无法从证据裁决的产品/偏好决策才提问。
 
 ### Step 2：候选方案设计与综合
 
@@ -127,9 +129,9 @@ allowed-tools:
 ### Step 4：共识确认与产出
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
-2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
+2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
 3. 若 3.2 声明层 / 组 / 规则变更，运行 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 做只读校验；层 / 组 / 规则的写入由承接票在 `/implement` 阶段完成。不得直接手改 `docs/ARCHITECTURE.md`。
-4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
+4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。`overview.structure` 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成；补全时用目录清单核对。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
 5. 本轮确定的新术语立即回写 GLOSSARY
 6. 架构影响落 3.2：按模板写 `层 / 组 | 动作(new|modify|retire) | 路径 / 规则 ID | 说明 | 验证方式`，并写“架构总览基线”行（首次补全 / 更新哪些节 / 不适用理由）。涉及 `docs/ARCH-CHECK.json` 的层 / 组 / 规则变更时，明确由哪张承接票更新规则并 `render write`；该票 `declared-scope` 必须包含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`。不新建 `docs/architecture` 图谱，也不写 `architecture-updates`。
 

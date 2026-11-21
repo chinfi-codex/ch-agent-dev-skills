@@ -1,8 +1,8 @@
 ## 前置说明
 
 - 先定位当前项目上下文：项目 `slug`、当前工作分支、当前 feature 名称或任务名
-- 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 再读该目录下的上游文档
-- 读取顺序（各类型取最新版本，不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 最新 `feature brief` → 最新 `PRD` → 最新 `pd-review-report`
+- 开始判断或写作前，先读现有上下文文档；上游文档区分项目级与需求级：项目级取最新 `project memo`，需求级先定位唯一 `feature-slug` 和当前 `campaign-id`，按显式 upstream 读取上游文档
+- 读取顺序（需求级取当前 campaign 明确绑定版本；不存在的跳过）：`./docs/GLOSSARY.md` → 最新 `project memo` → `./docs/EXPERIENCE.md`（只取「需求阶段经验」节）→ 已绑定的 `feature brief` → 已绑定的 `PRD` → 对应的 `pd-review-report`
 - 经验库读法：只读 `EXPERIENCE.md` 的「需求阶段经验」节；按「适用模块」（`全部` 或本模块）与「触发场景」关键词筛行，命中即带进上下文，不读「开发阶段经验」节，不读通用级文件，不全量读
 - 会话内复用：本会话已读的上游文档，磁盘未变更（mtime 未变）时不重复全量读，沿用已读内容；有变更只重读变更文档
 - 经验库回流：命中的规则要落到本技能的具体动作——提问维度、假设清单、评审或文档检查点；不重复踩已记录的坑；规则与本次用户共识冲突时以共识为准，冲突点记入「待确认问题」
@@ -14,7 +14,7 @@
 
 `feature-module` 是大功能块级分组标识（默认中文，如「交易链路」「性能优化」），命名与 `feature-slug` 同规：项目内唯一、稳定、一经建立不因标题调整而改变。需求级文档一律按 `./docs/features/<feature-module>/<feature-slug>/` 两级归档；一个 `feature-slug` 恰好归属一个 `feature-module`，先有模块、后有 slug。模块划分与归属登记在 `./docs/GLOSSARY.md` 的「feature-module 归档」节，模块发现 = 读该节 + `./docs/features/` 目录一层。
 
-- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录
+- 模块新建与归属确认只有 `/pd-plan` 可执行，且必须经用户最终确认后才建目录；其余技能一律不得擅自新建模块或需求目录，但可在已确定需求下按当前交付创建 campaign 子目录
 - 归属判据是主价值归属：砍掉该需求，哪块业务能力受损最大就归哪个模块；跨模块大需求在 issue 层拆，不动模块归属
 
 ## `feature-slug` 识别规则
@@ -35,4 +35,4 @@
 ## `feature-summary` 使用规则
 
 - `feature-summary` 是需求级文档文件名中的中文摘要名（4-12 个汉字，简短可搜索），标识大功能下的具体子功能或本次子范围；不进目录名，不替代 `feature-slug`；同一 slug 下允许多个
-- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；向用户说明文档归档位置时三者一起用自然句说清，不贴占位符
+- 写需求级文档前必须同时确定唯一 `feature-module`、`feature-slug` 、`campaign-id` 与本次 `feature-summary`；用户只给大功能名且无法从上下文唯一推断时，先提问确认；向用户说明文档归档位置时三者一起用自然句说清，不贴占位符

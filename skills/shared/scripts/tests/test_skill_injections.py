@@ -37,13 +37,10 @@ class SkillInjectionTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_how_preserves_parallel_exploration_and_independent_synthesis(self):
+    def test_how_references_are_available(self):
         template = (SKILLS / "how" / "SKILL.md.tmpl").read_text(encoding="utf-8")
-        self.assertIn("2–4", template)
         self.assertIn("references/explorer-prompt.md", template)
         self.assertIn("references/explainer-prompt.md", template)
-        self.assertIn("顺序降级", template)
-        self.assertIn("不做实质性重写", template)
         self.assertNotIn("grok-", template)
         for reference in ("explorer-prompt.md", "explainer-prompt.md"):
             self.assertTrue((SKILLS / "how" / "references" / reference).is_file())
