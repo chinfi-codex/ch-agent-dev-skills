@@ -49,7 +49,7 @@ powershell -ExecutionPolicy Bypass -File skills/scripts/build-all.ps1
 
 ## 同步到各宿主
 
-如果你已经把这个仓库安装到了某个宿主（Claude Code / ZCode / Kimi Code / Codex / DeepSeek Harness（DSH）），修改模板后还需要同步一次，否则宿主里的版本不会自动更新。
+如果你已经把这个仓库安装到了某个宿主（Claude Code / ZCode / Kimi Code / Codex / Grok CLI / Cursor / DeepSeek Harness（DSH）），修改模板后还需要同步一次，否则宿主里的版本不会自动更新。
 
 ```bash
 bash ./sync.sh
@@ -63,9 +63,9 @@ bash ./sync.sh
 
 同步脚本会自动做两件事：
 1. 用 `gen-skill-docs.ts --check` 只读核对全部生成物，发现漂移即停止，不隐式重写
-2. 把最新的各 skill 目录与 `shared/` 复制到你的宿主 skills 目录（如 `~/.claude/skills/`；DSH 默认为 `~/.dsh/skills/`，设置 `DSH_HOME` 时为 `$DSH_HOME/skills/`）
+2. 把最新的各 skill 目录与 `shared/` 复制到你的宿主 skills 目录（如 `~/.claude/skills/`、`~/.grok/skills/`、`~/.cursor/skills/`；DSH 默认为 `~/.dsh/skills/`，设置 `DSH_HOME` 时为 `$DSH_HOME/skills/`）
 
-此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks，并注册 DSH session-title 与 progress-panel 两个 bundle；不会覆盖已有 hooks。Kimi Code 只同步 skills，不装 hooks。共享脚本与 DSH 桥接回归：
+此外会向 CC / Codex / ZCode 合并 session 自动命名 hooks，并注册 DSH session-title 与 progress-panel 两个 bundle；不会覆盖已有 hooks。Kimi Code / Grok CLI / Cursor 只同步 skills，不装 hooks。共享脚本与 DSH 桥接回归：
 
 ```bash
 python3 -m unittest discover -s skills/shared/scripts/tests -v

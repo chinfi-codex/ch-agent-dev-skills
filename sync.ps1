@@ -34,6 +34,10 @@ if (Test-Path "$HOME\.zcode")  { Sync-Flat "$HOME\.zcode\skills" }  else { Write
 if (Test-Path "$HOME\.kimi-code") { Sync-Flat "$HOME\.kimi-code\skills" } else { Write-Host "skip: ~/.kimi-code 不存在（宿主未安装）" }
 if (Test-Path "$HOME\.codex")  { Sync-Flat "$HOME\.codex\skills" }  else { Write-Host "skip: ~/.codex 不存在（宿主未安装）" }
 
+# Grok CLI 只同步 skills；Cursor 同到 ~/.cursor/skills/（自带内置 skills 在 skills-cursor/，不触碰）。
+if (Test-Path "$HOME\.grok")   { Sync-Flat "$HOME\.grok\skills" }   else { Write-Host "skip: ~/.grok 不存在（宿主未安装）" }
+if (Test-Path "$HOME\.cursor") { Sync-Flat "$HOME\.cursor\skills" } else { Write-Host "skip: ~/.cursor 不存在（宿主未安装）" }
+
 # DeepSeek Harness（DSH）同步 skills 与原生 session 标题插件。
 $DSHRoot = Join-Path $HOME ".dsh"
 if ($env:DSH_HOME) { $DSHRoot = $env:DSH_HOME }

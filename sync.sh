@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 同步 skills/ 到本机各 agent 宿主的 skills 目录。
 # 两件事：1) 只读核对全部 SKILL.md 与模板/片段一致；2) 按各宿主布局分发（平铺：skill 目录 + shared）。
-#   Claude Code / ZCode / Kimi Code / Codex / DeepSeek Harness（DSH）：平铺到各宿主 skills 目录。
+#   Claude Code / ZCode / Kimi Code / Codex / Grok CLI / Cursor / DeepSeek Harness（DSH）：平铺到各宿主 skills 目录。
 #   DSH 默认使用 ~/.dsh/skills/；设置 DSH_HOME 时使用 $DSH_HOME/skills/。
 # 用法：在仓库根目录执行 bash ./sync.sh（维护者环境需 Node >= 22.6）
 set -euo pipefail
@@ -55,6 +55,19 @@ if [ -d "$HOME/.codex" ]; then
   sync_flat "$HOME/.codex/skills"
 else
   echo "skip: ~/.codex 不存在（宿主未安装）"
+fi
+
+# Grok CLI 只同步 skills；Cursor 同到 ~/.cursor/skills/（自带内置 skills 在 skills-cursor/，不触碰）。
+if [ -d "$HOME/.grok" ]; then
+  sync_flat "$HOME/.grok/skills"
+else
+  echo "skip: ~/.grok 不存在（宿主未安装）"
+fi
+
+if [ -d "$HOME/.cursor" ]; then
+  sync_flat "$HOME/.cursor/skills"
+else
+  echo "skip: ~/.cursor 不存在（宿主未安装）"
 fi
 
 # DeepSeek Harness（DSH）同步 skills 与原生 session 标题插件。
