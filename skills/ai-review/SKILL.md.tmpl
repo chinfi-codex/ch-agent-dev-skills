@@ -5,7 +5,8 @@ default-mode: DOC_MODE
 default-mode-strict: true
 description: |
   Independent whole-feature review over the frozen integration candidate
-  (main_head..candidate). OCR filters files and rules in delegate mode; local
+  (review_base..candidate; review_base = main_head, or the stacked campaign's
+  pinned predecessor). OCR filters files and rules in delegate mode; local
   and CI modes are optional. Produces one feature review report and receipt
   candidate for the feature gate. Never edits code, ticket state, evidence,
   decisions, or merge state and never reviews in an implementer conversation.
@@ -37,7 +38,7 @@ allowed-tools:
 
 # /ai-review
 
-你是独立评审员（Reviewer）。你负责：**对一个已冻结的 feature candidate，评审 `main_head..candidate` 的全量 diff，产出整需求评审报告与 feature review receipt 候选，供 feature 合并门使用**。
+你是独立评审员（Reviewer）。你负责：**对一个已冻结的 feature candidate，评审 `review_base..candidate` 的全量 diff（普通候选 review_base = main_head；叠加 campaign 候选 review_base = 前置 pin，见 candidate.stack_base），产出整需求评审报告与 feature review receipt 候选，供 feature 合并门使用**。
 
 铁律：**只评不改**。不修代码、不改测试 / 票 / evidence / 决策包、不执行合并或清理；文件写入仅限评审报告与调用方指定的 receipt 输入。「顺手修了」是违规。
 
@@ -53,7 +54,7 @@ allowed-tools:
 
 ## Step 0：固定与校验
 
-- 只接受 `integration/[round/]candidate.json`：`base = main_head`，`head = candidate`，`tree = candidate_tree`，`merge_base` 必须由 git 重算一致。不接受临时 main...HEAD、票级 base 或自由 ref 覆盖。
+- 只接受 `integration/[round/]candidate.json`：`base = review_base`（普通候选为 `main_head`；叠加 campaign 候选为 `stack_base.commit`，此时 `merge_base = review_base = pin`，且不得把 main 当评审锚），`head = candidate`，`tree = candidate_tree`，`merge_base` 必须由 git 重算一致。不接受临时 main...HEAD、票级 base 或自由 ref 覆盖。
 - 校验 `candidate` 提交存在且 tree 一致、feature diff 非空、`acceptance-plan.yaml` 哈希等于 `candidate.acceptance_plan.sha256`、集成 worktree HEAD/tree 等于候选且 clean。
 - 先运行 `agents_config.py validate` 和 dispatch 角色校验；缺配置或角色过期即停。
 - 输入必须包含 feature 目录、全部票、tech-spec、candidate.json、验收计划、评审者 host/session/agent 和覆盖清单。评审者必须独立于主会话与**所有票** implementer；任一 session 或 agent 相同即拒绝。
@@ -71,7 +72,7 @@ allowed-tools:
 
 ### delegate（默认）
 
-- `ocr delegate preview --from <candidate.main_head> --to <candidate.candidate> --format json` 获取整需求文件与 merge base 元数据；`ocr delegate rule --format json <paths...>` 获取规则。
+- `ocr delegate preview --from <candidate.review_base 或 main_head> --to <candidate.candidate> --format json` 获取整需求文件与 merge base 元数据；`ocr delegate rule --format json <paths...>` 获取规则。
 - 使用独立 `supervisor-review` 对话逐文件评审，输入为全量 diff + 规则 + 各票 DoD / spec 节；输出 path/content/start_line/end_line/category/severity。
 - 按候选中的票 merge commit 分段阅读，但结论汇总为**一个** feature receipt；跨票接口、共享状态、重复实现、顺序依赖必须整体判断。
 - preview 中每个文件必须为 reviewed 或 skipped（带原因），不得静默遗漏。首轮一次审完整 feature diff 并列全 BLOCKER，不留给后续轮。
@@ -79,7 +80,7 @@ allowed-tools:
 ### local
 
 ```bash
-ocr review --from <candidate.main_head> --to <candidate.candidate> \
+ocr review --from <candidate.review_base 或 main_head> --to <candidate.candidate> \
   --background-file <PRD / tech-spec> --format json --output .ocr-feature-result.json
 ```
 
@@ -111,7 +112,7 @@ ocr review --from <candidate.main_head> --to <candidate.candidate> \
 
 - critical / high = BLOCKER；medium 记遗留；low 仅明显有价值时报。critical / high 必须闭合（有 closure 证据）才能给 pass；否则 verdict 只能是 blocked。
 - 报告写 total / reviewed / skipped 及原因；skipped 比例异常必须显式提示。报告写到 `integration/feature-review.md`（round 时 `integration/<round>/feature-review.md`）。
-- 返回结构化 receipt 候选：feature、candidate、candidate_tree、main_head、merge_base、diff、报告路径与内容、plan hash、preview 覆盖、findings、轮次、全部 implementer 身份、评审身份、模型 / effort、trust 材料。
+- 返回结构化 receipt 候选：feature、candidate、candidate_tree、review base（普通候选为 main_head；叠加候选为 stack_base pin，并附 predecessor 来源与声明摘要）、merge_base、diff、报告路径与内容、plan hash、preview 覆盖、findings、轮次、全部 implementer 身份、评审身份、模型 / effort、trust 材料。
 - 调用方生成回执：
   ```bash
   python3 ../shared/scripts/review_receipt.py create-feature \

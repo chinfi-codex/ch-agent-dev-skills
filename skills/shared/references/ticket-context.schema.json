@@ -49,6 +49,22 @@
         "config": {"type": "string", "format": "sha256"}
       }
     },
+    "stack_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "consumer_scope", "predecessor_scope", "predecessor_ref", "commit", "tree", "source_path", "source_sha256", "declaration_sha256"],
+      "properties": {
+        "schema": {"const": "agent-dev.stack-base/v1"},
+        "consumer_scope": {"$ref": "#/definitions/repo-path"},
+        "predecessor_scope": {"$ref": "#/definitions/repo-path"},
+        "predecessor_ref": {"type": "string", "pattern": "^refs/heads/.+"},
+        "commit": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "source_path": {"$ref": "#/definitions/repo-path"},
+        "source_sha256": {"type": "string", "format": "sha256"},
+        "declaration_sha256": {"type": "string", "format": "sha256"}
+      }
+    },
     "gate2_context_digest": {"type": "string", "format": "sha256"},
     "dod": {
       "type": "array",

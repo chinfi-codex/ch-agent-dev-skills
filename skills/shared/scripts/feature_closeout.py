@@ -699,7 +699,24 @@ def freeze(args) -> Report:
     main_head = git(repo, "rev-parse", main).strip()
     head, tree = head_info(repo)
     merge_base = git(repo, "merge-base", main, "HEAD").strip()
-    if merge_base != main_head:
+    stack_base, predecessor_tip = None, None
+    if artifact_scope.stack_declared(fdir):
+        if cfg.get("tracker") != "local" or mode != "local-human":
+            rep.add("stack-base", "FAIL", "development stacking requires local-human local delivery")
+        else:
+            try:
+                main_root = repo_root_of(fdir)
+                stack_base, predecessor_tip = artifact_scope.checked_stack_base(
+                    main_root, fdir, target=branch, main_branch=main)
+            except (ValueError, OSError) as exc:
+                rep.add("stack-base", "FAIL", str(exc))
+        if stack_base is not None:
+            review_base = stack_base["commit"]
+            review_merge_base = git(repo, "merge-base", review_base, "HEAD").strip()
+            if (review_merge_base != review_base
+                    or not subprocess_run_ancestor(repo, review_base, head)):
+                rep.add("stack-base", "FAIL", "stacked candidate must descend exactly from the pinned predecessor")
+    elif merge_base != main_head:
         rep.add("main-sync", "FAIL", f"{main} 尚未同步进集成分支（merge-base {merge_base[:8]} ≠ {main} {main_head[:8]}）；"
                                      f"先在集成 worktree git merge {main}")
 
@@ -718,6 +735,20 @@ def freeze(args) -> Report:
             "path": "acceptance-plan.yaml", "sha256": digest, "cases": sorted(plan["cases"].keys()),
         },
     }
+    if stack_base is not None:
+        cand["stack_base"] = {
+            "schema": artifact_scope.STACK_BASE_SCHEMA,
+            "predecessor_scope": stack_base["predecessor_scope"],
+            "predecessor_ref": stack_base["predecessor_ref"],
+            "commit": stack_base["commit"],
+            "tree": stack_base["tree"],
+            "source_path": stack_base["source_path"],
+            "source_sha256": stack_base["source_sha256"],
+            "declaration_sha256": stack_base["declaration_sha256"],
+            "predecessor_tip_at_freeze": predecessor_tip,
+        }
+        cand["review_base"] = stack_base["commit"]
+        cand["review_merge_base"] = git(repo, "merge-base", stack_base["commit"], "HEAD").strip()
     if old.get("candidate_tree") and old["candidate_tree"] != tree:
         cand["supersedes"] = old["candidate_tree"]
         rep.add("candidate", "PASS", f"新候选取代旧 tree {old['candidate_tree'][:8]}：旧证据与人工确认全部失效，按增量重跑")
@@ -1225,7 +1256,8 @@ def report(args) -> int:
     if head != cand.get("candidate") or tree != cand.get("candidate_tree"):
         raise InputError("集成分支 HEAD/tree 已变化：先重新 freeze，不能给新候选套用旧报告")
     cfg = load_config(fdir)
-    if git(Path(args.repo), "rev-parse", cfg["main-branch"]).strip() != cand.get("main_head"):
+    if (git(Path(args.repo), "rev-parse", cfg["main-branch"]).strip() != cand.get("main_head")
+            and not cand.get("stack_base")):
         raise InputError("main 在冻结后已前进：先同步并重新 freeze，不能沿用旧报告")
     meta = cand.get("acceptance_plan") or {}
     if sha256_file(plan_source(fdir)) != meta.get("sha256"):
@@ -1249,8 +1281,48 @@ def _check_main_unchanged(rep: Report, repo: Path, cfg: dict, cand: dict):
         rep.add("main-drift", "FAIL", str(exc))
         return
     if main_now != cand.get("main_head"):
+        if cand.get("stack_base"):
+            # Stacked candidates anchor review and safety to the pinned
+            # predecessor; an independently advancing main never authorizes
+            # merge-main for a stacked campaign.
+            rep.add("main-drift", "PASS",
+                    f"{main} 冻结后前进（{str(cand.get('main_head'))[:12]} → {main_now[:12]}）；"
+                    "叠加候选按前置 pin 锚定，晋级保持拒绝")
+            return
         rep.add("main-drift", "FAIL", f"{main} 冻结后前进（{str(cand.get('main_head'))[:12]} → {main_now[:12]}）；"
                                      "任何路径变化都须同步 main、重新 freeze 并重验，main-drift-ignore 不再放行")
+
+
+def _check_stack_base(rep: Report, fdir: Path, repo: Path, cand: dict):
+    """Stacked candidates stay pinned to their declared predecessor source."""
+    stacked = cand.get("stack_base")
+    declared = artifact_scope.stack_declared(fdir)
+    if not stacked:
+        if declared:
+            rep.add("stack-base", "FAIL", "campaign declares a stack-base but the candidate lacks it；重新 freeze")
+        return
+    if not declared:
+        rep.add("stack-base", "FAIL", "stack-base declaration was removed after freeze；不得绕过叠加验收屏障")
+        return
+    try:
+        current, _tip = artifact_scope.checked_stack_base(
+            repo_root_of(fdir), fdir, target=str(cand.get("integration_branch") or ""),
+            main_branch=str(cand.get("main_branch") or ""))
+    except (ValueError, OSError, InputError) as exc:
+        rep.add("stack-base", "FAIL", str(exc))
+        return
+    if (current["commit"] != stacked.get("commit")
+            or current["declaration_sha256"] != stacked.get("declaration_sha256")
+            or current["source_sha256"] != stacked.get("source_sha256")):
+        rep.add("stack-base", "FAIL", "stack-base 声明在冻结后漂移；重新 freeze 并重跑全部候选证据")
+        return
+    candidate = str(cand.get("candidate") or "")
+    if not re.fullmatch(r"[a-f0-9]{40}", candidate) or not subprocess_run_ancestor(repo, stacked["commit"], candidate):
+        rep.add("stack-base", "FAIL", "candidate 不再包含前置 pin，冻结候选已失效")
+        return
+    if (cand.get("review_base") != stacked["commit"]
+            or cand.get("review_merge_base") != stacked["commit"]):
+        rep.add("stack-base", "FAIL", "review base 必须恰为前置 pin；独立评审范围不得改锚")
 
 
 def _check_ticket_states(rep: Report, fdir: Path, repo: Path, cand: dict):
@@ -1337,6 +1409,13 @@ def _check_candidate_verification(rep: Report, integ: Path, cand: dict):
             or value.get("main_head") != cand.get("main_head")
             or value.get("plan_sha256") != (cand.get("acceptance_plan") or {}).get("sha256")):
         rep.add("candidate-verification", "FAIL", "候选复跑绑定的 candidate/tree/main_head/plan 与冻结候选不一致")
+    stacked = cand.get("stack_base")
+    if stacked:
+        reported = value.get("stack_base")
+        if (not isinstance(reported, dict)
+                or reported.get("commit") != stacked.get("commit")
+                or reported.get("declaration_sha256") != stacked.get("declaration_sha256")):
+            rep.add("candidate-verification", "FAIL", "候选复跑未绑定冻结候选的前置 pin")
     if value.get("all-passed") is not True:
         rep.add("candidate-verification", "FAIL", "候选复跑并非全部通过；任一失败不得进入合并")
     expected = {str(item.get("id")) for item in cand.get("issues") or []}
@@ -1520,6 +1599,7 @@ def check(args) -> Report:
     if head != cand.get("candidate") or head_tree != tree:
         rep.add("candidate", "FAIL", f"集成分支 HEAD/tree 与冻结候选不一致：冻结后有新提交或 tree 改写，重新 freeze")
     _check_main_unchanged(rep, repo, cfg, cand)
+    _check_stack_base(rep, fdir, repo, cand)
     check_plan_unchanged(rep, fdir, cand)
     _check_ticket_states(rep, fdir, repo, cand)
     arch_check_meta = _check_arch_rules(rep, repo, str(cand.get("candidate")))

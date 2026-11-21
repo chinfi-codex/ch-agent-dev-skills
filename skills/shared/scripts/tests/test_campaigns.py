@@ -126,6 +126,147 @@ class CampaignTest(unittest.TestCase):
         self.assertEqual([item['issue'] for item in aggregate['issues']], ['issue-001'])
         self.assertFalse((b / 'integration').exists())
 
+    def test_stacked_campaign_real_delivery_freeze_and_candidate_rerun(self):
+        class Fixture(delivery_fixture.DeliveryTest):
+            @property
+            def source(self):
+                return scopes.worktree_path(self.root, self.fdir, 'issue-001')
+
+        f = self.fixture(Fixture)
+        predecessor = f.fdir
+        b = self.campaign(f.root, predecessor, 'b')
+        sh = delivery_fixture.sh
+        (f.integration / 'predecessor.py').write_text('previous = True\n')
+        sh(f.integration, 'add', 'predecessor.py')
+        sh(f.integration, 'commit', '-qm', 'predecessor')
+        pin = sh(f.integration, 'rev-parse', 'HEAD')
+        receipt = delivery.stack_source(f.root, predecessor, commit=pin)
+        self.assertEqual(receipt['status'], 'not-accepted')
+        self.assertEqual(receipt['main_ancestor'], sh(f.root, 'rev-parse', 'main'))
+        # Main advancing after the pin must not invalidate the frozen receipt.
+        (f.root / 'main-only.py').write_text('main_advanced = True\n')
+        sh(f.root, 'add', 'main-only.py')
+        sh(f.root, 'commit', '-qm', 'main advances independently')
+        main = sh(f.root, 'rev-parse', 'main')
+        stack = b / 'stack-base.json'
+        stack.write_text(json.dumps({
+            'schema': 'agent-dev.stack-base/v1', 'consumer_scope': scopes.scope_key(b),
+            'predecessor_scope': scopes.scope_key(predecessor),
+            'predecessor_ref': 'refs/heads/feat/demo',
+            'commit': pin, 'tree': receipt['tree'],
+            'source_path': receipt['path'], 'source_sha256': receipt['sha256'],
+        }))
+        target = f.root / '.worktrees/integration-b'
+        sh(f.root, 'worktree', 'add', '-qb', 'feat/mod/demo/b', str(target), pin)
+        f.fdir, f.issue, f.spec = b, b / 'issues' / f.issue.name, b / f.spec.name
+        f.integration = target
+        started = f.start()
+        self.assertEqual(sh(f.source, 'rev-parse', 'HEAD'), pin)
+        context = ticket_context.load_context(started['context'])
+        self.assertEqual(context['stack_base']['commit'], pin)
+        self.assertEqual(context['stack_base']['declaration_sha256'],
+                         hashlib.sha256(stack.read_bytes()).hexdigest())
+        previous = f.root / '.worktrees/integration-demo'
+        (previous / 'next.py').write_text('next_version = True\n')
+        sh(previous, 'add', 'next.py')
+        sh(previous, 'commit', '-qm', 'predecessor advances')
+        later = sh(previous, 'rev-parse', 'HEAD')
+        f.implement()
+        reopened = f.final_rebase()
+        self.assertEqual(ticket_context.load_context(started['context'])['stack_base']['commit'], pin)
+        self.assertEqual(reopened['predecessor_tip'], later)
+        f.verify('implementer')
+        import test_process_check
+        log = b / 'impl/issue-001/impl-log-issue-001.md'
+        log.write_text(test_process_check.LOG.replace('tests/test_dod.py', 't.py'))
+        result = delivery.merge(f.context_path)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(sh(target, 'rev-parse', 'HEAD^1'), pin)
+        self.assertEqual(sh(f.root, 'rev-parse', 'main'), main)
+        self.assertEqual(sh(previous, 'rev-parse', 'HEAD'), later)
+        from types import SimpleNamespace
+        report = fc.freeze(SimpleNamespace(feature_dir=str(b), repo=str(target), round=None, issues=None))
+        self.assertFalse(report.failed, str(report))
+        candidate = json.loads((b / 'integration/candidate.json').read_text())
+        self.assertEqual(candidate['stack_base']['commit'], pin)
+        self.assertEqual(candidate['review_base'], pin)
+        self.assertEqual(candidate['review_merge_base'], pin)
+        aggregate = verify_issue.run_candidate(b / 'integration/candidate.json', target,
+            host='zcode', agent='supervisor-review', session='candidate-review',
+            model='provider/supervisor', effort='high')
+        self.assertTrue(aggregate['all-passed'], aggregate)
+        self.assertEqual(aggregate['stack_base']['commit'], pin)
+        # Deleting the declaration cannot bypass the acceptance barrier.
+        stack.unlink()
+        with self.assertRaisesRegex(ValueError, 'stack-base'):
+            f.final_rebase()
+        refused = fc.freeze(SimpleNamespace(feature_dir=str(b), repo=str(target), round=None, issues=None))
+        self.assertTrue(refused.failed)
+
+    def test_stacked_campaign_closeout_review_main_drift_and_promotion_refusal(self):
+        f = self.fixture(closeout_fixture.FeatureCloseoutTest)
+        legacy = f.fdir
+        pin = f.merged_commit
+        receipt = delivery.stack_source(f.root, legacy, commit=pin)
+        stacked = self.campaign(f.root, legacy, 'stack')
+        (stacked / 'stack-base.json').write_text(json.dumps({
+            'schema': 'agent-dev.stack-base/v1', 'consumer_scope': scopes.scope_key(stacked),
+            'predecessor_scope': scopes.scope_key(legacy),
+            'predecessor_ref': 'refs/heads/feat/demo',
+            'commit': pin, 'tree': receipt['tree'],
+            'source_path': receipt['path'], 'source_sha256': receipt['sha256'],
+        }))
+        swt = f.root / '.worktrees/integration-stack'
+        delivery_fixture.sh(f.root, 'worktree', 'add', '-qb', 'feat/mod/demo/stack', str(swt), pin)
+        (swt / 'src' / 'b.py').write_text('y = 2\n')
+        delivery_fixture.sh(swt, 'add', '.')
+        delivery_fixture.sh(swt, 'commit', '-qm', 'campaign issue-001')
+        campaign_merge = delivery_fixture.sh(swt, 'rev-parse', 'HEAD')
+        f.fdir = stacked
+        f.wt = swt
+        f.merged_commit = campaign_merge
+        f.write_issue('done')
+        issue = stacked / 'issues/issue-001-x.md'
+        issue.write_text(issue.read_text().replace('feature-slug: demo',
+                                                   'feature-slug: demo\ncampaign-id: stack'))
+        f.write_conformance('conform')
+        f.write_merged(campaign_merge)
+        self.assertEqual(f.freeze().returncode, 0)
+        candidate = f.candidate
+        self.assertEqual(candidate['stack_base']['commit'], pin)
+        self.assertEqual(candidate['review_base'], pin)
+        # Independent main movement after the freeze is tolerated for stacked
+        # candidates; the safety anchor stays the pinned predecessor.
+        (f.root / 'main-only.py').write_text('main_advanced = True\n')
+        delivery_fixture.sh(f.root, 'add', 'main-only.py')
+        delivery_fixture.sh(f.root, 'commit', '-qm', 'main advances independently')
+        f.write_evidence([f.auto_result(), f.human_result(True)])
+        verification = stacked / 'integration/candidate-verification.json'
+        value = json.loads(verification.read_text())
+        value['stack_base'] = {'predecessor_scope': candidate['stack_base']['predecessor_scope'],
+                               'predecessor_ref': candidate['stack_base']['predecessor_ref'],
+                               'commit': pin,
+                               'declaration_sha256': candidate['stack_base']['declaration_sha256']}
+        verification.write_text(json.dumps(value))
+        receipt_path = stacked / 'integration/feature-review-receipt.json'
+        saved = json.loads(receipt_path.read_text())
+        self.assertEqual(saved['base'], pin)
+        self.assertEqual(saved['merge_base'], pin)
+        self.assertEqual(saved['stack_base']['commit'], pin)
+        f.confirm()
+        self.assertEqual(f.check('merge').returncode, 0)
+        # A receipt re-anchored onto main must fail the stacked gate.
+        tampered = dict(saved)
+        tampered['base'] = candidate['main_head']
+        tampered['merge_base'] = candidate['merge_base']
+        tampered.pop('stack_base', None)
+        receipt_path.write_text(json.dumps(tampered))
+        self.assertNotEqual(f.check('merge', generate_report=False).returncode, 0)
+        receipt_path.write_text(json.dumps(saved))
+        self.assertEqual(f.check('merge').returncode, 0)
+        with self.assertRaisesRegex(delivery.DeliveryError, 'STACKED_ACCEPTANCE_UNAVAILABLE'):
+            f.promote()
+
     def test_branch_identity_handles_existing_module_names_with_spaces(self):
         directory = Path('dev/features/data agent 核心流程/判读任务执行/campaigns/快测.回路')
         fm = {'feature-slug': '判读任务执行', 'campaign-id': '快测.回路'}

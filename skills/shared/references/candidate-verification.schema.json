@@ -25,6 +25,17 @@
       "type": "string",
       "minLength": 1,
       "description": "Generation directory name under the candidate's raw/ evidence tree."
+    },
+    "stack_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predecessor_scope", "predecessor_ref", "commit", "declaration_sha256"],
+      "properties": {
+        "predecessor_scope": {"type": "string", "minLength": 1},
+        "predecessor_ref": {"type": "string", "pattern": "^refs/heads/.+"},
+        "commit": {"type": "string", "format": "git-sha"},
+        "declaration_sha256": {"type": "string", "format": "sha256"}
+      }
     }
   },
   "definitions": {
