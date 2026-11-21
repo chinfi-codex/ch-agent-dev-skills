@@ -432,6 +432,11 @@ def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, prima
         },
         "dod": dod,
     }
+    stack_base, _ = artifact_scope.checked_stack_base(
+        primary, feature_dir, target=target, main_branch=config_data["main-branch"],
+    )
+    if stack_base is not None:
+        context["stack_base"] = stack_base
     context["gate2_context_digest"] = context_digest(context)
     _validate_context(context)
     if output_path is not None:

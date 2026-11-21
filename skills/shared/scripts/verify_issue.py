@@ -1453,6 +1453,19 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
         "all-passed": bool(entries) and all(item["pass"] is True for item in entries),
         "generated": output.name or output.as_posix(),
     }
+    stacked = frozen.get("stack_base")
+    if isinstance(stacked, dict):
+        pin = stacked.get("commit")
+        if not isinstance(pin, str) or not re.fullmatch(r"[a-f0-9]{40}", pin):
+            raise VerificationError("candidate.stack_base.commit must be a full 40-character Git OID")
+        if not _git(repo, "merge-base", "--is-ancestor", pin, frozen["candidate"], check=False).returncode == 0:
+            raise VerificationError("stacked candidate does not descend from its pinned predecessor")
+        aggregate["stack_base"] = {
+            "predecessor_scope": stacked.get("predecessor_scope"),
+            "predecessor_ref": stacked.get("predecessor_ref"),
+            "commit": pin,
+            "declaration_sha256": stacked.get("declaration_sha256"),
+        }
     try:
         schema_errors = _sibling("json_schema").load_validate(CANDIDATE_SCHEMA_PATH, aggregate)
     except (ImportError, ValueError, OSError) as exc:

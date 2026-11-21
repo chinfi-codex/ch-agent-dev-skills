@@ -103,7 +103,20 @@
         }
       }
     },
-    "created_at": {"type": "string", "format": "date-time"}
+    "created_at": {"type": "string", "format": "date-time"},
+    "stack_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predecessor_scope", "predecessor_ref", "commit", "tree", "source_sha256", "declaration_sha256"],
+      "properties": {
+        "predecessor_scope": {"type": "string", "minLength": 1},
+        "predecessor_ref": {"type": "string", "pattern": "^refs/heads/.+"},
+        "commit": {"type": "string", "format": "git-sha"},
+        "tree": {"type": "string", "format": "git-sha"},
+        "source_sha256": {"type": "string", "format": "sha256"},
+        "declaration_sha256": {"type": "string", "format": "sha256"}
+      }
+    }
   },
   "definitions": {
     "artifact": {

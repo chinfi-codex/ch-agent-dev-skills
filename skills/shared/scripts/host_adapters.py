@@ -266,7 +266,7 @@ def _binding_marker(value):
 
 def _review_binding(*values):
     keys = ("review_id", "round", "issue", "feature", "head", "tree",
-            "report_sha256", "context_digest", "repo", "worktree")
+            "report_sha256", "context_digest", "repo", "worktree", "stack_base")
     result = {}
     for value in values:
         if not isinstance(value, dict):

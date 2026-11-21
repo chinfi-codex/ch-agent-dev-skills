@@ -179,6 +179,7 @@ def _load_context(path) -> tuple:
     issue = root / context["issue_path"]
     if not issue.is_file():
         raise DeliveryError("frozen issue path is missing: %s" % issue)
+    _stack_context(root, issue.parent.parent, context)
     return context, root, source, issue
 
 
@@ -248,6 +249,66 @@ def _assert_target_allowed(context: dict, root: Path, issue: Path):
             raise DeliveryError("local-human tickets may target only the feature integration branch; explicit main is rejected")
 
 
+def stack_source(repo, feature_dir, *, commit, branch=None):
+    """Register an exact, development-only integration source."""
+    import tempfile
+
+    root = Path(repo).resolve()
+    directory = Path(feature_dir).resolve()
+    if directory not in set(artifact_scope.scopes(root)):
+        raise DeliveryError("stack-base predecessor must name an authoritative artifact scope")
+    ac, tc = _module("agents_config"), _module("ticket_context")
+    config = ac.load(root / "dev" / "agents-config.md")
+    if ((config.get("feature-closeout") or {}).get("mode") != "local-human"
+            or config.get("tracker") != "local"):
+        raise DeliveryError("development stacking requires local-human local delivery")
+    targets = set()
+    for issue in sorted(directory.glob("issues/issue-*.md")):
+        fm = ac.read_frontmatter(issue)
+        artifact_scope.validate_ticket(directory, fm)
+        fm["target-branch"] = None
+        targets.add(tc.target_branch(config, fm, directory))
+    if branch is None and len(targets) == 1:
+        branch = next(iter(targets))
+    if branch is None or branch not in targets or branch == config["main-branch"]:
+        raise DeliveryError("stack-base predecessor branch must match its declared integration scope")
+    receipt = artifact_scope.stack_source_receipt(root, directory, "refs/heads/" + branch,
+                                                  commit, config["main-branch"])
+    relative = artifact_scope.stack_source_path(receipt["scope"], commit)
+    path = root / relative
+    if path.resolve() != path:
+        raise DeliveryError("stack-base source path must be canonical")
+    data = _canonical(receipt) + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent) as pending:
+        pending.write(data)
+        pending.flush()
+        try:
+            os.link(pending.name, path)
+        except FileExistsError:
+            if path.is_symlink() or not path.is_file() or path.read_bytes() != data:
+                raise DeliveryError("existing stack-base receipt is immutable")
+    return {**receipt, "path": relative.as_posix(), "sha256": _sha(path)}
+
+
+def _stack_context(root, feature_dir, context):
+    config = _config(root, context)
+    current, tip = artifact_scope.checked_stack_base(
+        root, feature_dir, target=context["target_branch"], main_branch=config["main-branch"],
+    )
+    if current != context.get("stack_base"):
+        raise DeliveryError("stack-base differs from frozen ticket context")
+    if current and (config.get("tracker") != "local"
+                    or (config.get("feature-closeout") or {}).get("mode") != "local-human"):
+        raise DeliveryError("development stacking requires local-human local delivery")
+    return tip
+
+
+def _refuse_stacked_promotion(feature_dir):
+    if artifact_scope.stack_declared(feature_dir):
+        raise DeliveryError("STACKED_ACCEPTANCE_UNAVAILABLE")
+
+
 def start(issue_path, repo) -> dict:
     """Create the isolated worktree, main-dev symlink, and immutable context."""
     issue = Path(issue_path).resolve()
@@ -302,8 +363,28 @@ def start(issue_path, repo) -> dict:
         # on the target integration branch, even if the feature is not accepted yet.
         if statuses.get(dependency) not in {"merged", "done"}:
             raise DeliveryError("blocked-by dependency is neither merged nor done: %s" % dependency)
-    _oid(root, target)
-    if fc.get("mode") == "local-human" and target != str(config.get("main-branch") or "").strip():
+    target_head = _oid(root, target)
+    stack_base, predecessor_tip = artifact_scope.checked_stack_base(
+        root, feature_dir, target=target, main_branch=config["main-branch"],
+    )
+    if stack_base:
+        if config.get("tracker") != "local" or fc.get("mode") != "local-human":
+            raise DeliveryError("development stacking requires local-human local delivery")
+        if output.is_file():
+            _stack_context(root, feature_dir, tc.load_context(output))
+        if target_head != stack_base["commit"]:
+            proof = False
+            for path in (feature_dir / "impl").glob("issue-*/ticket-context.json"):
+                if tc.load_context(path).get("stack_base") != stack_base:
+                    continue
+                operation = _read_json(_operation_path(path))
+                for step in operation.get("steps", []):
+                    if (step.get("id") == "merge" and step.get("status") == "done"
+                            and step.get("observed", {}).get("merge_commit") == target_head):
+                        proof = True
+            if not proof:
+                raise DeliveryError("fresh stacked target must equal its pinned predecessor or an exact ticket merge")
+    if not stack_base and fc.get("mode") == "local-human" and target != str(config.get("main-branch") or "").strip():
         _require_fresh_integration_branch(root, config, feature_dir, fm, issue, target)
     # Validate DoD/spec/config/scope and all primary-repo inputs before any Git
     # mutation.  The provisional main-HEAD context is discarded, never reused.
@@ -363,9 +444,12 @@ def start(issue_path, repo) -> dict:
         _module("state_store").atomic_json_write(output, context)
     if context["source_head"] != _oid(worktree, "HEAD") or context["target_commit"] != _oid(root, target):
         raise DeliveryError("ticket_context froze the wrong source/target; refusing to amend it locally")
-    return {"schema": SCHEMA, "operation": "start", "context": str(output),
-            "worktree": str(worktree), "branch": branch, "target": target,
-            "source_head": context["source_head"]}
+    result = {"schema": SCHEMA, "operation": "start", "context": str(output),
+              "worktree": str(worktree), "branch": branch, "target": target,
+              "source_head": context["source_head"]}
+    if stack_base:
+        result["predecessor_tip"] = predecessor_tip
+    return result
 
 
 def _require_fresh_integration_branch(root, config, feature_dir, fm, issue, target):
@@ -525,15 +609,22 @@ def rebase(context_path) -> dict:
     """Only entry point that advances final target/base; conflicts stay in place."""
     current, root, source_path, issue = _load_context(context_path)
     _assert_target_allowed(current, root, issue)
+    predecessor_tip = _stack_context(root, issue.parent.parent, current)
+    if predecessor_tip:
+        def with_tip(result):
+            return {**result, "predecessor_tip": predecessor_tip}
+    else:
+        def with_tip(result):
+            return result
     source = _worktree_for_branch(root, _source_branch(current, issue))
     target_now = _oid(root, current["target_branch"])
     recovery = _rebase_recovery(source_path, current, target_now)
     if recovery is not None:
         journal, old, operation_path = recovery
-        return _resume_rebase(journal, old, root, source_path, issue, source, operation_path)
+        return with_tip(_resume_rebase(journal, old, root, source_path, issue, source, operation_path))
     old_head = current["source_head"]
     if target_now == current["target_commit"] and _oid(source, "HEAD") == old_head:
-        return {"schema": SCHEMA, "operation": "rebase", "changed": False, "context": current}
+        return with_tip({"schema": SCHEMA, "operation": "rebase", "changed": False, "context": current})
     if not _clean(source):
         raise DeliveryError("source worktree must be clean before rebase")
     if target_now != current["target_commit"] and _git(root, "merge-base", "--is-ancestor", current["target_commit"], target_now, check=False).returncode != 0:
@@ -547,7 +638,7 @@ def rebase(context_path) -> dict:
     journal = _module("state_store").OperationJournal.create(
         operation_path, operation_id, ["rebase", "record"])
     journal.advance("rebase", expected=expected)
-    return _resume_rebase(journal, current, root, source_path, issue, source, operation_path)
+    return with_tip(_resume_rebase(journal, current, root, source_path, issue, source, operation_path))
 
 
 def _read_json(path: Path):
@@ -855,6 +946,7 @@ def reconcile(context_path=None, *, candidate_path=None, candidate_repo=None, re
             raise DeliveryError("feature reconcile requires --candidate, --candidate-repo and --repo")
         candidate_file = Path(candidate_path).resolve()
         fdir, round_name, integ = _candidate_location(candidate_file)
+        _refuse_stacked_promotion(fdir)
         candidate = _load_json_strict(candidate_file)
         if not _feature_operation_path(integ).is_file():
             raise DeliveryError("no exact feature promote operation exists for this candidate")
@@ -1169,6 +1261,7 @@ def promote(candidate_path, candidate_repo, repo, *, strategy=None, run_id=None,
     """Promote a feature candidate; a ticket context is not a feature authority."""
     candidate_file = Path(candidate_path).resolve()
     fdir, round_name, integ = _candidate_location(candidate_file)
+    _refuse_stacked_promotion(fdir)
     candidate = _load_json_strict(candidate_file)
     if candidate.get("schema") != "agent-dev.feature-candidate/v2":
         raise DeliveryError("feature promote requires a v2 feature candidate")
@@ -1481,6 +1574,11 @@ def main(argv=None):
     start_p = sub.add_parser("start")
     start_p.add_argument("--issue", required=True)
     start_p.add_argument("--repo", required=True)
+    stack_p = sub.add_parser("stack-source")
+    stack_p.add_argument("--repo", required=True)
+    stack_p.add_argument("--feature-dir", required=True)
+    stack_p.add_argument("--commit", required=True)
+    stack_p.add_argument("--branch")
     for name in ("rebase", "merge"):
         item = sub.add_parser(name)
         item.add_argument("--context", required=True)
@@ -1509,6 +1607,8 @@ def main(argv=None):
     try:
         if args.command == "start":
             result = start(args.issue, args.repo)
+        elif args.command == "stack-source":
+            result = stack_source(args.repo, args.feature_dir, commit=args.commit, branch=args.branch)
         elif args.command == "rebase":
             result = rebase(args.context)
         elif args.command == "merge":

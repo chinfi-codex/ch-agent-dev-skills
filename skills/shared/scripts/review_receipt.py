@@ -960,10 +960,22 @@ def _feature_binding_errors(receipt, candidate, repo: Path, feature_dir: Path):
         feature = candidate.get("feature")
         if isinstance(feature, str) and feature and receipt["feature"] != feature:
             errors.append("receipt feature differs from candidate.feature")
-        for field, candidate_field in (("base", "main_head"), ("head", "candidate"),
-                                       ("tree", "candidate_tree"), ("merge_base", "merge_base")):
+        stacked = candidate.get("stack_base")
+        if stacked:
+            binding = (("base", "review_base"), ("head", "candidate"),
+                       ("tree", "candidate_tree"), ("merge_base", "review_merge_base"))
+        else:
+            binding = (("base", "main_head"), ("head", "candidate"),
+                       ("tree", "candidate_tree"), ("merge_base", "merge_base"))
+        for field, candidate_field in binding:
             if candidate.get(candidate_field) != receipt[field]:
                 errors.append("receipt %s differs from candidate.json %s" % (field, candidate_field))
+        if stacked:
+            recorded = receipt.get("stack_base")
+            if (not isinstance(recorded, dict)
+                    or recorded.get("commit") != stacked.get("commit")
+                    or recorded.get("declaration_sha256") != stacked.get("declaration_sha256")):
+                errors.append("receipt stack_base differs from the candidate's pinned predecessor")
         plan = candidate.get("acceptance_plan") or {}
         if isinstance(plan, dict) and plan.get("sha256") != receipt["plan_sha256"]:
             errors.append("receipt plan_sha256 differs from candidate.acceptance_plan.sha256")
@@ -1288,10 +1300,17 @@ def create_feature_receipt(feature_dir, repo, input_path, report, coverage_previ
         config = _load_feature_config(repo, feature_dir)
 
         feature = _feature_name(feature_dir, candidate)
-        base = _feature_oid(candidate.get("main_head"), "candidate.main_head")
+        stacked = candidate.get("stack_base")
+        if stacked:
+            base = _feature_oid(candidate.get("review_base"), "candidate.review_base")
+            merge_base = _feature_oid(candidate.get("review_merge_base"), "candidate.review_merge_base")
+            if not isinstance(stacked, dict) or stacked.get("commit") != base:
+                raise ReceiptError("stacked candidate review base must equal its pinned predecessor")
+        else:
+            base = _feature_oid(candidate.get("main_head"), "candidate.main_head")
+            merge_base = _feature_oid(candidate.get("merge_base"), "candidate.merge_base")
         head = _feature_oid(candidate.get("candidate"), "candidate.candidate")
         tree = _feature_oid(candidate.get("candidate_tree"), "candidate.candidate_tree")
-        merge_base = _feature_oid(candidate.get("merge_base"), "candidate.merge_base")
         branch = candidate.get("integration_branch")
         if not isinstance(branch, str) or not branch.strip():
             raise ReceiptError("candidate.integration_branch must be a non-empty string")
@@ -1300,7 +1319,7 @@ def create_feature_receipt(feature_dir, repo, input_path, report, coverage_previ
             raise ReceiptError("candidate_tree does not match the candidate commit tree")
         actual_merge_base = _git(repo, "merge-base", base, head).strip()
         if actual_merge_base != merge_base:
-            raise ReceiptError("candidate.merge_base does not match git merge-base main_head candidate")
+            raise ReceiptError("candidate merge base does not match git merge-base base candidate")
         diff_sha = _feature_diff_sha(repo, base, head)
         changed = _changed_paths(repo, base, head)
         if not changed:
@@ -1464,6 +1483,10 @@ def create_feature_receipt(feature_dir, repo, input_path, report, coverage_previ
             "artifacts": {"report": report_artifact, "process_check": process_artifact},
             "created_at": _now(),
         }
+        if stacked:
+            receipt["stack_base"] = {key: stacked.get(key) for key in (
+                "predecessor_scope", "predecessor_ref", "commit", "tree",
+                "source_sha256", "declaration_sha256")}
         if host_verification is not None:
             host_verification["review_action"] = _feature_review_action(receipt)
     except (ReceiptError, OSError, ValueError, KeyError, TypeError) as exc:
