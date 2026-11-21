@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and consume immutable v3 ticket contexts for delivery and gates.
+"""Create and consume immutable v4 ticket contexts for delivery and gates.
 
 Public API:
     target_branch(config, frontmatter, feature_dir=None) -> str
@@ -342,8 +342,8 @@ def _scope(frontmatter: Dict[str, Any], key: str) -> List[str]:
     return result
 
 
-def _validate_context(context: Dict[str, Any]) -> None:
-    errors = json_schema.load_validate(SCHEMA_PATH, context)
+def _validate_context(context: Dict[str, Any], schema_path: Path = SCHEMA_PATH) -> None:
+    errors = json_schema.load_validate(schema_path, context)
     if errors:
         raise ContextError("ticket context validation failed:\n  " + "\n  ".join(errors))
     for key in ("issue_path", "feature_dir", "spec_path", "config_path"):
@@ -450,7 +450,7 @@ def _reject_duplicate_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
     return result
 
 
-def load_context(path: Any) -> Dict[str, Any]:
+def _load_context(path: Any, candidate: bool = False) -> Dict[str, Any]:
     """Load a context without trusting handwritten or partially valid JSON."""
     source = Path(path)
     try:
@@ -461,8 +461,80 @@ def load_context(path: Any) -> Dict[str, Any]:
         raise ContextError("cannot load context %s: %s" % (source, exc))
     if not isinstance(context, dict):
         raise ContextError("ticket context root must be an object")
-    _validate_context(context)
+    schema_path = SCHEMA_PATH
+    if candidate and context.get("schema") == "agent-dev.ticket-context/v3":
+        schema_path = SCHEMA_PATH.with_name("ticket-context-v3.schema.json")
+    _validate_context(context, schema_path)
     return context
+
+
+def load_context(path: Any) -> Dict[str, Any]:
+    """Load only the current v4 contract; delivery never accepts historical v3."""
+    return _load_context(path)
+
+
+def load_candidate_context(path: Any) -> Dict[str, Any]:
+    """Read original v3/v4 contexts without migration or rewriting their digest."""
+    return _load_context(path, candidate=True)
+
+
+def _snapshot_paths(feature_dir: Any, sha: str) -> Tuple[Path, Path]:
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ContextError("expected-sha must be a lowercase SHA256")
+    feature = Path(feature_dir).resolve(strict=True)
+    directory = feature / "config-snapshots"
+    paths = (directory / (sha + ".md"), directory / (sha + ".receipt.json"))
+    if directory.is_symlink() or any(path.is_symlink() for path in paths):
+        raise ContextError("config snapshot paths must not be symlinks")
+    if directory.resolve().parent != feature:
+        raise ContextError("config snapshot path escapes feature")
+    return paths
+
+
+def load_archived_config(feature_dir: Any, sha: str) -> Tuple[Path, Dict[str, Any]]:
+    """Authenticate a registered, content-addressed configuration snapshot."""
+    snapshot, receipt_path = _snapshot_paths(feature_dir, sha)
+    data = snapshot.read_bytes()
+    if _sha256_bytes(data) != sha:
+        raise ContextError("config snapshot digest mismatch")
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (ValueError, UnicodeError) as exc:
+        raise ContextError("invalid config snapshot receipt: %s" % exc)
+    if (not isinstance(receipt, dict) or receipt.get("sha256") != sha
+            or receipt.get("size") != len(data) or not isinstance(receipt.get("source_path"), str)):
+        raise ContextError("invalid config snapshot receipt")
+    config = agents_config.load(snapshot)
+    if snapshot.read_bytes() != data:
+        raise ContextError("config snapshot changed during validation")
+    return snapshot, config
+
+
+def archive_config(feature_dir: Any, source: Any, expected_sha: str) -> Dict[str, Any]:
+    """Register exact original bytes; never overwrite conflicting archive files."""
+    snapshot, receipt_path = _snapshot_paths(feature_dir, expected_sha)
+    source = Path(source).resolve(strict=True)
+    data = source.read_bytes()
+    if _sha256_bytes(data) != expected_sha:
+        raise ContextError("source config digest mismatch")
+    agents_config.load(source)
+    if source.read_bytes() != data:
+        raise ContextError("source config changed during validation")
+    if snapshot.exists() and snapshot.read_bytes() != data:
+        raise ContextError("config snapshot conflicts with existing bytes")
+    receipt = {"source_path": str(source), "sha256": expected_sha, "size": len(data)}
+    if receipt_path.exists():
+        load_archived_config(feature_dir, expected_sha)
+        return json.loads(receipt_path.read_text(encoding="utf-8"))
+    snapshot.parent.mkdir(exist_ok=True)
+    if not snapshot.exists():
+        with snapshot.open("xb") as stream:
+            stream.write(data)
+    with receipt_path.open("x", encoding="utf-8") as stream:
+        json.dump(receipt, stream, ensure_ascii=False, indent=2, sort_keys=True)
+        stream.write("\n")
+    load_archived_config(feature_dir, expected_sha)
+    return receipt
 
 
 def _fraction(rate: Any) -> Fraction:
@@ -652,11 +724,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     plan.add_argument("--issue", required=True)
     plan.add_argument("--repo", required=True)
     plan.add_argument("--primary-repo")
+    archive = subparsers.add_parser("archive-config")
+    archive.add_argument("--feature-dir", required=True)
+    archive.add_argument("--source", required=True)
+    archive.add_argument("--expected-sha", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "create":
             context = create_context(args.issue, args.repo, args.output, primary_repo=args.primary_repo)
             _print(context)
+        elif args.command == "archive-config":
+            _print(archive_config(args.feature_dir, args.source, args.expected_sha))
         elif args.command == "check-plan":
             result = check_plan(args.issue, args.repo, primary_repo=args.primary_repo)
             _print(result)
