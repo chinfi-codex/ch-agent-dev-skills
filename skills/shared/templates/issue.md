@@ -1,4 +1,6 @@
 ---
+
+> 写作成本：保留本模板全部必需内容；事实用稳定 ID 与来源引用承接，不复述上游整段正文。完整行为、边界与断言不得省略。修订只编辑变化处，独立判断不可复用他人结论。
 feature-slug: <feature-slug>
 campaign-id: <campaign-id>
 issue-id: issue-001
@@ -42,6 +44,18 @@ created: YYYY-MM-DD
 ## 不做什么
 
 本票明确不覆盖的部分（防止 scope creep，评审 Spec 轴据此判越界）。
+
+## 方案切片
+
+来源：`<tech-spec 文件名>` §3.1
+来源 SHA256：`<spec 文件 SHA256>`
+切片格式：1
+
+本节由 `spec_tree.py slice` 从 tech-spec 3.1 文档树确定性生成（本票 `declared-scope` 命中的树行，仓库相对路径 + 动作 + 计划变动逻辑原文）；`declared-scope` 变更后必须重新生成，不得手改。本节是施工输入，不等同于本票全部行为——与邻票共享的文件必须在「要做什么 / 不做什么」写清行为分工。
+
+```text
+<由脚本写入，例如：services/order/order_service.py [修改] close_order() 增加幂等键校验，回调重试不再重复关单>
+```
 
 ## 备注
 

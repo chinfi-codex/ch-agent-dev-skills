@@ -16,7 +16,7 @@
 - `handoff/`: 会话交接 skill（横切；不落盘，交接提示词直接输出在对话里供复制到新会话）
 - `shared/fragments/`: 多个 skill 共享的纪律与流程片段（构建时内联进 SKILL.md）
 - `shared/templates/`: 输出格式模板（不内联，agent 运行时按指针读取）
-- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`。v2 核心包括：`agents_config.py` / `ticket_context.py`（冻结输入）、`verify_issue.py`（真实 DoD + fast）、`review_receipt.py`（独立评审）、`process_check.py`（只读门禁）、`delivery.py`（唯一合并）、`human_decision.py`（主会话问人）、`progress.py close-and-clean/reconcile`（可恢复清理）、`arch_check.py`（ARCH-CHECK 规则 / Python AST / 指南生成）；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode / DSH 会话命名及 hooks 非破坏安装
+- `shared/scripts/`: 跨 skill 的确定性脚本与标准库 `unittest`。v2 核心包括：`agents_config.py` / `ticket_context.py`（冻结输入）、`verify_issue.py`（真实 DoD + fast）、`review_receipt.py`（独立评审）、`process_check.py`（只读门禁）、`delivery.py`（唯一合并）、`human_decision.py`（主会话问人）、`progress.py close-and-clean/reconcile`（可恢复清理）、`arch_check.py`（ARCH-CHECK 规则 / Python AST / 指南生成）、`spec_tree.py`（tech-spec 3.1 树解析 / 票级方案切片）、`globmatch.py`（拆票与实现期共用的 glob 语义）；`session_title.py` 和 `install_host_hooks.py` 负责 CC / Codex / ZCode / DSH 会话命名及 hooks 非破坏安装
 - `shared/dsh-session-title/`: DSH 原生 bundle，监听宿主事件并调用 `ctx.sessionTitle.rename()`，与 Python 两阶段同步 accepted title
 - `scripts/`: 生成 `SKILL.md` 的构建脚本
 

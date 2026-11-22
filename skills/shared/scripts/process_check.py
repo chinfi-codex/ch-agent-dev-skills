@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import fnmatch
 import hashlib
 import importlib
 import json
@@ -35,6 +34,13 @@ import sys
 import tempfile
 from fractions import Fraction
 from pathlib import Path
+
+# Isolated CLI mode (-I) drops the script directory from sys.path; sibling
+# imports in this package-less standard-library layer use the explicit insert.
+# Glob semantics live in globmatch so split-time tree projections and this
+# implementation-time scope check share one definition.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from globmatch import glob_to_regex, is_concrete_path, match_any  # noqa: E402,F401
 
 DEFAULT_NON_PRODUCTION = [
     "tests/**", "**/tests/**", "test/**", "**/test/**", "**/test_*", "**/*_test.*",
@@ -96,37 +102,6 @@ def md_section(text: str, title: str) -> str:
 
 
 # ---------- glob and Git ----------
-
-def glob_to_regex(pattern: str) -> re.Pattern:
-    index, out = 0, []
-    while index < len(pattern):
-        char = pattern[index]
-        if pattern.startswith("**/", index):
-            out.append("(?:.*/)?")
-            index += 3
-        elif pattern.startswith("**", index):
-            out.append(".*")
-            index += 2
-        elif char == "*":
-            out.append("[^/]*")
-            index += 1
-        elif char == "?":
-            out.append("[^/]")
-            index += 1
-        else:
-            out.append(re.escape(char))
-            index += 1
-    return re.compile("".join(out) + r"\Z")
-
-
-def match_any(path: str, patterns):
-    for pattern in patterns or []:
-        pattern = str(pattern).strip()
-        if not pattern:
-            continue
-        if glob_to_regex(pattern).match(path) or (pattern.endswith("/") and path.startswith(pattern)) or fnmatch.fnmatch(path, pattern):
-            return pattern
-    return None
 
 
 def git(repo: Path, *args: str) -> str:

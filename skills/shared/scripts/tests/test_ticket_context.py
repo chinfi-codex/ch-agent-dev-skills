@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ import ticket_context as tc
 
 
 SCRIPT = Path(__file__).resolve().parent.parent / "ticket_context.py"
+SPEC_SCRIPT = Path(__file__).resolve().parent.parent / "spec_tree.py"
 CONFIG = """# markdown is retained
 ```yaml
 schema-version: 2
@@ -437,6 +439,119 @@ cases:
                           .replace("declared-scope: [src/b.py]", "declared-scope: [src/a.py]"), encoding="utf-8")
         result = tc.check_plan(self.issue, self.root)
         self.assertTrue(any("overlapping scope" in error for error in result["errors"]), result["errors"])
+
+    # ---------- spec §3.1 tree closure and 方案切片 (spec-tree-version: 1) ----------
+
+    def write_v1_spec(self, tree="src/\n  a.py [修改] a() 增加幂等校验\n  b.py [新增] 幂等键工具\n"):
+        self.spec.write_text("---\nstatus: 已确认（待拆解）\nspec-tree-version: 1\n---\n\n# Spec\n\n"
+                             "### 3.1 模块拆解\n\n```text\n%s```\n" % tree, encoding="utf-8")
+
+    def scope_issue(self, scope):
+        self.issue.write_text(ISSUE.replace("declared-scope: [src/a.py, tests/**]",
+                                            "declared-scope: [%s]" % scope), encoding="utf-8")
+
+    def generate_slice(self, issue=None):
+        cli = subprocess.run([sys.executable, "-I", str(SPEC_SCRIPT), "slice",
+                              "--issue", str(issue or self.issue), "--repo", str(self.root)],
+                             capture_output=True, text=True)
+        self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
+
+    def test_check_plan_v1_closure_accepts_full_projection(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/*.py")
+        self.generate_slice()
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["warnings"], [])
+        cli = subprocess.run([sys.executable, "-I", str(SCRIPT), "check-plan", "--issue", str(self.issue),
+                              "--repo", str(self.root)], capture_output=True, text=True)
+        self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
+        self.assertEqual(json.loads(cli.stdout)["warnings"], [])
+        context = tc.create_context(self.issue, self.root)
+        self.assertEqual(context["declared_scope"], ["src/*.py"])
+
+    def test_check_plan_v1_rejects_uncovered_tree_file(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/a.py")
+        self.generate_slice()
+        result = tc.check_plan(self.issue, self.root)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("no active ticket declared-scope covers it" in error and "b.py" in error
+                            for error in result["errors"]), result["errors"])
+
+    def test_check_plan_v1_rejects_scope_beyond_tree_and_zero_hit_glob(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/*.py, src/missing.py")
+        self.generate_slice()
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("src/missing.py" in error and "absent from the spec 3.1 tree" in error
+                            for error in result["errors"]), result["errors"])
+        self.scope_issue("src/*.py, tests/*.py")
+        self.generate_slice()
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("tests/*.py" in error and "matches no tree file" in error
+                            for error in result["errors"]), result["errors"])
+
+    def test_check_plan_v1_rejects_stale_and_missing_slice(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/*.py")
+        self.generate_slice()
+        self.issue.write_text(self.issue.read_text(encoding="utf-8").replace(
+            "declared-scope: [src/*.py]", "declared-scope: [src/a.py]"), encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("stale" in error for error in result["errors"]), result["errors"])
+        self.scope_issue("src/*.py")
+        self.generate_slice()
+        text = self.issue.read_text(encoding="utf-8")
+        self.issue.write_text(re.sub(r"^## 方案切片.*?(?=^## )", "", text, flags=re.S | re.M), encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(any("lacks a 方案切片" in error for error in result["errors"]), result["errors"])
+
+    def test_create_context_freeze_verifies_slice(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/*.py")
+        self.generate_slice()
+        output = self.feature / "impl/issue-001/slice-context.json"
+        tc.create_context(self.issue, self.root, output)
+        self.spec.write_text(self.spec.read_text(encoding="utf-8").replace(
+            "a.py [修改] a() 增加幂等校验", "a.py [修改] a() 改为串行关单"), encoding="utf-8")
+        with self.assertRaisesRegex(tc.ContextError, "stale|SHA256"):
+            tc.create_context(self.issue, self.root)
+
+    def test_check_plan_legacy_spec_gets_diagnostics_not_errors(self):
+        self.prepare_plan()
+        self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n\n### 3.1 模块拆解\n\n```text\n"
+                             "src/\n  a.py [修改] 旧方案树\n  b.py [新增] 旧方案新增\n```\n", encoding="utf-8")
+        self.scope_issue("src/a.py")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertTrue(any("no active ticket declared-scope covers it" in warning and "b.py" in warning
+                            for warning in result["warnings"]), result["warnings"])
+        self.spec.write_text("---\nstatus: 已确认（待拆解）\n---\n# Spec\n", encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertTrue(any("no §3.1" in warning for warning in result["warnings"]), result["warnings"])
+
+    def test_check_plan_cancelled_ticket_stops_covering_tree(self):
+        self.prepare_plan()
+        self.write_v1_spec()
+        self.scope_issue("src/a.py")
+        self.generate_slice()
+        second = self.write_second_plan_issue(blocked="[issue-001]", scope="src/b.py")
+        self.generate_slice()
+        self.generate_slice(second)
+        result = tc.check_plan(self.issue, self.root)
+        self.assertTrue(result["ok"], result["errors"])
+        second.write_text(second.read_text(encoding="utf-8").replace("status: proposed", "status: cancelled"),
+                          encoding="utf-8")
+        result = tc.check_plan(self.issue, self.root)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("b.py" in error and "covers it" in error for error in result["errors"]), result["errors"])
 
     def test_cli_create_show_validate(self):
         output = self.feature / "impl/issue-001/cli-context.json"

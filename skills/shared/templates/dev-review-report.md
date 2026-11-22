@@ -1,5 +1,7 @@
 # Feature Review Report：<feature-slug>
 
+> 写作成本：保留本模板全部必需内容；事实用稳定 ID 与来源引用承接，不复述上游整段正文。完整行为、边界与断言不得省略。修订只编辑变化处，独立判断不可复用他人结论。
+
 | 项 | 内容 |
 |---|---|
 | feature | `<feature-module>/<feature-slug>` |

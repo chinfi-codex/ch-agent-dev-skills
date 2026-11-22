@@ -34,7 +34,9 @@ allowed-tools:
 
 {{ARCH_CHECK}}
 
-{{HUMAN_DECISION}}
+需要裁决或关键输入缺失时，停止并先读取 `../shared/fragments/human-decision.md` 的请求 envelope 契约；只返回未持久化请求，不直接问人、不写决策包、不路由、不改票。主会话负责完整决策流程。
+
+{{TOKEN_DISCIPLINE}}
 
 # /ai-review
 

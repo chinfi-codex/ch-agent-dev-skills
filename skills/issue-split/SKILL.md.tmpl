@@ -31,7 +31,7 @@ allowed-tools:
 
 {{MODE_GUARD}}
 
-本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`ticket_context.py check-plan`，以及规则存在时的 `arch_check.py validate` / `render check`。它们只验证功能验收计划、整组票计划与规则结构，不属于实现或测试执行；其他实现导向命令限制不变。
+本 skill 可额外执行只读文档校验：`feature_closeout.py validate-plan`、`ticket_context.py check-plan`，以及规则存在时的 `arch_check.py validate` / `render check`；另可执行 `spec_tree.py slice`，它只向本 campaign 票文件写入「方案切片」节。它们只验证功能验收计划、整组票计划与规则结构，不属于实现或测试执行；其他实现导向命令限制不变。
 
 {{GLOSSARY}}
 
@@ -45,16 +45,18 @@ allowed-tools:
 
 {{DEV_CONFIG}}
 
-{{DISPATCH_PROTOCOL}}
 
-{{PROGRESS_EVENTS}}
 
-{{HUMAN_DECISION}}
 
-{{SUPERVISION_LOOP}}
+
+
+
+
 
 
 {{ARCH_CHECK}}
+
+{{TOKEN_DISCIPLINE}}
 
 # /issue-split
 
@@ -65,6 +67,13 @@ allowed-tools:
 - 技术方案设计（`/tech-spec` 的事）
 - 实现任何一张票（`/implement` 的事）
 - 修改 tech-spec 的方案内容；发现方案问题退回 `/tech-spec`
+
+## 阶段协议加载（执行前必读）
+
+- 门②未确认不发布、不派发；本阶段不实现代码。全部冻结、粒度、覆盖与验收门不变。
+- 门②确认后，首次派发前完整读取 `../shared/fragments/dispatch-protocol.md`、`../shared/fragments/supervision-loop.md` 和 `../shared/fragments/progress-events.md`，随后依协议监督至候选验收与 finalize；不能用本页摘要替代。
+- 任一阶段遇到需人裁决、needs-human、路由或恢复问题，先读 `../shared/fragments/human-decision.md`；ack 前不解除等待，结果不明不重派。无人值守只记录不问人。
+- 清场只能在真实合并、验收后按上述协议执行；未知活性不删除，不能用删除分支证明完成。push / Prod 仍需单独授权。
 
 你的位置是：
 
@@ -113,6 +122,7 @@ allowed-tools:
 **确定 declared-scope 与票粒度（确定性红线，不凭感觉）**：
 
 - 从 tech-spec 的模块 / 接口 / 约束导出本票 `declared-scope`（预计触碰的**所有**代码、测试、配置路径 / glob；本票修改架构规则时含 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md`；生产子集用于粒度统计）
+- **方案切片（spec 声明 `spec-tree-version: 1` 时强制）**：每票 `declared-scope` 定稿后运行 `python3 ../shared/scripts/spec_tree.py slice --issue <票文件> --repo <项目根>`，把 spec 3.1 树中命中本票 scope 的文件行（仓库相对路径 + 动作 + 计划变动逻辑原文）确定性写入票的「方案切片」节；scope 修订后必须重新生成，不得手改。切片是施工输入，不等同本票全部行为：与邻票共享同一文件的，必须在「要做什么 / 不做什么」写清本票行为分工，分不清就合票。spec 无 `spec-tree-version` frontmatter（存量旧 spec）时不生成切片，闭合检查降级为诊断告警，不拦门②
 - **粒度红线**：预计生产代码文件数 > `verify-policy.ticket-max-files`（默认 10）、预计生产代码 LOC > `verify-policy.ticket-max-loc`（默认 400），或 scope 不可枚举（只能写出目录级 glob）→ 本票必须再拆；不得靠增加测试深度或留到集成阶段放行。实现期任一 changed path 越界都必须重新确认票并生成新 context，实测超任一红线同样停止并退回再拆
 - **票级验证统一为 DoD + fast**，不为迁移 / 鉴权、公共接口、共享模块或 DAG 终点设置额外测试范围。DoD 仍须可执行且覆盖票面行为；feature / main 的 CI full 是套件级安全网，不是写窄票 DoD 的理由
 - **集成票不再强制额外测试**：DAG 中无后继（没有其他票 blocked-by 它）的票标记为集成票，用于 `development.escalated` 路由与 feature 级核对；它仍只跑本票 DoD + fast，不做票级 conformance。全部票合入集成分支后，feature 级评审、候选复跑和 conformance 在 candidate 统一做一次；所有票同样受上述粒度红线约束
@@ -130,7 +140,7 @@ python3 ../shared/scripts/feature_closeout.py validate-plan --feature-dir <需�
 python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一票> --repo <项目根>
 ```
 
-若 tech-spec 3.2 声明了规则变更，另跑 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json`（只读）。`check-plan` 检查组内 DAG、scope 重叠串行、DoD 与 AC 计划；不做架构 ID 对账。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
+若 tech-spec 3.2 声明了规则变更，另跑 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json`（只读）。`check-plan` 检查组内 DAG、scope 重叠串行、DoD 与 AC 计划；spec 声明 `spec-tree-version: 1` 时另做 3.1 树 ↔ declared-scope 闭合与逐票「方案切片」完整投影核验——树文件无人认领（漏拆）、scope 具体路径不在树中（扩围）、scope glob 零命中树文件、切片缺失或与重算投影不一致，均为错误拦门②；旧 spec（无版本声明）同项降级为诊断告警。不做架构 ID 对账。机器不判断 tracer-bullet 的业务语义，门②仍须审覆盖与粒度。
 
 向用户呈现编号清单，一次审全部：
 
@@ -164,6 +174,6 @@ python3 ../shared/scripts/ticket_context.py check-plan --issue <当前组任一�
 - tech-spec 未确认不开拆；`acceptance-plan.yaml` 缺失或校验不过不开拆；拆解不改变方案与验收计划内容
 - 门②未过不发布；发布只写票文件与 tracker issue，不碰源码
 - DoD 不可自动判定的票不允许存在；tech-spec 3.2 非空而票清单无任何契约 DoD 的，不许过门②
-- 票一旦 confirmed，标题 / DoD / declared-scope 不得由本 skill 或实现方单方面修改；变更须重新过门②并生成新 ticket context。实现期任何 changed path 越界都直接 FAIL，超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以登记漂移或补跑测试代替
+- 票一旦 confirmed，标题 / DoD / declared-scope / 方案切片不得由本 skill 或实现方单方面修改；变更须重新生成切片、重新过门②并生成新 ticket context。实现期任何 changed path 越界都直接 FAIL，超过 `ticket-max-files` / `ticket-max-loc` 必须退回再拆，不得以登记漂移或补跑测试代替
 - 分工：派发、监督与合并在主会话，实现与评审各自在独立的新开对话；主会话不代写实现、不代评
 - 用词遵循 GLOSSARY 标准术语
