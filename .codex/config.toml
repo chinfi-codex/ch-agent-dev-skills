@@ -1,0 +1,14 @@
+model = "gpt-6-astra"
+model_reasoning_effort = "low"
+
+[agents.supervisor-review]
+description = "独立 code review / 符合性核对；只评不改，使用监督评审模型。"
+config_file = "agents/supervisor-review.toml"
+
+[agents.development]
+description = "独立 /implement 开发会话；在指定 worktree 实现、测试并落证据。"
+config_file = "agents/development.toml"
+
+[agents.development-escalated]
+description = "独立 /implement 升档开发会话；在指定 worktree 实现、测试并落证据。"
+config_file = "agents/development-escalated.toml"
