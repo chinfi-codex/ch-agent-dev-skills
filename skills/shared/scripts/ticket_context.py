@@ -26,6 +26,14 @@ Public API:
     select_conformance(context, rate) -> bool
         Deterministically compare SHA256(gate2 digest + issue ID) / 2**256 with
         a fractions.Fraction rate in (0, 1].
+    declared_scope(frontmatter) -> list[str]
+        Validated declared-scope list, shared with spec_tree.slice_issue.
+    check_plan(issue_path, repo) -> {"ok", "errors", "warnings", "issues", ...}
+        Read-only gate-2 plan validation: DoD shape, DAG, scope overlap,
+        acceptance-plan binding, plus spec §3.1 tree ↔ declared-scope closure
+        and per-ticket 方案切片 projection equality.  Strict closure applies
+        only to specs declaring ``spec-tree-version: 1``; legacy specs get
+        diagnostics in ``warnings`` and never block gate 2.
 
 CLI (for delivery):
     python3 ticket_context.py create --issue ISSUE --repo REPO [--output OUT]
@@ -55,6 +63,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artifact_scope
 
 import agents_config
+from globmatch import is_concrete_path, match_any
 import json_schema
 from state_store import atomic_json_write
 from process_check import InputError as PlanInputError
@@ -342,6 +351,11 @@ def _scope(frontmatter: Dict[str, Any], key: str) -> List[str]:
     return result
 
 
+def declared_scope(frontmatter: Dict[str, Any]) -> List[str]:
+    """Validated declared-scope; public because spec_tree slices from it."""
+    return _scope(frontmatter, "declared-scope")
+
+
 def _validate_context(context: Dict[str, Any], schema_path: Path = SCHEMA_PATH) -> None:
     errors = json_schema.load_validate(schema_path, context)
     if errors:
@@ -367,6 +381,33 @@ def _validate_context(context: Dict[str, Any], schema_path: Path = SCHEMA_PATH) 
         raise ContextError("context DoD hash does not match parsed DoD list")
     if context["gate2_context_digest"] != context_digest(context):
         raise ContextError("gate2 context digest mismatch; frozen context was modified")
+
+
+def _verify_issue_slice(issue_text: str, spec: Path, spec_relative: str, scope: List[str]) -> None:
+    """Freeze-time re-check of the 方案切片 projection for v1 spec trees.
+
+    check-plan validates the whole group read-only; this closes the gap between
+    that pass and freezing (validate, then edit, then freeze).  Legacy specs
+    (no ``spec-tree-version``) never fail here.
+    """
+    import spec_tree
+    try:
+        version = spec_tree.spec_tree_version(spec)
+    except spec_tree.SpecTreeError as exc:
+        raise ContextError(str(exc)) from exc
+    if version is None:
+        return
+    try:
+        spec_bytes = spec.read_bytes()
+        entries = spec_tree.parse_tree(spec_bytes.decode("utf-8"))
+        if entries is None:
+            raise ContextError("spec %s declares spec-tree-version but §3.1 has no ```text tree block" % spec_relative)
+        expected = spec_tree.projection(entries, scope)
+        spec_tree.verify_slice(issue_text, spec_relative, _sha256_bytes(spec_bytes), expected)
+    except spec_tree.SpecTreeError as exc:
+        raise ContextError(str(exc)) from exc
+    except (OSError, UnicodeError) as exc:
+        raise ContextError("cannot read spec for slice verification: %s" % exc)
 
 
 def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, primary_repo: Any = None) -> Dict[str, Any]:
@@ -410,6 +451,7 @@ def create_context(issue_path: Any, repo: Any, output_path: Any = None, *, prima
     scope = _scope(frontmatter, "declared-scope")
     if not scope:
         raise ContextError("declared-scope must be non-empty when freezing a ticket")
+    _verify_issue_slice(issue_text, spec, spec_relative, scope)
     dod = parsed["dod"]
     context: Dict[str, Any] = {
         "schema": CONTEXT_SCHEMA,
@@ -599,10 +641,11 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
     root = _repo_root(primary_repo if primary_repo is not None else repo)
     issue, _ = _inside(root, issue_path, "issue")
     errors: List[str] = []
+    warnings: List[str] = []
     try:
         spec = find_spec(issue, root)
     except ContextError as exc:
-        return {"ok": False, "errors": [str(exc)], "issues": [], "all_statuses": {}}
+        return {"ok": False, "errors": [str(exc)], "warnings": warnings, "issues": [], "all_statuses": {}}
     feature = issue.parent.parent
     records: Dict[str, Dict[str, Any]] = {}
     all_statuses: Dict[str, str] = {}
@@ -698,15 +741,82 @@ def check_plan(issue_path: Any, repo: Any, *, primary_repo: Any = None) -> Dict[
         errors.extend(feature_closeout.validate_plan_sources(feature, plan))
         plan_spec_name = str(plan.get("tech_spec") or "")
         if plan_spec_name != spec.name:
-            errors.append("acceptance-plan tech_spec must equal %s" % spec.name)
+            errors.append("acceptance plan tech_spec must equal %s" % spec.name)
     except (ImportError, ValueError, OSError, TypeError, PlanInputError) as exc:
         errors.append("acceptance plan validation failed: %s" % exc)
+    if group:
+        _check_spec_tree_closure(root, spec, group, scopes, all_statuses, errors, warnings)
     summary = [{"issue_id": ident, "status": all_statuses.get(ident),
                 "blocked_by": dependencies.get(ident, []), "declared_scope": scopes.get(ident, [])}
                for ident in identifiers]
-    return {"ok": not errors, "errors": list(dict.fromkeys(errors)),
+    return {"ok": not errors, "errors": list(dict.fromkeys(errors)), "warnings": list(dict.fromkeys(warnings)),
             "spec_path": spec.relative_to(root).as_posix(), "issues": summary,
             "all_statuses": all_statuses}
+
+
+def _check_spec_tree_closure(root: Path, spec: Path, group: Dict[str, Dict[str, Any]],
+                             scopes: Dict[str, List[str]], all_statuses: Dict[str, str],
+                             errors: List[str], warnings: List[str]) -> None:
+    """Close the spec §3.1 tree against every ticket's declared-scope and slices.
+
+    Strict (errors) only for specs declaring ``spec-tree-version: 1``.  Legacy
+    specs run the same checks diagnostically into ``warnings`` so in-flight
+    features are informed without blocking gate 2.  Coverage skips tickets in
+    ``cancelled`` / ``deferred`` states; merged/done tickets keep covering.
+    """
+    import spec_tree
+    try:
+        version = spec_tree.spec_tree_version(spec)
+        spec_text = spec.read_text(encoding="utf-8")
+        if version is not None:
+            entries = spec_tree.parse_tree(spec_text)
+        else:
+            try:
+                entries = spec_tree.parse_tree(spec_text)
+            except spec_tree.SpecTreeError as exc:
+                warnings.append("legacy spec 3.1 tree diagnostic failed: %s" % exc)
+                return
+    except spec_tree.SpecTreeError as exc:
+        errors.append("spec 3.1 tree invalid: %s" % exc)
+        return
+    except (OSError, UnicodeError) as exc:
+        errors.append("cannot read spec 3.1 tree: %s" % exc)
+        return
+    spec_relative = spec.relative_to(root).as_posix()
+    sha = _sha256_bytes(spec.read_bytes())
+    findings = errors if version is not None else warnings
+    active = {ident: patterns for ident, patterns in scopes.items()
+              if all_statuses.get(ident) not in {"cancelled", "deferred"}}
+    if not active:
+        return
+    if entries is None:
+        findings.append("spec %s has no §3.1 ```text tree block; tree/scope closure check skipped%s"
+                        % (spec_relative, "" if version is None else " although spec-tree-version is declared"))
+        if version is not None:
+            errors.append("spec %s declares spec-tree-version but has no §3.1 tree; add the tree to the spec" % spec_relative)
+        return
+    tree_paths = {entry["path"] for entry in entries}
+    for entry in sorted(entries, key=lambda item: item["path"]):
+        if not any(match_any(entry["path"], patterns) for patterns in active.values()):
+            findings.append("%s is in the spec 3.1 tree but no active ticket declared-scope covers it; re-split required"
+                            % entry["path"])
+    for ident in sorted(active):
+        for pattern in active[ident]:
+            if is_concrete_path(pattern):
+                if pattern not in tree_paths:
+                    findings.append("%s declared-scope path %s is absent from the spec 3.1 tree; "
+                                    "scope must not exceed the plan" % (ident, pattern))
+            elif not any(match_any(entry["path"], [pattern]) for entry in entries):
+                findings.append("%s declared-scope glob %s matches no tree file; fix the pattern or list the files in the tree"
+                                % (ident, pattern))
+        text = group[ident]["path"].read_text(encoding="utf-8")
+        expected = spec_tree.projection(entries, active[ident])
+        try:
+            if version is None and not spec_tree.has_slice_section(text):
+                continue
+            spec_tree.verify_slice(text, spec_relative, sha, expected)
+        except spec_tree.SpecTreeError as exc:
+            findings.append("%s: %s" % (ident, exc))
 
 
 def _print(context: Dict[str, Any]) -> None:

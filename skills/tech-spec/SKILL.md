@@ -347,6 +347,17 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 违规输出包含规则 ID、`file:line`、违规事实和 Step 1 / Step 2 修复动作。按步骤修代码或按流程改规则；不要手改 `docs/ARCHITECTURE.md`，也不要用改规则来绕过错误。
 
+## 上下文与产物成本纪律
+
+- 完整保留本阶段必读范围、独立判断、真实测试、候选绑定、人工确认和全部门禁。不得用摘要替代必读原文、按改动大小跳过复核，或重标旧证据为新候选通过。
+- 派发只传身份、任务、冻结来源路径与哈希、工作目录、输出位置；不粘贴子会话随后必须读取的全文。独立会话仍须自行读取全部规定输入，不继承实现者结论。
+- 可用 `shared/scripts/artifact_text.py bundle --manifest <JSON>` 组装必读原文：manifest 的 sources 为 path / sha256 / 可选 start、end（1-based inclusive）数组；路径相对 manifest 所在目录。工具校验哈希并合并同文件重叠区间。清单必须覆盖本阶段规定的全部输入；工具只保证字节与区间，不证明语义完整。锚点不明确时读取全文，不能截断省略。
+- FR 定义可观察行为，规则表定义分支/计算/权限，spec 定义实现与决策，票定义交付边界与 DoD，验收计划定义完整可执行 case。下游用稳定 ID + 短标题 + 来源引用承接，只展开新增信息；上下文组装仍提供要求读取的原文。不得删减边界、失败路径、前置条件、输入、断言或独立可测试后果。
+- 修订采用“复制旧版 + 精确补丁”生成完整新版本，不重写未修改正文。可用 `artifact_text.py revise --manifest <JSON>`：source / sha256 / output / replacements（old、new 数组）；每段 old 必须唯一匹配，输出不得已存在。修改后仍做原有完整评审、稳定 ID/引用检查与冻结失效处理。工具不判定语义正确。
+- 两次独立判断各自保留：评审与 conformance 都先从规定原文独立枚举、核代码，再参照实现矩阵。共享来源定位，不共享“通过”结论；索引不是穷尽需求清单。
+- 报告元数据、统计、原文引用、BLOCKER 派生列表由已有工具或确定性模板生成；模型只写一次本角色判断、依据与异常，不再转述同一 findings。可用 `artifact_text.py render --manifest <JSON>` 无损填充经核对的完整报告骨架：template / sha256 / output / fields；骨架以 `{{field_name}}` 标出模型独立撰写的判断或工具提取的事实，fields 必须恰好覆盖且非空。骨架必须保留原模板必需章节；渲染成功不等于通过门禁，候选/身份/覆盖/正文仍由原检查器验证。对话只交结论、待处理项与报告路径，除非用户要求全文。
+- 候选回修先比较 base/HEAD/tree、票组、spec、计划、配置及变更文件，整理闭合证据以安排检查顺序；不缩小全量评审范围。新候选仍重新评审、真实复跑、conformance、回执与人工确认。可复制报告骨架并局部更新，但每项结论须经本轮核对，旧回执与旧执行结果不可沿用。
+
 # /tech-spec
 
 你是系统架构师。你负责：**把一份需求输入——标准路径是 pd-review 结论为可交付的 PRD，小变更路径是来自 /issue 的 change-request——变成一份可拆解、可实现、可评审的技术方案（tech spec）**。
@@ -407,7 +418,7 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 **公共与跨模块接口必须 usage-first**：先写真实消费者和最小调用示例，再推导输入/输出/error/async/ownership 类型语义；列出现存 `path:symbol` 调用点的 keep/migrate/delete 和覆盖测试。无法穷举动态/外部调用时写清假设和探测方法。3.7 保存迁移清单，`ARCH-CHECK.json` 只保留可执行的层 / 组 / 依赖规则，不复制全部调用点。
 
-最终方案骨架仍包含：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。其中模块拆解必须以**文档树**落到具体代码模块与文件，逐文件标注「新增 / 修改 / 删除」和一句话计划变动逻辑（模板 3.1），作为 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入。
+最终方案骨架仍包含：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。其中模块拆解必须以**文档树**落到具体代码模块与文件，逐文件标注「新增 / 修改 / 删除」和一句话计划变动逻辑（模板 3.1），作为 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入。树同时是机器解析契约（模板 frontmatter `spec-tree-version: 1`）：文件行固定 `<仓库相对路径> [动作] <计划变动逻辑>`、目录行以 `/` 结尾、禁 glob / 绝对路径 / 缺说明，3.7 的 migrate / delete 本仓调用点必须入树；`/issue-split` 据此做树↔scope 闭合校验并把它逐字投影进票的「方案切片」。
 
 **约束与假设必须分栏**，不得混写：
 
@@ -429,7 +440,7 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 ### Step 4：共识确认与产出
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
-2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
+2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`、`spec-tree-version` 置 `1`，整体取代旧方案时填 `supersedes`
 3. 若 3.2 声明层 / 组 / 规则变更，运行 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 做只读校验；层 / 组 / 规则的写入由承接票在 `/implement` 阶段完成。不得直接手改 `docs/ARCHITECTURE.md`。
 4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。`overview.structure` 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成；补全时用目录清单核对。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
 5. 本轮确定的新术语立即回写 GLOSSARY

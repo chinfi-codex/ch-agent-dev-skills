@@ -10,6 +10,7 @@ const rootDir = resolve(__dirname, "..");
 const fragmentsDir = join(rootDir, "shared", "fragments");
 
 const fragmentMap: Record<string, string> = {
+  TOKEN_DISCIPLINE: "token-discipline.md",
   PREAMBLE: "preamble.md",
   CAMPAIGN_CONTEXT: "campaign-context.md",
   MODE_GUARD: "mode-guard.md",
@@ -89,6 +90,10 @@ function findSkillDirs(): string[] {
 }
 
 function validateTemplateRefs(rendered: string, skillName: string): void {
+  const fragmentRefs = rendered.match(/shared\/fragments\/[\w.-]+\.md/g) ?? [];
+  for (const ref of new Set(fragmentRefs)) {
+    statSync(join(fragmentsDir, ref.split("/").pop()!));
+  }
   const refs = rendered.match(/shared\/templates\/[\w.-]+\.(?:md|html)/g) ?? [];
   for (const ref of new Set(refs)) {
     const filename = ref.split("/").pop() ?? "";
@@ -101,6 +106,17 @@ function validateTemplateRefs(rendered: string, skillName: string): void {
 }
 
 function validateSkillContract(template: string, skillName: string): void {
+  if (skillName === "issue-split") {
+    for (const name of ["dispatch-protocol", "supervision-loop", "progress-events", "human-decision"]) {
+      if (!template.includes(`../shared/fragments/${name}.md`)) {
+        throw new Error(`issue-split: missing staged protocol ${name}`);
+      }
+    }
+  }
+  if (["implement", "ai-review", "issue-split"].includes(skillName) && !template.includes("{{TOKEN_DISCIPLINE}}")) {
+    throw new Error(`${skillName}: missing lossless context and independent judgment contract`);
+  }
+
   if (template.includes("- AskUserQuestion") && !template.includes("{{ASK_FORMAT}}")) {
     throw new Error(`${skillName}: AskUserQuestion requires {{ASK_FORMAT}}`);
   }

@@ -47,6 +47,8 @@ allowed-tools:
 
 {{ARCH_CHECK}}
 
+{{TOKEN_DISCIPLINE}}
+
 # /tech-spec
 
 你是系统架构师。你负责：**把一份需求输入——标准路径是 pd-review 结论为可交付的 PRD，小变更路径是来自 /issue 的 change-request——变成一份可拆解、可实现、可评审的技术方案（tech spec）**。
@@ -107,7 +109,7 @@ allowed-tools:
 
 **公共与跨模块接口必须 usage-first**：先写真实消费者和最小调用示例，再推导输入/输出/error/async/ownership 类型语义；列出现存 `path:symbol` 调用点的 keep/migrate/delete 和覆盖测试。无法穷举动态/外部调用时写清假设和探测方法。3.7 保存迁移清单，`ARCH-CHECK.json` 只保留可执行的层 / 组 / 依赖规则，不复制全部调用点。
 
-最终方案骨架仍包含：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。其中模块拆解必须以**文档树**落到具体代码模块与文件，逐文件标注「新增 / 修改 / 删除」和一句话计划变动逻辑（模板 3.1），作为 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入。
+最终方案骨架仍包含：模块拆解、接口变更、数据与存储、关键流程（主路径 + 失败路径）、影响面、风险。其中模块拆解必须以**文档树**落到具体代码模块与文件，逐文件标注「新增 / 修改 / 删除」和一句话计划变动逻辑（模板 3.1），作为 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入。树同时是机器解析契约（模板 frontmatter `spec-tree-version: 1`）：文件行固定 `<仓库相对路径> [动作] <计划变动逻辑>`、目录行以 `/` 结尾、禁 glob / 绝对路径 / 缺说明，3.7 的 migrate / delete 本仓调用点必须入树；`/issue-split` 据此做树↔scope 闭合校验并把它逐字投影进票的「方案切片」。
 
 **约束与假设必须分栏**，不得混写：
 
@@ -129,7 +131,7 @@ allowed-tools:
 ### Step 4：共识确认与产出
 
 1. 输出共识摘要（关键决策清单 + 约束 / 假设归属），请用户确认
-2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`，整体取代旧方案时填 `supersedes`
+2. 确认后按模板 `shared/templates/tech-spec.md` 写入 `./dev/features/<feature-module>/<feature-slug>/campaigns/<campaign-id>/<feature-summary>-tech-spec-YYYY-MM-DD.md`，同时写入同目录 `acceptance-plan.yaml`。2.1 引用 How/Why 报告和 source HEAD，3.1 以文档树列出本次实施对应的代码模块、文件与逐文件计划变动逻辑，3.6 记录承重决策候选综合，3.7 记录公共接口 usage 与调用点迁移；frontmatter `status` 置 `已确认（待拆解）`、`spec-tree-version` 置 `1`，整体取代旧方案时填 `supersedes`
 3. 若 3.2 声明层 / 组 / 规则变更，运行 `arch_check.py validate --repo <项目根> --rules docs/ARCH-CHECK.json` 做只读校验；层 / 组 / 规则的写入由承接票在 `/implement` 阶段完成。不得直接手改 `docs/ARCHITECTURE.md`。
 4. **架构总览基线（首次架构影响必做）**：读取 `docs/ARCHITECTURE.md` 的 1–10 节；存在“未登记”或本次方案已使其失真时，按 How/Why 证据与代码现状补全 / 更新 `docs/ARCH-CHECK.json` 的 `architecture.overview`，只写现行事实，不写候选方案、历史迁移或逐票实现细节。`overview.structure` 必须按真实目录展开到 2–3 层子目录与关键文件，只列顶层目录视为未完成；补全时用目录清单核对。没有该类对象时在 `overview.notes.<节名>` 写“不适用”及理由，替代“未登记”占位。随后运行 `arch_check.py validate --worktree` 与 `arch_check.py render write`，把 `docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 随本 spec 一并落盘。总览基线是文档事实，可直接由本 skill 写入；层 / 组 / 规则仍按第 3 项走承接票，不得用总览写入绕过规则变更。
 5. 本轮确定的新术语立即回写 GLOSSARY

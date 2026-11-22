@@ -1,4 +1,6 @@
 ---
+
+> 写作成本：保留本模板全部必需内容；事实用稳定 ID 与来源引用承接，不复述上游整段正文。完整行为、边界与断言不得省略。修订只编辑变化处，独立判断不可复用他人结论。
 doc_type: tech-spec
 feature_module: <feature-module>
 feature_slug: <feature-slug>
@@ -6,6 +8,7 @@ campaign_id: <campaign-id>
 feature_summary: <feature-summary>
 version: YYYY-MM-DD
 status: 草稿        # 草稿 | 已确认（待拆解）—— /issue-split 以 status = 已确认（待拆解） 为开工门禁
+spec-tree-version: 1   # 3.1 文档树机器契约版本；/issue-split 的树↔scope 闭合校验与票级方案切片以它为开关（缺失 = 旧 spec，只做诊断告警）
 supersedes:          # 可空：本 tech-spec 整体取代的旧 tech-spec 文件名（取代链，机器可读；部分取代不填，在 3.2 节写清废弃项）
 upstream:                  # 标准路径：定稿 PRD + pd-review-report；小变更路径：change-request（删 pd-review-report 行）
   prd: <PRD 文件名>                # 小变更路径改写 change-request 文件名
@@ -38,6 +41,8 @@ upstream:                  # 标准路径：定稿 PRD + pd-review-report；小�
 ### 3.1 模块拆解
 
 先按模块说清职责与边界，再以**文档树**列出本次实施对应的全部代码模块与文件，逐文件标注动作（`[新增]` / `[修改]` / `[删除]`）和一句话计划变动逻辑（改哪些符号、什么行为变化）。树是 `/issue-split` 拆票与票级 `declared-scope` 冻结的直接输入：方案范围外文件不得入树；被替代的旧实现及其失效引用以 `[删除]` 入树；架构规则 / 派生物变更（如 `docs/ARCH-CHECK.json`）同样入树并注明承接方式。
+
+树是机器解析契约（`spec-tree-version: 1`）：文件行格式固定为 `<仓库相对路径> [新增|修改|删除] <一句话计划变动逻辑>`，目录行以 `/` 结尾、可带 `# 说明`；文件行缺动作或缺说明、路径含 glob、绝对路径、重复路径都会被 `ticket_context.py check-plan` 拒绝。树必须列全预计触碰的文件（含新增测试与契约文件），3.7 的 migrate / delete 本仓调用点必须入树；已由本 skill 完成的总览基线写入 3.2，不入树。每个文件行会被投影进命中它的票的「方案切片」节，逐字下发给实现会话。
 
 ```text
 <repo>/
