@@ -3,7 +3,7 @@
 # 两件事：1) 只读核对全部 SKILL.md 与模板/片段一致；2) 按各宿主布局分发（平铺：skill 目录 + shared）。
 #   Claude Code / ZCode / Kimi Code / Codex / Grok CLI / Cursor / DeepSeek Harness（DSH）：平铺到各宿主 skills 目录。
 #   DSH 默认使用 ~/.dsh/skills/；设置 DSH_HOME 时使用 $DSH_HOME/skills/。
-# 用法：在仓库根目录执行 bash ./sync.sh（维护者环境需 Node >= 22.6）
+# 用法：在仓库根目录执行 bash ./sync.sh（维护者环境需 Node >= 24，或设置 SKILL_NODE 指向带 TypeScript strip 支持的 node）
 set -euo pipefail
 
 case "$(uname -s)" in
@@ -13,8 +13,16 @@ esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACK="$ROOT/skills"
+NODE_BIN="${SKILL_NODE:-node}"
 
-node --experimental-strip-types "$PACK/scripts/gen-skill-docs.ts" --check
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+  echo "refuse: node not found; set SKILL_NODE to a Node >= 24 binary" >&2
+  exit 1
+fi
+if ! "$NODE_BIN" --experimental-strip-types "$PACK/scripts/gen-skill-docs.ts" --check; then
+  echo "refuse: skill doc generator failed; Node >= 24 (or a build with TypeScript strip support) is required; set SKILL_NODE=<path>" >&2
+  exit 1
+fi
 if find "$PACK" \( -type d -name __pycache__ -o -type f -name '*.py[cod]' \) -print -quit | grep -q .; then
   echo "refuse: Python cache artifacts found under $PACK; remove __pycache__ / *.pyc before sync" >&2
   exit 1

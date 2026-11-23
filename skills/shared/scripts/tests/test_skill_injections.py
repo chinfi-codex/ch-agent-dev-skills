@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -29,8 +30,9 @@ class SkillInjectionTest(unittest.TestCase):
         self.assertIn("../shared/fragments/human-decision.md", template)
 
     def test_generated_documents_match_templates_and_fragments(self):
+        node = os.environ.get("SKILL_NODE", "node")
         result = subprocess.run(
-            ["node", "--experimental-strip-types", str(SKILLS / "scripts" / "gen-skill-docs.ts"), "--check"],
+            [node, "--experimental-strip-types", str(SKILLS / "scripts" / "gen-skill-docs.ts"), "--check"],
             cwd=REPO,
             capture_output=True,
             text=True,

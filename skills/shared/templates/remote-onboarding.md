@@ -2,7 +2,7 @@
 
 1. 机器与目录：`hc` 可用、判读机已注册；repo 在受管 clone，拒绝 `/opt/pandu/**`。
 2. git：CA 生效（`git ls-remote` 无 `-k`）、user.name/email、凭据（token/SSH）、`credential.helper`。
-3. 运行时：venv、fast 基线、`test_slots` 预算（total/max-runs）。
+3. 运行时：venv、fast 基线、`test_slots` 预算（total/max-runs）；技能构建/同步用 Node ≥ 24 或 `SKILL_NODE`。
 4. 技能：`~/.dsh/skills` 与 OpenCode skills 根有你需要的套件；manifest 校验和一致。
 5. 模型：dsh/opencode 主机目录实测可用；默认 GLM-5.3 / GLM-5.3-Flash。
 6. 角色：`agents_config.py validate`、`dispatch_config.py validate/resolve`、`render --check`。

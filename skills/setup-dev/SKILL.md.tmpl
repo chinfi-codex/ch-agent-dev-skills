@@ -55,7 +55,7 @@ allowed-tools:
 - 架构契约：`docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 是否已存在；若不存在，本 skill 会初始化空规则与 11 节架构总览骨架并安装 pre-push hook。总览正文不在本 skill 生成，由首次出现架构影响的 `/tech-spec` 3.2 补全。旧 `docs/architecture/*.json` 只提示迁移删除，不再读取
 - 测试选择基建：仅在配置 `feature-closeout.mode: local-human` 时探查 pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力——决定需求集成候选的 dir-map 映射怎么配；不用于单票测试选择或定档
 - 宿主可选模型与原生适配：逐个探查本机已安装、会跑 dev 流程的 `claude-code / codex / zcode / dsh / opencode`。用宿主模型列举能力取得**精确模型 ID 与支持的 effort**，同时确认主会话模型设置、独立对话机制及角色绑定能力（Claude frontmatter / Codex 角色 TOML / ZCode frontmatter / DSH `subagent` 路由 / OpenCode agents frontmatter）；Claude 另查 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` / `CLAUDE_CODE_EFFORT_LEVEL` 等环境覆盖，存在与配置冲突时先报告，不得静默接受。把已核实目录写成 `dev/dispatch-model-catalog.json`（结构 `{host: {model: [effort...]}}`），不靠记忆补模型名
-- **remote 模式追加探查**：确认 `hc` 可用且判读机已作为 `hc machine` 注册（未注册只打印 `hc machine add ...` 命令，不代执行）；确认 dsh/OpenCode 已安装、技能发现根可用、`~/.dsh/dev.env` 与 git CA/凭据/身份就绪；cwd 必须在判读机的受管 clone，拒绝 `/opt/pandu/**`。
+- **remote 模式追加探查**：确认 `hc` 可用且判读机已作为 `hc machine` 注册（未注册只打印 `hc machine add ...` 命令，不代执行）；确认 dsh/OpenCode 已安装、技能发现根可用、`~/.dsh/dev.env` 与 git CA/凭据/身份就绪；技能构建/同步需要 Node ≥ 24 或设置 `SKILL_NODE`；cwd 必须在判读机的受管 clone，拒绝 `/opt/pandu/**`。
 - 宿主能力：用 `host_adapters.py` 只读探测独立实现 / 评审、复审与回答后续接、session 活性、worktree 文件系统、浏览器和运行资源能力，区分 available / unavailable / unknown。配置里写了不代表实际可用；host-verified 评审必须先通过原生接口写入绑定，再实时调用 `verify_review_session` 重读；host-probes.json 只保存写回执，不单独构成证明。server-enforced 还用 `ci_proof.py capabilities` 在线核 CI API、workflow、protected branch、required checks、有效权限和 expected-SHA，任何未知都不得落为该模式
 - 整机预算：`~/.cache/agent-dev/slots/budget.json` 是否已存在及其取值（已存在 = 同机其他仓已设定，直接镜像进配置，不重新问）
 
