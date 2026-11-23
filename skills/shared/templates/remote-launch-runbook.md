@@ -22,6 +22,8 @@ hc run --on <machine> --keep --bg --name pandu-dev-web \
 # OpenCode（备选）
 hc run --on <machine> --keep --bg --name pandu-oc \
   --cwd <repo> -- /home/pandu/.dsh/bin/dev-opencode
+# 若直接启动裸 opencode：先用 `opencode service set env <NAME> <value>` + `opencode service restart`
+# 把 provider key 注入 v2 背景服务（service.json 0600），否则会 401。
 ```
 
 ## 记录与恢复
