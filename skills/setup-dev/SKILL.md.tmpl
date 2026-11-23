@@ -1,6 +1,6 @@
 ---
 name: setup-dev
-version: 0.6.0
+version: 0.7.0
 default-mode: IMPLEMENT_MODE
 description: |
   One-time per-repo setup for the dev-stage skills. Detects ocr / glab /
@@ -36,6 +36,13 @@ allowed-tools:
 
 你不负责：需求判断、技术方案、写业务代码、建 issue、跑实现、代替人去 GitLab 后台设置 CI 变量。
 
+## 运行模式（--mode local|remote）
+
+- `local`（默认）：当前本机开发面。保持既有行为；mac 侧 `feature-closeout.mode=local-human`，push 由用户在本机执行。
+- `remote`：判读机开发面，用于用户从 mac 通过 Herdr（`hc`）手动启动 dsh/OpenCode 的场景。只写**判读机本地**文件，绝不从 mac 跨机写主机；`active-plane=remote`、`execution-planes.local|remote`、`feature-closeout.mode=pr`、`ci: null`、远端 `push=per-campaign`、`unattended=false`。
+- `remote` 的默认模型：监督 `GLM-5.3`、实现 `GLM-5.3-Flash`（以判读机实时目录实测为准；不得静默跨宿主套用）。
+- 迁移单位是整个 campaign：主会话、子 agent、worktree、证据同机；跨机只走 git refs。
+
 ## 工作流
 
 ### Step 0：探查仓库与环境事实（自查，不问人）
@@ -47,7 +54,8 @@ allowed-tools:
 - 项目事实：README / AGENTS.md / CLAUDE.md / 测试框架配置 → 质量门命令与协议 / 密钥文件位置；`.gitignore` 是否已含 `.worktrees/` 与 `dev/`；`git ls-files dev` 是否已有跟踪条目（dev/ 一旦入库，每个 worktree checkout 自带一份完整副本，磁盘随票线性膨胀）
 - 架构契约：`docs/ARCH-CHECK.json` 与 `docs/ARCHITECTURE.md` 是否已存在；若不存在，本 skill 会初始化空规则与 11 节架构总览骨架并安装 pre-push hook。总览正文不在本 skill 生成，由首次出现架构影响的 `/tech-spec` 3.2 补全。旧 `docs/architecture/*.json` 只提示迁移删除，不再读取
 - 测试选择基建：仅在配置 `feature-closeout.mode: local-human` 时探查 pytest-testmon / coverage 数据 / jest 等框架的 findRelatedTests 能力——决定需求集成候选的 dir-map 映射怎么配；不用于单票测试选择或定档
-- 宿主可选模型与原生适配：逐个探查本机已安装、会跑 dev 流程的 `claude-code / codex / zcode / dsh`。用宿主模型列举能力取得**精确模型 ID 与支持的 effort**，同时确认主会话模型设置、独立对话机制及角色绑定能力（Claude frontmatter / Codex 角色 TOML / ZCode frontmatter / DSH `subagent` 路由）；Claude 另查 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` / `CLAUDE_CODE_EFFORT_LEVEL` 等环境覆盖，存在与配置冲突时先报告，不得静默接受。把已核实目录写成 `dev/dispatch-model-catalog.json`（结构 `{host: {model: [effort...]}}`），不靠记忆补模型名
+- 宿主可选模型与原生适配：逐个探查本机已安装、会跑 dev 流程的 `claude-code / codex / zcode / dsh / opencode`。用宿主模型列举能力取得**精确模型 ID 与支持的 effort**，同时确认主会话模型设置、独立对话机制及角色绑定能力（Claude frontmatter / Codex 角色 TOML / ZCode frontmatter / DSH `subagent` 路由 / OpenCode agents frontmatter）；Claude 另查 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` / `CLAUDE_CODE_EFFORT_LEVEL` 等环境覆盖，存在与配置冲突时先报告，不得静默接受。把已核实目录写成 `dev/dispatch-model-catalog.json`（结构 `{host: {model: [effort...]}}`），不靠记忆补模型名
+- **remote 模式追加探查**：确认 `hc` 可用且判读机已作为 `hc machine` 注册（未注册只打印 `hc machine add ...` 命令，不代执行）；确认 dsh/OpenCode 已安装、技能发现根可用、`~/.dsh/dev.env` 与 git CA/凭据/身份就绪；cwd 必须在判读机的受管 clone，拒绝 `/opt/pandu/**`。
 - 宿主能力：用 `host_adapters.py` 只读探测独立实现 / 评审、复审与回答后续接、session 活性、worktree 文件系统、浏览器和运行资源能力，区分 available / unavailable / unknown。配置里写了不代表实际可用；host-verified 评审必须先通过原生接口写入绑定，再实时调用 `verify_review_session` 重读；host-probes.json 只保存写回执，不单独构成证明。server-enforced 还用 `ci_proof.py capabilities` 在线核 CI API、workflow、protected branch、required checks、有效权限和 expected-SHA，任何未知都不得落为该模式
 - 整机预算：`~/.cache/agent-dev/slots/budget.json` 是否已存在及其取值（已存在 = 同机其他仓已设定，直接镜像进配置，不重新问）
 
@@ -71,13 +79,15 @@ allowed-tools:
 12. **dispatch.hosts**：按宿主逐个确认角色模型——`supervisor-review` 用于主会话监督、feature 独立评审与符合性核对；`development.default` 用于普通票，`development.escalated` 用于集成 / 高风险票及 feature 评审 BLOCKER 后的修复票。每个角色都必须从 Step 0 实时目录选择具体 `model + effort`，不允许抽象档位、跨宿主名称或缺省继承；两档可以使用同一模型，表示不另设升级型号。`parallel-max` 默认 2。DSH 若选择 host-verified，还必须显式配置 `native_session_command`：同一单行原生命令负责写入评审绑定与读取真实 session JSON；null 或无原生写读能力时不得选择 host-verified
 13. **review-round-alert / base-freeze / generated-refresh / artifact-budget / retention**：默认 3 / true / 空清单 / 120 行 + 20MB / 保留两个代际；派生物按仓库实际生成器逐条确认，raw / OCR / 截图必须有 generation manifest，salvage 只按确认策略清理
 14. **conformance**：默认 `mode: always` + `checker: main-session`。人主动提出抽查时改 `sampled` 并设 `sample-rate`，是否抽中由 gate2 context digest + issue ID 确定性计算，不能由填写者自报 skipped；集成票始终实核。上下文紧张时可改 `dispatched`，仍需真实独立会话回执
+15. **execution-planes（仅 remote 模式）**：写 `active-plane: remote` 与 `execution-planes.local|remote`。local 固定 `closeout=local-human`、`push=user-on-closeout`；remote 固定 `access=manual-herdr`、`session-manager=herdr`、`closeout=pr`、`ci=disabled`、`push=per-campaign`、`unattended=false`，repo 不得在 `/opt/pandu` 下。`feature-closeout.mode` 必须与 active plane 一致（remote=pr）。
 
 ### Step 2：写配置与种子
 
 按模板落盘（写作前必须先读对应模板）：
 
 - `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`），顶层 `schema-version: 2`。写完立即运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，再运行 `dispatch_config.py validate --catalog ./dev/dispatch-model-catalog.json`；任何旧字段、未知字段或非法模式组合都必须修正，不能带入后续流程
-- 按已确认宿主生成原生角色：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <.claude|.codex|.zcode>`；渲染器拒绝覆盖已有不同文件时先展示差异并请人确认，不强行覆盖。DSH 先用 `--dsh-profile <headless|desktop>` 渲染到临时目录，再只把主模型、完整 `tool-subagent` config 与 `allowedModels` 合并进人确认的目标 profile：headless 新增白名单插件必须使用 `- insert:`，已有 config 按整体替换处理；不动其他 profile，新建 DSH 会话才采样子代理白名单
+- 按已确认宿主生成原生角色：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <.claude|.codex|.zcode>`；渲染器拒绝覆盖已有不同文件时先展示差异并请人确认，不强行覆盖。DSH 先用 `--dsh-profile <headless|desktop|dev>` 渲染到临时目录，再只把主模型、完整 `tool-subagent` config 与 `allowedModels` 合并进人确认的目标 profile：headless/dev 新增白名单插件必须使用 `- insert:`，已有 config 按整体替换处理；不动其他 profile，新建 DSH 会话才采样子代理白名单。OpenCode 渲染到 `.opencode/agents/<role>.md`（`mode: subagent`）
+- **仅 remote 模式追加落盘**：`dev/remote/launch-runbook.md`（Herdr `hc machine add/run/get/attach/read/send/wait`、dsh/OpenCode 启动、session id 记录、恢复、SSH 兜底）、`dev/remote/plane.json`（plane/host/access/session_manager/herdr_machine/herdr_terminal/repo/interpreter/dsh_profile/overlay/opencode_config）、`dev/remote/skills-manifest.json`（技能名/版本/校验和）。只写这些本地文件，不执行 `hc run/send/kill`。
 - `.gitignore` 追加 `.worktrees/` 与 `dev/`（已存在则跳过）；探查发现 dev/ 已被 git 跟踪 → 显式警示并建议 `git rm -r --cached dev/` 出库（dev/ 不入库是 worktree dev/ 软链约定的前提；入库会让每个 worktree 自带完整副本）
 - **仅当 ocr.mode = ci 时**：
   - 复制 `shared/templates/gitlab-ci-ocr.yml`（相对本 SKILL.md 为 `../shared/templates/gitlab-ci-ocr.yml`）为仓库 `ci/ocr-review.gitlab-ci.yml`，并在项目 `.gitlab-ci.yml` 加 `include: local`；回贴脚本 `ci/ocr-post-review.py` 需人从上游仓库获取放置（模板头部有说明，内网不能现场 curl 外网）
@@ -92,6 +102,7 @@ allowed-tools:
 - 架构契约初始化后运行 `python3 ../shared/scripts/arch_check.py validate --repo <仓库根> --worktree --rules docs/ARCH-CHECK.json` 与 `render check --worktree`，并确认 pre-push hook 已安装；告诉用户 11 节总览此时只是骨架，首次架构变更会由 `/tech-spec` 3.2 补全；票级不做架构检查，feature candidate 的 `freeze / check` 才强制 arch-check
 - `ocr.mode = ci` 时逐条核对 CI 前提：include 已加、post 脚本已放、GitLab 变量已设（后两项须人确认，未确认则 `gitlab-ci: manual` 落配置）；`delegate` 模式无 CI 前提，跳过核对
 - repo-level = A 时显式警示：本仓库不得运行 `/implement`，AI 仅只读辅助
+- **remote 模式追加验证**：`dispatch_config.py resolve --host dsh|opencode --role supervisor|review|development`、`render --check`（dsh dev profile 与 OpenCode agents）均通过；`host_adapters.py` 的独立会话 / 恢复 / session 活性 / worktree 可达性探测非 available 即停；干净 checkout 跑 fast；将 `plane.json` 的 `herdr_terminal` 初始为 null，提示用户启动后回填。
 - 告诉用户配置已完成、下一步该跑什么（`/tech-spec`），按「完成状态协议 · 对人表达」收尾
 
 ## 硬约束
@@ -101,4 +112,5 @@ allowed-tools:
 - `delegate` 是默认模式而非降级，无需 LLM 端点即可落；`ocr llm test` 不通过不得把 `ocr.mode` 落为 `local` / `ci`
 - server-enforced 未经在线能力证明不得落配置；协作 / 本地模式不得冒称服务端强制。配置中的 token-env 只能是环境变量名，token、CI verdict / proof 不得写入配置
 - `dispatch.hosts` 只写 Step 1 人逐宿主确认的 `supervisor-review` 与 `development.default / escalated` 具体 `model + effort`；禁止旧 `dispatch.model`、抽象档位、缺字段及跨宿主套用。模型变化后同人确认目录与配置，再用渲染器重生角色文件；不得手改角色文件形成第二真源
+- remote 模式只写判读机本地文件：不跨机 SSH、不写 `/opt/pandu`、不执行 `hc run/send/kill`、不启用无人值守；Herdr 终端活性不等于 agent 会话有效，评审回执只认 agent CLI 的 session id。
 - 配置写完后不进入任何后续 skill

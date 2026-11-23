@@ -88,6 +88,57 @@ class AgentsConfigTest(unittest.TestCase):
         self.assertEqual(validated["feature-closeout"]["ci"]["provider"], "gitlab")
         self.assertEqual(validated["verify-policy"]["base-freeze"], True)
 
+    def test_pr_closeout_and_remote_execution_plane(self):
+        config = fixture()
+        config["active-plane"] = "remote"
+        config["feature-closeout"] = {
+            "mode": "pr", "ci": None,
+            "pr": {"provider": "gitea", "base-url": "https://git.example.com",
+                   "repository": "AI/repo", "token-env": "PANDU_GITEA_TOKEN"},
+        }
+        config["execution-planes"] = {
+            "local": {"repo": "/Users/dev/repo", "hosts": ["zcode"],
+                      "closeout": "local-human", "push": "user-on-closeout"},
+            "remote": {"host": "judge", "access": "manual-herdr", "session-manager": "herdr",
+                       "repo": "/home/pandu/dev/repo",
+                       "worktree-root": "/home/pandu/dev/repo/.worktrees",
+                       "interpreter": "/home/pandu/dev/venv/bin/python",
+                       "skills-root": "/home/pandu/.dsh/skills",
+                       "hosts": ["zcode"], "closeout": "pr", "ci": "disabled",
+                       "push": "per-campaign", "unattended": False},
+        }
+        validated = ac.validate_config(config)
+        self.assertEqual(validated["active-plane"], "remote")
+        self.assertEqual(validated["feature-closeout"]["mode"], "pr")
+        self.assertEqual(validated["execution-planes"]["remote"]["push"], "per-campaign")
+
+        broken = copy.deepcopy(config)
+        broken["execution-planes"]["remote"]["ci"] = "enabled"
+        with self.assertRaisesRegex(ac.ConfigError, "remote plane must use ci=disabled"):
+            ac.validate_config(broken)
+
+        broken = copy.deepcopy(config)
+        broken["execution-planes"]["remote"]["repo"] = "/opt/pandu/deploy"
+        with self.assertRaisesRegex(ac.ConfigError, "must not live under /opt/pandu"):
+            ac.validate_config(broken)
+
+        broken = copy.deepcopy(config)
+        broken["feature-closeout"] = {"mode": "pr", "ci": None}
+        with self.assertRaisesRegex(ac.ConfigError, "requires feature-closeout.pr"):
+            ac.validate_config(broken)
+
+    def test_pr_mode_rejects_ci_object(self):
+        config = fixture()
+        config["feature-closeout"] = {
+            "mode": "pr", "ci": {"provider": "gitlab", "base-url": "https://gitlab.example.com",
+                                  "repository": "group/project", "workflow": "full",
+                                  "artifact": "verdict.json", "token-env": "GITLAB_TOKEN"},
+            "pr": {"provider": "gitea", "base-url": "https://git.example.com",
+                   "repository": "AI/repo", "token-env": "PANDU_GITEA_TOKEN"},
+        }
+        with self.assertRaisesRegex(ac.ConfigError, "ci is only valid"):
+            ac.validate_config(config)
+
     def test_markdown_load_does_not_rewrite_source(self):
         config = fixture()
         yaml_text = """schema-version: 2

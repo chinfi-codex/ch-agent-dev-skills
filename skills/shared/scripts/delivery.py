@@ -235,6 +235,10 @@ def _legacy_local_human(fc: dict, fm: dict) -> bool:
     return created_date < since_date
 
 
+def _integration_mode(fc: dict) -> bool:
+    return fc.get("mode") in ("local-human", "pr")
+
+
 def _assert_target_allowed(context: dict, root: Path, issue: Path):
     config = _config(root, context)
     tc = _module("ticket_context")
@@ -243,10 +247,10 @@ def _assert_target_allowed(context: dict, root: Path, issue: Path):
     if resolved != context["target_branch"]:
         raise DeliveryError("ticket target changed after context freeze: %s != %s" % (resolved, context["target_branch"]))
     fc = config.get("feature-closeout") or {}
-    if fc.get("mode") == "local-human" and resolved == config.get("main-branch"):
+    if _integration_mode(fc) and resolved == config.get("main-branch"):
         legacy = _legacy_local_human(fc, fm)
         if not legacy:
-            raise DeliveryError("local-human tickets may target only the feature integration branch; explicit main is rejected")
+            raise DeliveryError("local-human/PR tickets may target only the feature integration branch; explicit main is rejected")
 
 
 def stack_source(repo, feature_dir, *, commit, branch=None):
@@ -327,10 +331,10 @@ def start(issue_path, repo) -> dict:
     feature_dir = issue.parent.parent
     target = tc.target_branch(config, fm, feature_dir)
     fc = config.get("feature-closeout") or {}
-    if fc.get("mode") == "local-human" and target == config.get("main-branch"):
+    if _integration_mode(fc) and target == config.get("main-branch"):
         if not _legacy_local_human(fc, fm):
-            raise DeliveryError("local-human ticket cannot target main, including explicit target-branch: main")
-    if fc.get("mode") == "local-human" and not _legacy_local_human(fc, fm):
+            raise DeliveryError("local-human/PR ticket cannot target main, including explicit target-branch: main")
+    if _integration_mode(fc) and not _legacy_local_human(fc, fm):
         implicit = dict(fm)
         implicit["target-branch"] = None
         expected_target = tc.target_branch(config, implicit, feature_dir)
@@ -384,7 +388,7 @@ def start(issue_path, repo) -> dict:
                         proof = True
             if not proof:
                 raise DeliveryError("fresh stacked target must equal its pinned predecessor or an exact ticket merge")
-    if not stack_base and fc.get("mode") == "local-human" and target != str(config.get("main-branch") or "").strip():
+    if not stack_base and _integration_mode(fc) and target != str(config.get("main-branch") or "").strip():
         _require_fresh_integration_branch(root, config, feature_dir, fm, issue, target)
     # Validate DoD/spec/config/scope and all primary-repo inputs before any Git
     # mutation.  The provisional main-HEAD context is discarded, never reused.
@@ -1255,6 +1259,29 @@ def _execute_feature_merge(main_repo, candidate, strategy):
     return {"repo": str(main_repo), "commit": commit, "strategy": strategy}
 
 
+def _promote_pr(candidate, fdir, integ, candidate_repo, main_repo, round_name):
+    """Record a user-merged Gitea PR; never move refs or create a merge commit."""
+    fc = _module("feature_closeout")
+    args = SimpleNamespace(feature_dir=str(fdir), repo=str(candidate_repo), round=round_name,
+                           phase="merge", record=False, main_repo=str(main_repo))
+    try:
+        authorization = fc.authorize_merge(args)
+    except Exception as exc:
+        raise DeliveryError("PR merge authorization failed: %s" % exc) from exc
+    pr = fc.read_pr_evidence(integ)
+    operation_id = _digest({"candidate": candidate, "pr": pr,
+                            "evidence": _feature_evidence(integ)})
+    authorization["operation_id"] = operation_id
+    merge_result = {"repo": str(main_repo), "commit": pr["merge_commit"],
+                    "strategy": pr.get("strategy"), "operation_id": operation_id}
+    rep = fc.record_merge(authorization, merge_result)
+    if rep.failed:
+        messages = "; ".join(i["msg"] for i in rep.items if i["level"] == "FAIL")
+        raise DeliveryError("PR merge recording failed: " + messages)
+    return {"repo": str(main_repo), "commit": pr["merge_commit"],
+            "strategy": pr.get("strategy"), "mode": "pr", "recorded": True}
+
+
 def promote(candidate_path, candidate_repo, repo, *, strategy=None, run_id=None,
             attempt=None, event=None, provider=None, repository=None, base_url=None,
             workflow=None, artifact=None, token_env=None, timeout=10.0) -> dict:
@@ -1281,8 +1308,10 @@ def promote(candidate_path, candidate_repo, repo, *, strategy=None, run_id=None,
                                           allow_evidence_change=True)
     strategy = strategy or "no-ff"
     mode = candidate.get("mode")
-    if mode not in ("local-human", "server-enforced", "cooperative-ci"):
+    if mode not in ("local-human", "server-enforced", "cooperative-ci", "pr"):
         raise DeliveryError("candidate mode is missing/invalid")
+    if mode == "pr":
+        return _promote_pr(candidate, fdir, integ, candidate_repo, main_repo, round_name)
     fc = _module("feature_closeout")
     config = fc.load_config(fdir)
     if fc.feature_mode(config) != mode:

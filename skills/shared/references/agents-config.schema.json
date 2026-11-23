@@ -17,6 +17,8 @@
   ],
   "properties": {
     "schema-version": {"const": 2},
+    "active-plane": {"enum": ["local", "remote"]},
+    "execution-planes": {"$ref": "#/definitions/execution-planes"},
     "tracker": {"enum": ["local", "gitlab"]},
     "main-branch": {"$ref": "#/definitions/branch"},
     "repo-level": {"enum": ["A", "B", "C"]},
@@ -132,7 +134,7 @@
       "additionalProperties": false,
       "required": ["mode"],
       "properties": {
-        "mode": {"enum": ["server-enforced", "cooperative-ci", "local-human"]},
+        "mode": {"enum": ["server-enforced", "cooperative-ci", "local-human", "pr"]},
         "integration-branch": {"type": "string", "minLength": 1},
         "since": {"type": ["string", "null"], "format": "date"},
         "verify-budget-seconds": {"type": "integer", "minimum": 1},
@@ -171,6 +173,20 @@
             "status": {"$ref": "#/definitions/command"},
             "rollback": {"$ref": "#/definitions/command"}
           }
+        },
+        "pr": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["provider", "base-url", "repository", "token-env"],
+          "properties": {
+            "provider": {"enum": ["gitea"]},
+            "base-url": {"type": "string", "minLength": 1},
+            "repository": {"type": "string", "minLength": 1},
+            "token-env": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"},
+            "required-checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "merge": {"enum": ["user", "api"]},
+            "delete-branch": {"enum": ["authorized-only", "never"]}
+          }
         }
       }
     },
@@ -189,7 +205,8 @@
             "codex": {"$ref": "#/definitions/host-routes"},
             "claude-code": {"$ref": "#/definitions/host-routes"},
             "zcode": {"$ref": "#/definitions/host-routes"},
-            "dsh": {"$ref": "#/definitions/host-routes"}
+            "dsh": {"$ref": "#/definitions/host-routes"},
+            "opencode": {"$ref": "#/definitions/host-routes"}
           }
         }
       }
@@ -296,6 +313,39 @@
             "escalated": {"$ref": "#/definitions/route"}
           }
         }
+      }
+    },
+    "execution-plane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "hosts", "closeout", "push"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "access": {"enum": ["local", "manual-ssh", "manual-herdr"]},
+        "session-manager": {"enum": ["none", "herdr"]},
+        "repo": {"$ref": "#/definitions/path"},
+        "worktree-root": {"$ref": "#/definitions/path"},
+        "interpreter": {"$ref": "#/definitions/path"},
+        "skills-root": {"type": ["string", "null"], "minLength": 1},
+        "hosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {"enum": ["codex", "claude-code", "zcode", "dsh", "opencode"]}
+        },
+        "closeout": {"enum": ["local-human", "pr"]},
+        "ci": {"enum": ["disabled", "enabled"]},
+        "push": {"enum": ["user-on-closeout", "per-campaign"]},
+        "unattended": {"type": "boolean"}
+      }
+    },
+    "execution-planes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "remote"],
+      "properties": {
+        "local": {"$ref": "#/definitions/execution-plane"},
+        "remote": {"$ref": "#/definitions/execution-plane"}
       }
     }
   }

@@ -198,9 +198,9 @@ def target_branch(config: Dict[str, Any], frontmatter: Dict[str, Any],
         if not isinstance(closeout, dict):
             raise ContextError("feature-closeout must be a mapping")
         mode = closeout.get("mode")
-        if mode not in ("server-enforced", "cooperative-ci", "local-human"):
+        if mode not in ("server-enforced", "cooperative-ci", "local-human", "pr"):
             raise ContextError("unsupported feature-closeout.mode: %r" % mode)
-        use_integration = mode == "local-human"
+        use_integration = mode in ("local-human", "pr")
         since = closeout.get("since")
         if use_integration and since:
             created = frontmatter.get("created")

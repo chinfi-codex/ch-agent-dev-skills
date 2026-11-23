@@ -14,7 +14,7 @@ if _SCRIPT_DIR not in sys.path:
 
 from process_check import InputError, read_first_yaml_block
 
-HOSTS = ("codex", "claude-code", "zcode", "dsh")
+HOSTS = ("codex", "claude-code", "zcode", "dsh", "opencode")
 TIERS = ("default", "escalated")
 EFFORTS = {"low", "medium", "high", "xhigh", "max", "ultra", "disabled", "enabled", "off"}
 ABSTRACT_MODELS = {"default", "escalated", "economy", "main", "inherit"}
@@ -41,9 +41,9 @@ def _model(value, host: str, path: str) -> str:
         raise ConfigError(f"{path} 必须是不带首尾空白的具体模型 ID")
     if value.lower() in ABSTRACT_MODELS or any(c in value for c in "<>[]{}") or any(c.isspace() for c in value):
         raise ConfigError(f"{path} 不是具体模型 ID: {value}")
-    if host in {"zcode", "dsh"}:
+    if host in {"zcode", "dsh", "opencode"}:
         parts = value.split("/")
-        if ((host == "dsh" and len(parts) != 2)
+        if ((host in {"dsh", "opencode"} and len(parts) != 2)
                 or (host == "zcode" and len(parts) < 2) or not all(parts)):
             raise ConfigError(f"{path} 必须使用 <provider>/<model> 完整路由")
     elif "/" in value:
@@ -110,8 +110,8 @@ def validate(config: dict, catalogs: dict | None = None) -> dict:
         validated["hosts"][host] = {"supervisor-review": supervisor, "development": development}
         native_command = host_config.get("native_session_command")
         if native_command is not None:
-            if host != "dsh":
-                raise ConfigError(f"{path}.native_session_command 仅用于 DSH 原生会话核验")
+            if host not in ("dsh", "opencode"):
+                raise ConfigError(f"{path}.native_session_command 仅用于 DSH/OpenCode 原生会话核验")
             if not isinstance(native_command, str) or not native_command.strip() or any(c in native_command for c in ("\x00", "\r", "\n")):
                 raise ConfigError(f"{path}.native_session_command 必须是单行非空命令")
             validated["hosts"][host]["native_session_command"] = native_command.strip()
@@ -160,6 +160,12 @@ def resolve(dispatch: dict, host: str, role: str, tier: str = "default") -> dict
         native = {"model": route["model"], "thoughtLevel": route["effort"]}
         if context != "current-session":
             native["subagent_type"] = "development-escalated" if role == "development" and tier == "escalated" else config_role
+    elif host == "opencode":
+        provider, model = _split_route(route)
+        native = {"provider": provider, "model": model,
+                  "reasoningEffort" if context == "current-session" else "reasoning_effort": route["effort"]}
+        if context != "current-session":
+            native["agent_type"] = "development-escalated" if role == "development" and tier == "escalated" else config_role
     else:
         provider, model = _split_route(route)
         native = {"provider": provider, "model": model, "reasoningEffort" if context == "current-session" else "reasoning_effort": route["effort"]}
@@ -175,6 +181,18 @@ def _agent_markdown(host: str, name: str, route: dict, description: str, body: s
         f"description: {json.dumps(description, ensure_ascii=False)}\n"
         f"model: {route['model']}\n"
         f"{effort_key}: {route['effort']}\n"
+        "---\n"
+        f"{body.strip()}\n"
+    )
+
+
+def _opencode_agent_markdown(name: str, route: dict, description: str, body: str) -> str:
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {json.dumps(description, ensure_ascii=False)}\n"
+        "mode: subagent\n"
+        f"model: {route['model']}#{route['effort']}\n"
         "---\n"
         f"{body.strip()}\n"
     )
@@ -228,6 +246,12 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
             )
         files["config.toml"] = "\n".join(config)
         return files
+    if host == "opencode":
+        return {
+            f".opencode/agents/{name}.md": _opencode_agent_markdown(
+                name, route, descriptions[name], bodies[name])
+            for name, route in routes.items()
+        }
     provider, supervisor_model = _split_route(supervisor)
     allowed = []
     for route in (
@@ -265,7 +289,7 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
             f"      - provider: {route['provider']}",
             f"        model: {route['model']}",
         ])
-    if dsh_profile == "headless":
+    if dsh_profile in ("headless", "dev"):
         lines.append("- insert:")
         lines.extend(f"    {line}" if line else "" for line in settings)
     elif dsh_profile == "desktop":
@@ -311,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog", type=Path, help="可选：{host: {model: [effort...]}} 实时模型目录")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check", action="store_true", help="render：只读检查原生角色是否缺失或过期")
-    parser.add_argument("--dsh-profile", choices=("headless", "desktop"), default="headless")
+    parser.add_argument("--dsh-profile", choices=("headless", "desktop", "dev"), default="headless")
     args = parser.parse_args(argv)
     try:
         catalogs = json.loads(args.catalog.read_text(encoding="utf-8")) if args.catalog else None

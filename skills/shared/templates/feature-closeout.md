@@ -147,6 +147,26 @@ business_results_sha256: <最终 business-results.json 的 SHA256>
 
 沉默、超时、「看着行」之类非确认语不算确认；确认后候选 tree、main HEAD 或计划哈希变化须重新确认。合 main 与内部 record 只由 `delivery.py promote` 在同一授权进程完成，不提供公开 record-merge 或任意 --commit 入口。
 
+## 4b. pr.json（mode=pr 的 PR 证据）
+
+`feature-closeout.mode=pr` 不写 `confirmation.md`，改由用户在 Gitea 合并 PR，并在 `integration/pr.json` 记录：
+
+```yaml
+provider: gitea
+repository: <owner/repo>
+number: <PR 编号>
+base: main
+head_sha: <冻结 candidate 完整 SHA>
+head_tree: <candidate tree>
+merge_commit: <PR 合并后的完整 commit>
+strategy: merge | squash
+merged: true
+merged_by: <Gitea 用户>
+merged_at: <ISO 时间>
+```
+
+`check --phase merge --main-repo <主工作区>` 要求：主工作区 main HEAD = `merge_commit`、`head_sha/head_tree` = 冻结候选、merge commit tree = candidate tree、merge/squash 父提交关系正确。CI 可为 null，不以状态检查为门。`delivery.py promote` 在 pr 模式只核验并登记 `feature-merged`，不本地合并、不移动 ref。
+
 ## 7. 集成运行资源与清场
 
 - 实例租约与开发服务记录保存在 integration runtime  registry，绑定 repo / feature / round、candidate、worktree、lease/service ID 和日志代际；business-results.environment 必须引用同一 ID。

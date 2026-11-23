@@ -51,7 +51,8 @@ HUMAN_REASONS = (
     "environment-unavailable", "evidence-insufficient",
 )
 JOURNAL = "progress.jsonl"
-MODES = ("server-enforced", "cooperative-ci", "local-human")
+MODES = ("server-enforced", "cooperative-ci", "local-human", "pr")
+PR_EVIDENCE = "pr.json"
 _MERGE_CAPABILITY = object()
 
 
@@ -1133,7 +1134,9 @@ def _report_decision(plan: dict, results: dict, evidence: dict, conformance: dic
         suffix = f"，但有 {waived} 项人工豁免"
     else:
         suffix = ""
-    waiting = "，等待人的合并授权" if cand.get("mode") == "local-human" else "，等待在线 CI 证明与晋级核对"
+    waiting = ("，等待人的合并授权" if cand.get("mode") == "local-human"
+               else "，等待用户合并 PR" if cand.get("mode") == "pr"
+               else "，等待在线 CI 证明与晋级核对")
     return "验收条件已满足" + suffix + waiting
 
 
@@ -1279,6 +1282,10 @@ def _check_main_unchanged(rep: Report, repo: Path, cfg: dict, cand: dict):
         main_now = git(repo, "rev-parse", main).strip()
     except InputError as exc:
         rep.add("main-drift", "FAIL", str(exc))
+        return
+    if cand.get("mode") == "pr":
+        # PR 模式由用户在 Gitea 合并，main 前进是预期行为；候选与 PR merge commit 的
+        # tree 绑定由 _check_pr_evidence 在 --main-repo 上单独核验。
         return
     if main_now != cand.get("main_head"):
         if cand.get("stack_base"):
@@ -1635,6 +1642,11 @@ def check(args) -> Report:
         check_no_active_decisions(rep, fdir)
         if mode == "local-human":
             _check_confirmation(rep, integ, cand)
+        elif mode == "pr":
+            if not args.main_repo:
+                rep.add("main-repo", "FAIL", "feature-closeout.mode=pr 的 merge 检查必须提供 --main-repo")
+            else:
+                _check_pr_evidence(rep, integ, cand, cfg, Path(args.main_repo))
         elif mode not in ("server-enforced", "cooperative-ci"):
             rep.add("config", "FAIL", f"未知模式 {mode} 不得 merge")
         # CI 模式在这里只形成 candidate/business 授权；delivery.promote 还必须
@@ -1650,6 +1662,49 @@ def check(args) -> Report:
         append_event(fdir, event, event_id=f"{event}:{cand['candidate']}", ts=cand.get("frozen_at"),
                      tree=tree[:12], note=note)
     return rep
+
+
+def read_pr_evidence(integ: Path) -> dict:
+    value = load_json(Path(integ) / PR_EVIDENCE)
+    return value if isinstance(value, dict) else {}
+
+
+def _check_pr_evidence(rep: Report, integ: Path, cand: dict, cfg: dict, main_repo: Path) -> None:
+    """Prove a user-merged Gitea PR is exactly this candidate, without CI checks."""
+    pr = read_pr_evidence(integ)
+    if not pr:
+        rep.add("pr", "FAIL", "integration/pr.json 不存在：先由用户合并 PR 并记录 PR 证据")
+        return
+    for key in ("number", "head_sha", "head_tree", "merge_commit", "strategy", "merged"):
+        if key not in pr:
+            rep.add("pr", "FAIL", f"integration/pr.json 缺字段 {key}")
+    if pr.get("merged") is not True:
+        rep.add("pr", "FAIL", "PR 尚未合并（merged 必须为 true）")
+    if pr.get("head_sha") != cand.get("candidate"):
+        rep.add("pr", "FAIL", "PR head SHA 与冻结候选不一致")
+    if pr.get("head_tree") != cand.get("candidate_tree"):
+        rep.add("pr", "FAIL", "PR head tree 与冻结候选 tree 不一致")
+    merge_commit = str(pr.get("merge_commit") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", merge_commit):
+        rep.add("pr", "FAIL", "PR merge commit 必须是完整 40 位 SHA")
+        return
+    try:
+        main_head = git(main_repo, "rev-parse", cfg["main-branch"]).strip()
+        if main_head != merge_commit:
+            rep.add("pr", "FAIL", "主工作区 main 未停在 PR merge commit；先 fetch/checkout main")
+        tree = git(main_repo, "rev-parse", merge_commit + "^{tree}").strip()
+        if tree != cand.get("candidate_tree"):
+            rep.add("pr", "FAIL", "PR merge commit tree 与冻结候选 tree 不一致")
+        strategy = str(pr.get("strategy") or "")
+        if strategy not in ("merge", "squash"):
+            rep.add("pr", "FAIL", "PR strategy 必须为 merge / squash")
+        parents = git(main_repo, "rev-list", "--parents", "-n", "1", merge_commit).split()[1:]
+        if strategy == "merge" and cand.get("candidate") not in parents:
+            rep.add("pr", "FAIL", "merge commit 的父提交不含冻结候选")
+        if strategy == "squash" and len(parents) != 1:
+            rep.add("pr", "FAIL", "squash 合并必须只有一个父提交")
+    except InputError as exc:
+        rep.add("pr", "FAIL", f"PR merge commit 不可证明：{exc}")
 
 
 def _canonical_sha(value) -> str:
@@ -1694,9 +1749,9 @@ def authorize_merge(args, online_proof=None) -> dict:
     integ = integ_dir(args)
     cand = load_json(integ / "candidate.json")
     mode = feature_mode(load_config(fdir))
-    if mode == "local-human":
+    if mode in ("local-human", "pr"):
         if online_proof is not None:
-            raise InputError("local-human 不接受 CI proof 代替 merge-main 人工确认")
+            raise InputError(f"{mode} 不接受 CI proof 代替候选/PR 证据")
     elif online_proof is None:
         raise InputError("CI promote 缺同进程在线 proof，不得生成 merge authorization")
     confirmation_path = integ / "confirmation.md"
@@ -1711,6 +1766,7 @@ def authorize_merge(args, online_proof=None) -> dict:
         "business_results_sha256": sha256_file(integ / "business-results.json"),
         **feature_evidence_hashes(integ),
         "confirmation_sha256": sha256_file(confirmation_path) if mode == "local-human" else None,
+        "pr_sha256": sha256_file(integ / PR_EVIDENCE) if mode == "pr" else None,
         "online_proof_sha256": _canonical_sha(online_proof) if online_proof is not None else None,
         "online_proof": online_proof,
         "_capability": _MERGE_CAPABILITY,
@@ -1789,28 +1845,44 @@ def record_merge(authorization, merge_result) -> Report:
         if authorization.get("confirmation_sha256"):
             if sha256_file(integ / "confirmation.md") != authorization["confirmation_sha256"]:
                 rep.add("confirmation", "FAIL", "人工确认在授权后变化")
+        mode = authorization.get("mode")
+        if mode == "pr" and sha256_file(integ / PR_EVIDENCE) != authorization.get("pr_sha256"):
+            rep.add("pr", "FAIL", "integration/pr.json 在授权后变化")
         commit = git(repo, "rev-parse", "--verify", str(merge_result.get("commit")) + "^{commit}").strip()
         if merge_result.get("operation_id") != authorization.get("operation_id"):
             rep.add("merge", "FAIL", "merge_result operation_id 与精确授权事务不一致")
         if git(repo, "rev-parse", "HEAD").strip() != commit:
             rep.add("merge", "FAIL", "merge_result 不是当前 main HEAD；不接受任意历史 commit")
-        parents = git(repo, "rev-list", "--parents", "-n", "1", commit).split()[1:]
-        main_before = authorization["main_head"]
-        strategy = merge_result.get("strategy")
-        if strategy == "no-ff":
-            if parents != [main_before, authorization["candidate"]]:
-                rep.add("parents", "FAIL", "no-ff 合并父提交必须依次为冻结 main HEAD 与 candidate")
-        elif strategy == "squash":
-            if parents != [main_before]:
-                rep.add("parents", "FAIL", "squash 提交唯一父提交必须是冻结 main HEAD")
-        else:
-            rep.add("merge", "FAIL", "strategy 必须为 no-ff / squash")
         tree = git(repo, "rev-parse", commit + "^{tree}").strip()
         if tree != authorization["candidate_tree"]:
-            rep.add("tree", "FAIL", "最终 tree 不等于 candidate tree；额外改动不得随 squash/merge 混入")
-        proven = _proven_merge_tree(repo, main_before, authorization["candidate"])
-        if proven != authorization["candidate_tree"] or proven != tree:
-            rep.add("tree", "FAIL", "git merge-tree 无法证明最终结果就是 candidate 的 clean 三方合并 tree")
+            rep.add("tree", "FAIL", "最终 tree 不等于 candidate tree；额外改动不得随合并混入")
+        parents = git(repo, "rev-list", "--parents", "-n", "1", commit).split()[1:]
+        strategy = merge_result.get("strategy")
+        pr = {}
+        if mode == "pr":
+            pr = read_pr_evidence(integ)
+            if not pr or str(pr.get("merge_commit")) != commit:
+                rep.add("pr", "FAIL", "record_merge 的 commit 与 integration/pr.json 不一致")
+            strategy = str(pr.get("strategy") or "")
+            if strategy not in ("merge", "squash"):
+                rep.add("merge", "FAIL", "PR strategy 必须为 merge / squash")
+            if strategy == "merge" and authorization["candidate"] not in parents:
+                rep.add("parents", "FAIL", "PR merge commit 的父提交不含冻结候选")
+            if strategy == "squash" and len(parents) != 1:
+                rep.add("parents", "FAIL", "PR squash 提交必须只有一个父提交")
+        else:
+            main_before = authorization["main_head"]
+            if strategy == "no-ff":
+                if parents != [main_before, authorization["candidate"]]:
+                    rep.add("parents", "FAIL", "no-ff 合并父提交必须依次为冻结 main HEAD 与 candidate")
+            elif strategy == "squash":
+                if parents != [main_before]:
+                    rep.add("parents", "FAIL", "squash 提交唯一父提交必须是冻结 main HEAD")
+            else:
+                rep.add("merge", "FAIL", "strategy 必须为 no-ff / squash")
+            proven = _proven_merge_tree(repo, main_before, authorization["candidate"])
+            if proven != authorization["candidate_tree"] or proven != tree:
+                rep.add("tree", "FAIL", "git merge-tree 无法证明最终结果就是 candidate 的 clean 三方合并 tree")
         existing = cand.get("merged_commit")
         if existing and existing != commit:
             rep.add("replay", "FAIL", f"候选已登记另一合并 {existing[:12]}；不得重放为新 commit")
@@ -1826,7 +1898,9 @@ def record_merge(authorization, merge_result) -> Report:
             "branch": cand["integration_branch"], "target": cand["main_branch"],
             "candidate": authorization["candidate"], "candidate_tree": authorization["candidate_tree"],
             "operation_id": authorization["operation_id"], "strategy": strategy,
-            "note": f"{cand['integration_branch']} → {cand['main_branch']}；仅 merge-main，不含 deploy-prod/push",
+            "note": (f"PR #{pr.get('number')} merged by {pr.get('merged_by') or 'user'}；candidate tree 已核"
+                     if mode == "pr" else
+                     f"{cand['integration_branch']} → {cand['main_branch']}；仅 merge-main，不含 deploy-prod/push"),
         }
         if not existing:
             recorded = dict(cand)
@@ -2156,10 +2230,10 @@ def target(args) -> int:
     except (ImportError, ValueError, OSError) as exc:
         raise InputError(str(exc))
     fc = config.get("feature-closeout") or {}
-    if fc.get("mode") == "local-human" and target == config.get("main-branch"):
+    if fc.get("mode") in ("local-human", "pr") and target == config.get("main-branch"):
         legacy = _legacy_local_human(fc, fm)
         if not legacy:
-            raise InputError("local-human 票只能进入本需求集成分支；显式 target-branch=main 同样拒绝")
+            raise InputError("local-human/PR 票只能进入本需求集成分支；显式 target-branch=main 同样拒绝")
     print(target)
     return 0
 

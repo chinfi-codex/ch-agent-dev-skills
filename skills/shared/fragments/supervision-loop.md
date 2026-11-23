@@ -50,6 +50,23 @@
     确认候选、feature-merged 事件和主 HEAD 一致；逐票 close-and-clean，再清理 integration worktree / 精确 upstream / 失效代际（多轮复用目录必须带本轮 `--round`，finalize 只清本轮候选与分支，不动旧轮结论产物）。任何一步失败都保持 needs-attention，不能用总结掩盖残留。
 11. **发布与兜底**：push、Prod dry-run/sync、只读冒烟和 rollback 均需人另行明确授权；main push 后 CI full 是安全网。新失败归因到本需求则开修复票，影响 Prod 时提议 revert / 回滚，人确认后执行。
 
+### 需求收口（pr 模式）
+
+用于 remote 执行面：本地候选验证与 `local-human` 完全相同，只把“合 main”换成“用户在 Gitea 合并 PR”。CI 可全停，PR 不以状态检查为门。
+
+1. **前置**：全票 merged/done；按 local-human 的第 1–8 步完成 freeze、整需求独立评审、候选 supervisor 复跑、compliance/conformance、自动 AC、`report` 与 `check --phase verify --record`。任一失败不得进入 PR。
+2. **推送**：按 campaign 授权把票/集成分支推到主仓；实现子 agent 不 push。
+3. **建 PR**：用户在 Gitea 建 PR（或用 API），记录 `integration/pr.json`：`number / head_sha / head_tree / base / merge_commit / strategy(merge|squash) / merged / merged_by / merged_at / provider / repository`。不得记录 token。
+4. **用户合并**：用户在 Gitea 合并；本地 `git fetch` 并 checkout `main`，主工作区 HEAD 必须是该 PR 的 `merge_commit`。
+5. **PR 证据门**：`feature_closeout.py check --phase merge --main-repo <主工作区>` 核 `head_sha/head_tree` 等于候选、`merge_commit` tree 等于候选 tree、merge/squash 父提交关系正确；缺失或不一致即 FAIL。
+6. **登记合并**：
+   ```bash
+   python3 ../shared/scripts/delivery.py promote \
+     --candidate <integration/candidate.json> --candidate-repo <集成 worktree> --repo <主工作区>
+   ```
+   pr 模式不本地合并、不移动 ref，只校验 PR 证据并写 `feature-merged`；随后 `feature_closeout.py finalize`。
+7. **发布**：远端分支删除、部署、Prod 均另行授权；CI 未启用时不得声称有状态检查。
+
 ### 无人值守模式（人离场自动跑）
 
 - **授权落盘**：`unattended.md` 写明可自主事项、禁止事项、预算和停止条件，经人过目后开跑。默认禁止 deny 命中、改 DoD、绕过 scope / 粒度、执行本机 full、合 main、Prod、push 和越过停止条件；额度阈值未指定时默认 80%。
