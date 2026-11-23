@@ -30,13 +30,21 @@ def fail(message: str) -> None:
 
 
 def export_session(session_id: str) -> dict:
-    try:
-        result = subprocess.run(["opencode", "export", session_id],
-                                capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as exc:
-        fail("opencode export failed: %s" % exc)
-    if result.returncode:
-        fail("opencode export failed: " + (result.stderr or result.stdout).strip())
+    commands = [
+        ["opencode", "--standalone", "session", "export", session_id],  # v2
+        ["opencode", "export", session_id],                              # v1
+    ]
+    result = None
+    for command in commands:
+        try:
+            candidate = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if candidate.returncode == 0 and candidate.stdout.strip():
+            result = candidate
+            break
+    if result is None:
+        fail("opencode session export failed (v1/v2 command not available)")
     try:
         value = json.loads(result.stdout)
     except ValueError as exc:
@@ -47,10 +55,11 @@ def export_session(session_id: str) -> dict:
     if not info.get("id"):
         fail("opencode export lacks session info.id")
     title = info.get("title") or info.get("slug") or str(info["id"])
+    location = info.get("location") if isinstance(info.get("location"), dict) else {}
     return {
         "id": str(info["id"]), "name": title, "title": title,
-        "role": str(info.get("agent") or "build"),
-        "cwd": info.get("directory"),
+        "role": str(info.get("agent") or info.get("mode") or "build"),
+        "cwd": info.get("directory") or location.get("directory") or location.get("cwd"),
     }
 
 

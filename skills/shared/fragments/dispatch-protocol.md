@@ -42,7 +42,7 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 | ZCode | 当前会话须核对 `supervisor-review.model` / `thoughtLevel` | `Agent`；角色 frontmatter 绑定 model / thoughtLevel；复审和回答后可按 agentId 用 `SendMessage` 续接 | 同 Claude Code |
 | Codex | 项目 config 的 `model` / `model_reasoning_effort` | 原生多代理；`agent_type` 同上，角色 TOML 绑定模型 / effort | 自管沙箱必须由 adapter 回报路径和可达性；异文件系统不可达时保留唯一分支并报 external-pending |
 | DSH | profile `agent-default-model` 的 provider / model / reasoningEffort | `subagent` 显式传 provider / model / reasoning_effort，只取 resolve 选出的 allowedModels | 以真实 adapter 能力为准；主会话 `git worktree prune` 不能冒充异文件系统清理；dev 会话必须叠加 `--patch dev-overlay.yml` 覆盖主机 workspace/默认模型 |
-| OpenCode（备选） | agent/model 配置的 provider/model | 自定义 agents（`mode: subagent`）绑 model；`native_session_command` 负责 session 读写；`opencode run/serve` 为无头入口 | 同 DSH；权限未硬化前不得作为默认宿主 |
+| OpenCode（备选） | agent/model 配置的 provider/model | 自定义 agents（`mode: subagent`）绑 model；`native_session_command` 负责 session 读写；`opencode run/serve` 为无头入口 | 同 DSH；v2 需在 `opencode.json` 显式 `skills: [<skills-root>]`，CLI 用 `--standalone` 继承 `dev.env`；权限未硬化前不得作为默认宿主 |
 
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
