@@ -38,7 +38,7 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
 - 宿主完全没有独立对话能力时，主会话只能产出自包含提示词与 resolve 结果，请人在对应模型的新对话启动；无法确认实际模型不得开工，也不得在主会话顺便实现。评审没有独立环境时同样停止，绝不自评。
-- feature 复审优先续接原评审对话，输入为新 candidate 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨 feature 一律新开。票级不再发起独立评审。
+- feature 复审优先续接原评审对话，输入为新 candidate 范围、同目录 `review-handoff.json`、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。handoff 的增量与闭合线索只安排检查顺序，完整 feature diff、全部规定输入与本轮独立判断不缩减。跨 feature 一律新开。票级不再发起独立评审。
 - 宿主能力由 `host_adapters.py` 区分 available / unavailable / unknown。配置里写了能力不等于实际可用；评审定稿先 `write_review_binding` 通过宿主原生接口附着本次 issue / round / head / tree / report 绑定，再 `verify_review_session` 实时重读。`host-probes.json` 只保存写回执供对账，单独文件或 capability bool 不构成证明。浏览器不可用时 AC 记 unverified 或转人工，session 活性 unknown 时禁止删除其 worktree。
 
 ### 清场触发与统一入口

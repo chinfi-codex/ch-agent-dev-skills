@@ -61,7 +61,21 @@
     },
     "identity": {"$ref": "#/definitions/identity"},
     "generated_at": {"type": "string", "format": "date-time"},
-    "manifest": {"type": "string", "minLength": 1}
+    "manifest": {"type": "string", "minLength": 1},
+    "candidate_flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_path", "candidate_sha256", "issue_id", "candidate", "candidate_tree", "main_head", "plan_sha256"],
+      "properties": {
+        "candidate_path": {"type": "string", "minLength": 1},
+        "candidate_sha256": {"type": "string", "format": "sha256"},
+        "issue_id": {"type": "string", "pattern": "^issue-[0-9]+[a-z]?$"},
+        "candidate": {"type": "string", "format": "git-sha"},
+        "candidate_tree": {"type": "string", "format": "git-sha"},
+        "main_head": {"type": "string", "format": "git-sha"},
+        "plan_sha256": {"type": "string", "format": "sha256"}
+      }
+    }
   },
   "definitions": {
     "snapshot": {

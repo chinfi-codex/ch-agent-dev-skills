@@ -18,7 +18,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `feature-closeout.mode`：
   - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
   - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
-  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
+  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划并生成 review-handoff，在候选上并行发起整需求独立评审与 `run-candidate` 复跑，两者完成后统一做 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。同 candidate 复跑可幂等复验或用 `--resume` 补跑；新 candidate 仍全票执行。push / Prod 始终另行授权。
 - `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
 - `conformance`：只在 feature 冻结候选上执行一次，不再每票必做。主会话或独立监督会话先反向枚举需求，再打开代码按 tech-spec 全节与全部票覆盖矩阵并集逐条核对；`integration/conformance-feature.md` 必须绑定 candidate/tree、精确覆盖本轮票与 spec hash，空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。票级覆盖矩阵保留在 impl-log 供 feature 核对。
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
@@ -31,6 +31,6 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 ## 测试位置
 
 - **票级验证在本票 worktree**：TDD 见红 / 变绿、每条 DoD、fast 和单项失败归因；票级只跑内环，不跑独立评审、supervisor 复跑或 conformance。fast 不经整机槽位包装。
-- **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。
+- **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。与完整独立评审并行；同 candidate 重验通过可复用，`--resume` 只补缺失 / 失败 / 无效票，新 candidate 不跨代复用。
 - **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
 - **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。

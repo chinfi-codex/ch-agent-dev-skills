@@ -602,6 +602,30 @@ class CandidateVerificationTest(unittest.TestCase):
     def aggregate(self):
         return json.loads((self.integration / "candidate-verification.json").read_text())
 
+    def test_candidate_runner_records_phase_once_across_idempotent_replay(self):
+        import feature_closeout as fc
+
+        self.assertEqual(self.call_candidate()[0], 0)
+        rows = fc.phase_timing_summary(self.feature, self.candidate_document())
+        self.assertEqual([(row["phase"], row["state"]) for row in rows],
+                         [("candidate-verification", "finished")])
+        self.assertGreaterEqual(rows[0]["duration_seconds"], 0)
+        journal = self.feature / "progress.jsonl"
+        first = journal.read_bytes()
+        self.assertEqual(self.call_candidate()[0], 0)
+        self.assertEqual(journal.read_bytes(), first)
+        self.assertEqual(len([json.loads(line) for line in first.splitlines()
+                              if json.loads(line).get("kind") == "feature-phase-timing"]), 2)
+
+    def test_phase_timing_failure_does_not_replace_real_verification(self):
+        import feature_closeout as fc
+
+        with mock.patch.object(fc, "record_phase", side_effect=fc.InputError("legacy journal")):
+            code, out = self.call_candidate()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.aggregate()["all-passed"])
+        self.assertEqual(out.count("phase timing unavailable"), 2)
+
     def test_historical_v3_candidate_preserves_bytes_and_runs_frozen_commands(self):
         path = self.feature / "impl/issue-001/ticket-context.json"
         value = self.contexts["issue-001"]
@@ -798,21 +822,21 @@ class CandidateVerificationTest(unittest.TestCase):
                             for entry in aggregate["issues"]))
         self.assertFalse((self.integration / "raw").exists())
 
-    def test_repeated_candidate_runs_do_not_overwrite_ticket_level_evidence(self):
+    def test_repeated_candidate_runs_revalidate_without_reexecuting(self):
         first_code, first_out = self.call_candidate()
         self.assertEqual(first_code, 0, first_out)
         first = self.aggregate()
+        first_bytes = (self.integration / "candidate-verification.json").read_bytes()
         first_paths = [entry["verification_path"] for entry in first["issues"]]
         self.assertTrue(first["all-passed"])
-        second_code, second_out = self.call_candidate()
+        with mock.patch.object(vi, "_run_tasks", side_effect=AssertionError("must not execute")):
+            second_code, second_out = self.call_candidate()
         self.assertEqual(second_code, 0, second_out)
+        self.assertIn("no commands re-executed", second_out)
         second = self.aggregate()
-        second_paths = [entry["verification_path"] for entry in second["issues"]]
-        self.assertTrue(second["all-passed"])
-        self.assertNotEqual(first["generated"], second["generated"])
-        self.assertNotEqual(first_paths, second_paths)
-        for relative in first_paths + second_paths:
-            self.assertTrue((self.integration / relative).is_file(), relative)
+        self.assertEqual(second, first)
+        self.assertEqual((self.integration / "candidate-verification.json").read_bytes(), first_bytes)
+        self.assertEqual([entry["verification_path"] for entry in second["issues"]], first_paths)
         self.assertEqual(self.implementer_path.read_bytes(), self.implementer)
         self.assertEqual(self.implementer_manifest.read_bytes(), self.implementer_manifest_bytes)
         impl_issue = self.feature / "impl/issue-001"
@@ -820,6 +844,81 @@ class CandidateVerificationTest(unittest.TestCase):
                          ["raw", "ticket-context.json", "verification-implementer.json"])
         self.assertFalse((impl_issue / "verification-supervisor.json").exists())
         self.assertFalse((impl_issue / "raw" / "ticket-generation" / "supervisor").exists())
+
+    def test_resume_only_reexecutes_failed_tickets(self):
+        marker = Path(self.tmp.name) / "dod2-output.txt"
+        marker.write_text("broken-output\n", encoding="utf-8")
+        (self.wt / "tests/test_dod2.py").write_text(
+            "from pathlib import Path\nprint(Path(%r).read_text().strip())\n" % str(marker),
+            encoding="utf-8")
+        sh(self.wt, "git", "add", "tests/test_dod2.py")
+        sh(self.wt, "git", "commit", "-qm", "read external test fixture")
+        self.candidate = sh(self.wt, "git", "rev-parse", "HEAD")
+        self.candidate_tree = sh(self.wt, "git", "rev-parse", "HEAD^{tree}")
+        self.write_candidate()
+        code, out = self.call_candidate()
+        self.assertEqual(code, 1, out)
+        first = {entry["issue"]: entry for entry in self.aggregate()["issues"]}
+        self.assertTrue(first["issue-001"]["pass"])
+        self.assertFalse(first["issue-002"]["pass"])
+        marker.write_text("dod2-ok\n", encoding="utf-8")
+        code, out = self.call_candidate("--resume")
+        self.assertEqual(code, 0, out)
+        second = {entry["issue"]: entry for entry in self.aggregate()["issues"]}
+        self.assertTrue(all(entry["pass"] for entry in second.values()))
+        self.assertEqual(second["issue-001"], first["issue-001"])
+        self.assertNotEqual(second["issue-002"]["verification_sha256"],
+                            first["issue-002"]["verification_sha256"])
+        self.assertEqual(second["issue-002"]["verification_path"],
+                         first["issue-002"]["verification_path"])
+        self.assertIn("resumed 1 ticket(s), re-executed 1", out)
+
+    def test_resume_full_revalidation_rejects_raw_tamper(self):
+        self.assertEqual(self.call_candidate()[0], 0)
+        first = {entry["issue"]: entry for entry in self.aggregate()["issues"]}
+        path = self.integration / first["issue-001"]["verification_path"]
+        document = json.loads(path.read_text())
+        raw = path.parent / document["records"][0]["raw_log"]["path"]
+        raw.write_text("tampered\n", encoding="utf-8")
+        code, out = self.call_candidate("--resume")
+        self.assertEqual(code, 0, out)
+        second = {entry["issue"]: entry for entry in self.aggregate()["issues"]}
+        self.assertNotEqual(second["issue-001"]["verification_sha256"],
+                            first["issue-001"]["verification_sha256"])
+        self.assertEqual(second["issue-001"]["verification_path"],
+                         first["issue-001"]["verification_path"])
+        self.assertEqual(second["issue-002"], first["issue-002"])
+        self.assertIn("hash mismatch", out)
+
+    def test_environment_change_forces_real_execution(self):
+        first_environment = {"platform": "test", "python": "test", "variables": {"MODE": "one"}}
+        with mock.patch.object(vi, "_environment", return_value=first_environment):
+            self.assertEqual(self.call_candidate()[0], 0)
+        first = self.aggregate()
+        second_environment = {"platform": "test", "python": "test", "variables": {"MODE": "two"}}
+        with mock.patch.object(vi, "_environment", return_value=second_environment), \
+                mock.patch.object(vi, "_run_tasks", wraps=vi._run_tasks) as execute:
+            code, out = self.call_candidate()
+            self.assertEqual(code, 0, out)
+            self.assertEqual(execute.call_count, 2)
+        self.assertNotEqual(self.aggregate()["generated"], first["generated"])
+
+    def test_new_candidate_or_supervisor_identity_never_reuses_old_evidence(self):
+        self.assertEqual(self.call_candidate()[0], 0)
+        first = self.aggregate()
+        sh(self.wt, "git", "commit", "-q", "--allow-empty", "-m", "new commit same tree")
+        self.candidate = sh(self.wt, "git", "rev-parse", "HEAD")
+        self.write_candidate()
+        with mock.patch.object(vi, "_run_tasks", wraps=vi._run_tasks) as execute:
+            self.assertEqual(self.call_candidate()[0], 0)
+            self.assertEqual(execute.call_count, 2)
+        self.assertNotEqual(self.aggregate()["generated"], first["generated"])
+        same_candidate = self.aggregate()
+        with mock.patch.object(vi, "_run_tasks", wraps=vi._run_tasks) as execute:
+            code, out = self.call_candidate("--session", "different-supervisor")
+            self.assertEqual(code, 0, out)
+            self.assertEqual(execute.call_count, 2)
+        self.assertNotEqual(self.aggregate()["generated"], same_candidate["generated"])
 
     def test_frozen_context_commands_win_over_current_issue_and_config_drift_fails(self):
         # The ticket file is not an input to candidate verification: relay only

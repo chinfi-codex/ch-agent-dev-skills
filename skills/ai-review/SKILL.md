@@ -117,6 +117,7 @@ allowed-tools:
             integration/                # 本 campaign 收口产物；可选 integration/<round>/ 为内部执行轮次，不改变 campaign 身份或分支；结构见 shared/templates/feature-closeout.md
               candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
               acceptance-plan.json      #   冻结时的计划快照
+              review-handoff.json       #   完整评审范围、上轮 findings 与修复证据定位（freeze 写，不是通过结论）
               feature-review.md         #   整需求独立评审报告（main_head..candidate）
               feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
               candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总
@@ -181,7 +182,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `feature-closeout.mode`：
   - `server-enforced`：必须由 `ci_proof.py` 在线证明 workflow、run、artifact、分支保护、required checks 和 expected-SHA 能力；任一未知即停止。
   - `cooperative-ci`：CI API 可用但无完整服务端保护时显式选择；只经 `delivery.py` 协作合并，报告必须注明“无服务端强制”，不得从 server-enforced 自动降级。
-  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划，在候选上各执行一次整需求独立评审、`run-candidate` 复跑和 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。push / Prod 始终另行授权。
+  - `local-human`：每 campaign 独立集成分支；票只做内环并合入集成分支（状态 `merged`）。新战役使用独立 campaign 目录与分支；feature-slug 不变。全部票 merged/done 后 freeze 候选与验收计划并生成 review-handoff，在候选上并行发起整需求独立评审与 `run-candidate` 复跑，两者完成后统一做 feature conformance，再执行 scoped 关联选择集及 command / browser-agent / human AC，生成正式报告，完成人工实测 / 复核 / 豁免，并取得明确 `merge-main` 确认后才由 `delivery.promote` 合 main，随后 finalize 转 done 并清理（多轮目录 finalize/close-and-clean 带本轮 `--round`，旧轮结论产物不动）。同 candidate 复跑可幂等复验或用 `--resume` 补跑；新 candidate 仍全票执行。push / Prod 始终另行授权。
 - `feature-closeout.ci`：server / cooperative 必填 `{provider, base-url, repository, workflow, artifact, token-env}`；local-human 必须为 null。配置只存环境变量名，不存 token、verdict 或 proof。main 或候选前进后必须重新同步、freeze 和验证，没有 drift-ignore 豁免。
 - `conformance`：只在 feature 冻结候选上执行一次，不再每票必做。主会话或独立监督会话先反向枚举需求，再打开代码按 tech-spec 全节与全部票覆盖矩阵并集逐条核对；`integration/conformance-feature.md` 必须绑定 candidate/tree、精确覆盖本轮票与 spec hash，空正文、缺来源、缺代码 / 测试 / evidence 指针均不能通过。票级覆盖矩阵保留在 impl-log 供 feature 核对。
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
@@ -194,7 +195,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 ## 测试位置
 
 - **票级验证在本票 worktree**：TDD 见红 / 变绿、每条 DoD、fast 和单项失败归因；票级只跑内环，不跑独立评审、supervisor 复跑或 conformance。fast 不经整机槽位包装。
-- **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。
+- **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。与完整独立评审并行；同 candidate 重验通过可复用，`--resume` 只补缺失 / 失败 / 无效票，新 candidate 不跨代复用。
 - **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
 - **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。
 
@@ -231,7 +232,7 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 - 修订采用“复制旧版 + 精确补丁”生成完整新版本，不重写未修改正文。可用 `artifact_text.py revise --manifest <JSON>`：source / sha256 / output / replacements（old、new 数组）；每段 old 必须唯一匹配，输出不得已存在。修改后仍做原有完整评审、稳定 ID/引用检查与冻结失效处理。工具不判定语义正确。
 - 两次独立判断各自保留：评审与 conformance 都先从规定原文独立枚举、核代码，再参照实现矩阵。共享来源定位，不共享“通过”结论；索引不是穷尽需求清单。
 - 报告元数据、统计、原文引用、BLOCKER 派生列表由已有工具或确定性模板生成；模型只写一次本角色判断、依据与异常，不再转述同一 findings。可用 `artifact_text.py render --manifest <JSON>` 无损填充经核对的完整报告骨架：template / sha256 / output / fields；骨架以 `{{field_name}}` 标出模型独立撰写的判断或工具提取的事实，fields 必须恰好覆盖且非空。骨架必须保留原模板必需章节；渲染成功不等于通过门禁，候选/身份/覆盖/正文仍由原检查器验证。对话只交结论、待处理项与报告路径，除非用户要求全文。
-- 候选回修先比较 base/HEAD/tree、票组、spec、计划、配置及变更文件，整理闭合证据以安排检查顺序；不缩小全量评审范围。新候选仍重新评审、真实复跑、conformance、回执与人工确认。可复制报告骨架并局部更新，但每项结论须经本轮核对，旧回执与旧执行结果不可沿用。
+- 候选回修先读取 freeze 生成的 `integration/[round/]review-handoff.json`：比较 base/HEAD/tree、票组、spec、计划、配置及变更文件，读取上轮 findings 与修复票 / merged commit / 票级证据闭合表；再按本候选代码与评审结果逐项判断是否闭合。闭合表只提供定位线索，不继承旧通过结论，不缩小全量评审范围。新候选仍重新评审、真实复跑、conformance、回执与人工确认。可复制报告骨架并局部更新，但每项结论须经本轮核对，旧回执与旧执行结果不可沿用。
 
 # /ai-review
 
@@ -254,8 +255,8 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 - 只接受 `integration/[round/]candidate.json`：`base = review_base`（普通候选为 `main_head`；叠加 campaign 候选为 `stack_base.commit`，此时 `merge_base = review_base = pin`，且不得把 main 当评审锚），`head = candidate`，`tree = candidate_tree`，`merge_base` 必须由 git 重算一致。不接受临时 main...HEAD、票级 base 或自由 ref 覆盖。
 - 校验 `candidate` 提交存在且 tree 一致、feature diff 非空、`acceptance-plan.yaml` 哈希等于 `candidate.acceptance_plan.sha256`、集成 worktree HEAD/tree 等于候选且 clean。
 - 先运行 `agents_config.py validate` 和 dispatch 角色校验；缺配置或角色过期即停。
-- 输入必须包含 feature 目录、全部票、tech-spec、candidate.json、验收计划、评审者 host/session/agent 和覆盖清单。评审者必须独立于主会话与**所有票** implementer；任一 session 或 agent 相同即拒绝。
-- 候选冻结后不得改动代码；评审只读。发现候选不干净或已前进：停止并返回重新 freeze，不评新候选。
+- 输入必须包含 feature 目录、全部票、tech-spec、candidate.json、验收计划、评审者 host/session/agent 和覆盖清单。复审还必须读取同目录 `review-handoff.json`，用其中的候选差异、上轮 findings 和修复票 / merged commit / 票级证据定位闭合项；表中事实只作线索，须由本轮代码与报告核对，不继承旧通过结论。评审者必须独立于主会话与**所有票** implementer；任一 session 或 agent 相同即拒绝。
+- 候选冻结后不得改动代码；评审只读。发现候选不干净或已前进：停止并返回重新 freeze，不评新候选。评审可能与候选复跑并行，OCR preview / rules / local JSON 等评审工具产物只写主工作区 `integration/[round/]` 或临时目录，绝不写集成 worktree；主工作区证据写入不得进入候选 Git 状态。
 
 ## Step 1：定位整需求背景
 
@@ -278,7 +279,8 @@ python3 ../shared/scripts/arch_check.py render check --repo <项目根> --worktr
 
 ```bash
 ocr review --from <candidate.review_base 或 main_head> --to <candidate.candidate> \
-  --background-file <PRD / tech-spec> --format json --output .ocr-feature-result.json
+  --background-file <PRD / tech-spec> --format json \
+  --output <主工作区 integration/[round/]/ocr-feature-result.json>
 ```
 
 项目 `.opencodereview/rule.json` 自动生效，临时覆盖必须显式记录。
@@ -324,7 +326,7 @@ ocr review --from <candidate.review_base 或 main_head> --to <candidate.candidat
 ## Step 5：结论与复审
 
 - 无 BLOCKER → `pass`；仅 Medium / Low → `pass-with-notes`；任一 BLOCKER 或 critical/high 未闭合 → `blocked`。
-- BLOCKER 不回退已 merged 票，也不在评审会话修代码：主会话在同需求下开修复票，走新票级内环并合入同一集成分支，然后重新 freeze。
+- BLOCKER 不回退已 merged 票，也不在评审会话修代码：主会话在同需求下为各问题分别开修复票，走各自票级内环并合入同一集成分支。每张评审回修票的 frontmatter `review-findings` 必须列出它闭合的上轮 receipt finding id，供 freeze 自动生成闭合线索；机器复跑问题无 finding id 时留空，由 `repairs` 追踪。首轮必须一次列全 BLOCKER；主会话收齐本批评审与机器复跑的问题、完成全部回修并同步 main 后统一重新 freeze，不为单条问题逐一生成正式候选。
 - 新 candidate 必须重新评审；receipt 的 `round` 递增并绑定 `previous_receipt_sha256`，旧 receipt、报告、复跑、conformance、人工确认全部失效。
 - 同需求复审可续接原评审对话，输入新候选范围、上轮报告 / receipt 与闭合证据；跨需求一律新开。
 - 连续多轮全 PASS / 全 BLOCK 时，提示用已合并 feature 回测误报漏报并修订规则；反复判据沉淀进 `REVIEW.md`，不在本轮自行放宽。

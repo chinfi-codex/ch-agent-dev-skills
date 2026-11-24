@@ -66,4 +66,4 @@ coverage_rate: N%
 | 轮 | candidate | 相对上轮增量 | 复审结论 | 残留 BLOCKER |
 |---|---|---|---|---|
 
-每轮生成独立报告，回执 `round` 递增并绑定 `previous_receipt_sha256`。复审聚焦新 candidate 增量、上轮 BLOCKER 闭合和新增回归；candidate / tree 变化后旧回执失效。
+每轮生成独立报告，回执 `round` 递增并绑定 `previous_receipt_sha256`。复审读取 `integration/[round/]review-handoff.json`，优先核对本轮变化、上轮问题闭合和新增回归，同时逐项复核完整 feature diff；增量只决定检查顺序，不缩小评审范围。candidate / tree 变化后旧回执失效。

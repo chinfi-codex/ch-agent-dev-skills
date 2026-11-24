@@ -23,19 +23,19 @@
 全部票 `merged` 或 `done` 后按以下顺序执行；所有产物写主工作区 `integration/[round/]`，不写集成 worktree、不提交到集成分支。`executor` 决定谁执行，`oracle` 决定谁最终验收，浏览器操作不能替代人的业务判断。
 
 1. **前提**：全票 merged/done + 每票 merged commit 完整且为候选祖先、无活动 human-decision；`freeze` 只冻结候选与票组，**不再要求每票 conformance**。PRD 或 change-request delta + retained baseline AC 全部进入 acceptance-plan.yaml 且 validate-plan 通过。
-2. **同步并冻结**：集成 worktree 先同步 main，冲突在集成分支解决；`feature_closeout.py freeze` 绑定 candidate / tree / 票组与计划哈希（新流程 --feature-dir 指当前 campaign；可选 `--round <执行轮次> --issues <本战役全部非 deferred 票>`，不改 feature-slug 或集成分支）。main 或候选之后任何前进都必须重新同步、freeze 并重跑 feature 门。
-3. **整需求独立评审**：在冻结候选上发起**一次** `/ai-review`，评审 `main_head..candidate` 全 diff，按票 merge commit 分段并整体判断跨票契约。评审者必须独立于主会话和全部票 implementer；产出 `integration/feature-review.md` 与 `integration/feature-review-receipt.json`（`review_receipt.py create-feature`）。critical/high 未闭合或 verdict=blocked 即阻塞。
+2. **同步并冻结**：集成 worktree 先同步 main，冲突在集成分支解决；`feature_closeout.py freeze` 绑定 candidate / tree / 票组与计划哈希，并确定性生成同目录 `review-handoff.json`（新流程 --feature-dir 指当前 campaign；可选 `--round <执行轮次> --issues <本战役全部非 deferred 票>`，不改 feature-slug 或集成分支）。首轮一次收齐评审问题；回修轮同时收齐评审与候选复跑结果，逐问题建独立修复票并走完票级内环，本批修复票全部 merged/done 后只 freeze 一次，不为每条问题重复封版。main 或候选之后任何前进都必须重新同步、freeze 并重跑 feature 门。
+3. **并行发起独立评审与候选复跑**：先执行 `feature_closeout.py phase --feature-dir <需求目录> --repo <集成 worktree> --phase review --event start`（多轮目录带本轮 `--round`），再发起**一次** `/ai-review`，评审 `main_head..candidate` 全 diff，按票 merge commit 分段并整体判断跨票契约；不等待评审返回，立即在后台启动第 4 步候选复跑。两项工作读取同一 candidate/tree，互不等待、互不替代，全部完成后才进入第 5 步。评审者必须独立于主会话和全部票 implementer；产出 `integration/feature-review.md` 与 `integration/feature-review-receipt.json`（`review_receipt.py create-feature`），随后以相同参数执行 `phase --phase review --event finish`。critical/high 未闭合、verdict=blocked 或任一复跑失败都阻塞；若任一项先失败，仍收齐另一项结果，将本批问题放在同一轮回修，不为每条问题单独 freeze。
 4. **候选 supervisor 复跑**：在集成 worktree 执行：
    ```bash
    python3 ../shared/scripts/verify_issue.py run-candidate \
      --candidate <integration/candidate.json> --repo <集成 worktree> \
      --identity-json <supervisor 身份>
    ```
-   对每票冻结 DoD + fast 真实执行一次，写 `integration/raw/<generation>/<issue>/verification-supervisor.json` 与 `integration/candidate-verification.json`；不覆盖票级 implementer manifest。任一失败阻塞。
-5. **Feature conformance**：完成 `integration/conformance-feature.md`，绑定 candidate/tree；按 tech-spec 全节与全部票覆盖矩阵并集逐条核对，coverage.issues / specs 精确覆盖本轮票与方案，每票至少一行有效证据。票级 conformance 不再必做，票级矩阵保留在 impl-log 供此处核对。
-6. **准备候选环境与自动证据**：配置了 verify-instance 时由 integration_runtime 获取租约、部署并核 candidate；否则按显式 dev-service 配置启动集成 worktree 实例。后台执行 fast → `scoped_select.py`（经 test_slots 包装，direct 全跑、indirect 到预算停发并记 feature deferred，不跑 full）→ command / browser-agent AC 的真实执行与 generation 证据。自动 pass 必须有实际断言；浏览器还需 URL、actions、console/page error 和当前候选截图。清单外失败只做单项 base 归因，本需求引入则开修复票并重新 freeze。
-7. **机器门禁与首次报告**：`feature_closeout.py report` 生成 acceptance-report.md，再 `check --phase verify --record`。该门同时核 feature review receipt、candidate-verification、conformance-feature、票状态 / merged 祖先、AC 漏项 / 重复 / 额外和证据环境；任一项失败不过。
-8. **人工验收与最终报告**：先向人展示实际通过、失败、未验证、待人工原因及每条操作与预期。判据不足只能向 auto+human-review / human 严格调整并写 reclassification；未执行只能真人实测或显式豁免。人报问题回第 2 步重新 freeze、评审与复跑。明确 `merge-main` 原话、时间、候选 tree 和无附加条件写入 confirmation.md，再重新 report；沉默、取消或超时不算确认。
+   对每票冻结 DoD + fast 真实执行一次，写 `integration/raw/<generation>/<issue>/verification-supervisor.json` 与 `integration/candidate-verification.json`；不覆盖票级 implementer manifest。任一失败阻塞。同 candidate 再次执行先复验已有完整证据；中断或部分失败时用 `--resume`，只补跑缺失 / 未通过票并逐票重新验证原始证据。新 candidate 不复用任何旧候选结果，仍须全票真实复跑。
+5. **Feature conformance**：用 `phase --phase conformance --event start` 开始真实计时，完成 `integration/conformance-feature.md` 后以 `--event finish` 结束；绑定 candidate/tree，按 tech-spec 全节与全部票覆盖矩阵并集逐条核对，coverage.issues / specs 精确覆盖本轮票与方案，每票至少一行有效证据。票级 conformance 不再必做，票级矩阵保留在 impl-log 供此处核对。
+6. **准备候选环境与自动证据**：以 `phase --phase acceptance --event start` 开始验收计时；配置了 verify-instance 时由 integration_runtime 获取租约、部署并核 candidate；否则按显式 dev-service 配置启动集成 worktree 实例。后台执行 fast → `scoped_select.py`（经 test_slots 包装，direct 全跑、indirect 到预算停发并记 feature deferred，不跑 full）→ command / browser-agent AC 的真实执行与 generation 证据。自动 pass 必须有实际断言；浏览器还需 URL、actions、console/page error 和当前候选截图。清单外失败只做单项 base 归因，本需求引入则开修复票并重新 freeze。
+7. **机器门禁与首次报告**：以 `phase --phase report --event start` 开始，`feature_closeout.py report` 生成 acceptance-report.md，再 `check --phase verify --record`，结束后以 `--event finish` 记录。该门同时核 feature review receipt、candidate-verification、conformance-feature、票状态 / merged 祖先、AC 漏项 / 重复 / 额外和证据环境；任一项失败不过。报告末尾的「阶段耗时」来自本 candidate 的真实 digest 计时事件；缺计时只留空，不伪造数值，也不替代门禁。
+8. **人工验收与最终报告**：先向人展示实际通过、失败、未验证、待人工原因及每条操作与预期。判据不足只能向 auto+human-review / human 严格调整并写 reclassification；未执行只能真人实测或显式豁免。人报问题回第 2 步重新 freeze、并行评审与复跑。全部人工 AC 实测 / 复核 / 豁免写回后，以 `phase --phase acceptance --event finish` 结束本段计时；随后重新 report，生成包含全部已结束阶段耗时的最终报告并向人展示。人明确 `merge-main` 原话、时间、候选 tree 和无附加条件后写入 confirmation.md，确认绑定这个最终报告哈希。确认后不得再新增会改变报告的计时；恢复性重复 report 必须字节不变，报告或候选变化须重新确认。沉默、取消或超时不算确认。
 9. **合 main**：主会话只执行：
    ```bash
    python3 ../shared/scripts/delivery.py promote \

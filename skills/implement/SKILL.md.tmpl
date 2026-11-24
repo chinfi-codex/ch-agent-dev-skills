@@ -49,7 +49,7 @@ allowed-tools:
 ```text
 confirmed → delivery start → TDD + runner evidence → process_check --phase ticket
 → 主会话 delivery merge 到集成分支 → merged（解锁下游）
-→ 全部票 merged → freeze → 整需求评审 → 候选 supervisor 复跑 → feature conformance
+→ 全部票 merged → freeze → [整需求评审 ∥ 候选 supervisor 复跑] → feature conformance
 → report / check verify → 人确认 → promote（内含 merge 核验） → finalize
 → merged → done + accepted + 清理
 ```
