@@ -46,6 +46,12 @@ def _model(value, host: str, path: str) -> str:
         if ((host == "dsh" and len(parts) != 2)
                 or (host == "zcode" and len(parts) < 2) or not all(parts)):
             raise ConfigError(f"{path} 必须使用 <provider>/<model> 完整路由")
+    elif host == "codex":
+        # Codex 可写具体模型 ID，也可写 <namespace>/<route> 形式的路由组；
+        # 这里只管语法，是否真实存在仍由实时目录校验。
+        parts = value.split("/")
+        if len(parts) > 2 or not all(parts):
+            raise ConfigError(f"{path} 必须是具体模型 ID 或 <namespace>/<route>")
     elif "/" in value:
         raise ConfigError(f"{path} 不得包含宿主 provider 前缀")
     return value

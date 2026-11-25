@@ -108,9 +108,25 @@ class DispatchConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(dc.ConfigError, "具体模型 ID"):
             dc.validate(bad)
         bad = fixture()
-        bad["dispatch"]["hosts"]["codex"]["supervisor-review"]["model"] = "deepseek/deepseek-flash"
+        bad["dispatch"]["hosts"]["claude-code"]["supervisor-review"]["model"] = "deepseek/deepseek-flash"
         with self.assertRaisesRegex(dc.ConfigError, "provider 前缀"):
             dc.validate(bad)
+        bad = fixture()
+        bad["dispatch"]["hosts"]["codex"]["supervisor-review"]["model"] = "group/never-stuck/extra"
+        with self.assertRaisesRegex(dc.ConfigError, "<namespace>/<route>"):
+            dc.validate(bad)
+
+    def test_codex_accepts_bare_model_or_namespaced_route(self):
+        candidate = fixture()
+        candidate["dispatch"]["hosts"]["codex"]["supervisor-review"]["model"] = "group/never-stuck"
+        validated = dc.validate(candidate)
+        route = validated["hosts"]["codex"]["supervisor-review"]
+        self.assertEqual(route["model"], "group/never-stuck")
+        self.assertEqual(dc.resolve(validated, "codex", "supervisor")["native"]["model"],
+                         "group/never-stuck")
+        bare = deepcopy(candidate)
+        bare["dispatch"]["hosts"]["codex"]["supervisor-review"]["model"] = "gpt-6.2-sol"
+        self.assertEqual(dc.validate(bare)["hosts"]["codex"]["supervisor-review"]["model"], "gpt-6.2-sol")
 
     def test_zcode_accepts_namespaced_model_route(self):
         candidate = fixture()
