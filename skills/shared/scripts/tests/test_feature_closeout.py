@@ -1157,6 +1157,17 @@ baseline_ac:
         self.assertEqual(2, text.count("verification-supervisor.json#DoD-1"))
         self.assertEqual(self.check("verify", generate_report=False).returncode, 0)
 
+    def test_ticket_identity_key_matches_progress_load_issues_for_campaign(self):
+        import progress
+        campaign = self.root / "dev" / "features" / "mod" / SLUG / "campaigns" / "demo-20260101"
+        (campaign / "issues").mkdir(parents=True)
+        issue = campaign / "issues" / "issue-001-x.md"
+        issue.write_text("---\nissue-id: issue-001\nfeature-slug: demo\nstatus: done\n---\n")
+        identity = fc._ticket_identity(campaign, issue, "issue-001")
+        loaded = progress.load_issues(self.root, campaign, [], {})
+        loaded = next(item for item in loaded if item["id"] == "issue-001")
+        self.assertEqual(loaded["key"], identity["key"])
+
     def test_candidate_empty_coverage_and_missing_leaf_fail(self):
         self.ready_local()
         path = self.fdir / "integration" / "conformance-feature.md"

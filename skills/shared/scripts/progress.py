@@ -108,13 +108,18 @@ def parse_frontmatter(path):
         key, val = key.strip(), re.split(r"\s+#", val.strip())[0].strip()
         if indent == 0:
             if val == "":
-                data[key] = {}
+                # 空值先记 None（与 ticket_context/agents_config 的 YAML 口径一致）；
+                # 只有后续出现缩进子行时才升级为块，避免把空标量误当成空 mapping。
+                data[key] = None
                 parent = key
             else:
                 data[key] = coerce(val)
                 parent = None
-        elif parent and isinstance(data.get(parent), dict):
-            data[parent][key] = coerce(val)
+        elif parent:
+            if data.get(parent) is None:
+                data[parent] = {}
+            if isinstance(data.get(parent), dict):
+                data[parent][key] = coerce(val)
     return data
 
 

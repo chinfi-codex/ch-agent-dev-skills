@@ -26,6 +26,26 @@ def write_issue(repo, module, slug, iid, title, status, extra="", body=""):
         ISSUE.format(iid=iid, title=title, status=status, extra=extra, body=body), encoding="utf-8")
 
 
+class ParseFrontmatterTest(unittest.TestCase):
+    def _parse(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "issue.md"
+            path.write_text(text, encoding="utf-8")
+            return progress.parse_frontmatter(path)
+
+    def test_empty_scalar_is_none_not_mapping(self):
+        fm = self._parse("---\nissue-id: issue-001\ntarget-branch:\nstatus: done\n---\n")
+        self.assertIsNone(fm["target-branch"])
+
+    def test_empty_block_with_children_stays_mapping(self):
+        fm = self._parse("---\nissue-id: issue-001\ndispatch:\n  host: zcode\n  attempts: 2\n---\n")
+        self.assertEqual({"host": "zcode", "attempts": 2}, fm["dispatch"])
+
+    def test_blank_block_without_children_is_none(self):
+        fm = self._parse("---\nissue-id: issue-001\ndispatch:\nstatus: done\n---\n")
+        self.assertIsNone(fm["dispatch"])
+
+
 def edge_map(payload):
     return {(e["from"], e["to"], e["kind"]) for e in payload["dependencies"]}
 

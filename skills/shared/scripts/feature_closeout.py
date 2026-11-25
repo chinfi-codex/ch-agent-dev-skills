@@ -2499,8 +2499,13 @@ def record_merge(authorization, merge_result) -> Report:
 
 def _ticket_identity(fdir: Path, issue: Path, iid: str) -> dict:
     fm = read_frontmatter(issue)
+    # key 必须与 progress.load_issues 的构造一致（campaign 目录带 scope 前缀），
+    # 否则 apply_operation 用 key 复核 find_ticket 会失配并抛 StaleOperation。
+    key = issue.stem
+    if artifact_scope.campaign_id(fdir):
+        key = artifact_scope.scope_key(fdir) + "/" + key
     return {
-        "id": iid, "key": issue.stem, "title": str(fm.get("title") or iid), "status": "done",
+        "id": iid, "key": key, "title": str(fm.get("title") or iid), "status": "done",
         "feature": artifact_scope.scope_key(fdir), "feature_dir": str(fdir.resolve()),
         "issue_path": str(issue.resolve()), "fm": fm,
     }
