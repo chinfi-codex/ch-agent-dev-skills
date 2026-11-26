@@ -223,7 +223,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
 - `artifact-budget / retention`：限制 impl-log / evidence 行数及 impl / integration 体积；raw / OCR / 截图按 generation manifest 管理。当前、最后成功和被引用证据始终保留，失效代际与 salvage 只能经 `close-and-clean` 预检确认后清理。
 - `integration-runtime`：显式配置开发服务与 verify-instance 的启动、就绪、停止和租约；运行记录绑定 candidate。停止服务、释放租约失败时不得清集成 worktree。
-- `dispatch`：`supervisor-review` 用于主会话监督、feature 独立评审与 feature conformance；`development.default / escalated` 分别用于普通票和集成 / 高风险 / feature 评审 BLOCKER 后的修复票。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
+- `dispatch`：`supervisor-review` 用于主会话监督、feature 独立评审与 feature conformance；`development.default / escalated` 分别用于普通票和集成 / 高风险 / feature 评审 BLOCKER 后的修复票。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --host <当前宿主> --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
 - `enforcement`：声明评审信任级别与宿主 / 分支 / SHA 能力要求。宿主不能证明独立评审身份时不得冒充 host-verified；非 server-enforced 不得宣称具有服务端分支保护。
 - `ocr.mode`：默认 `delegate`，OCR 只筛文件与规则，由独立宿主对话评审；`local / ci` 为可选增强，必须配置对应端点和 CI。
 
@@ -282,7 +282,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 
 按模板落盘（写作前必须先读对应模板）：
 
-- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`），顶层 `schema-version: 2`。写完立即运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，再运行 `dispatch_config.py validate --catalog ./dev/dispatch-model-catalog.json`；任何旧字段、未知字段或非法模式组合都必须修正，不能带入后续流程
+- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`），顶层 `schema-version: 2`。写完立即运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，再运行 `dispatch_config.py validate --host <当前宿主> --catalog ./dev/dispatch-model-catalog.json`；任何旧字段、未知字段或非法模式组合都必须修正，不能带入后续流程
 - 按已确认宿主生成原生角色：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <.claude|.codex|.zcode>`；渲染器拒绝覆盖已有不同文件时先展示差异并请人确认，不强行覆盖。DSH 先用 `--dsh-profile <headless|desktop>` 渲染到临时目录，再只把主模型、完整 `tool-subagent` config 与 `allowedModels` 合并进人确认的目标 profile：headless 新增白名单插件必须使用 `- insert:`，已有 config 按整体替换处理；不动其他 profile，新建 DSH 会话才采样子代理白名单
 - `.gitignore` 追加 `.worktrees/` 与 `dev/`（已存在则跳过）；探查发现 dev/ 已被 git 跟踪 → 显式警示并建议 `git rm -r --cached dev/` 出库（dev/ 不入库是 worktree dev/ 软链约定的前提；入库会让每个 worktree 自带完整副本）
 - **仅当 ocr.mode = ci 时**：

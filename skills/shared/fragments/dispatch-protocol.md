@@ -8,8 +8,10 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**主会话通过�
 
 ```bash
 python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
-python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+python3 ../shared/scripts/dispatch_config.py validate --host <当前宿主> --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
 ```
+
+执行时必须从当前会话确定宿主，显式传入 `--host`；仅校验该宿主的模型、effort、实时目录及原生角色。其他宿主目录缺失或模型不可用不阻塞当前宿主，不根据模型名称推断宿主。`agents_config.py validate` 是配置结构检查，不代表任一宿主的模型可用性已经验证。
 
 - **主会话监督**：取当前宿主 `supervisor-review`，用 `resolve --role supervisor` 核对实际 model / effort。配置写入不会 retroactively 切换现有会话，不符即停。
 - **开发实现**：普通票取 `development.default`；集成 / 高风险及评审预警后的续修取 `development.escalated`，用 `resolve --role development`。不得按测试范围路由。

@@ -163,6 +163,63 @@ class DispatchConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(dc.ConfigError, "模型目录中不存在"):
             dc.validate(fixture(), catalogs)
 
+    def test_execution_checks_only_selected_host(self):
+        for host, values in ROUTES.items():
+            with self.subTest(host=host):
+                candidate = fixture()
+                for other in dc.HOSTS:
+                    if other != host:
+                        candidate["dispatch"]["hosts"][other] = {"invalid": True}
+                catalog = {host: {values[0]: [values[1]], values[2]: [values[3]]}}
+                result = dc.validate(candidate, catalog, host=host)
+                self.assertEqual(list(result["hosts"]), [host])
+                with self.assertRaisesRegex(dc.ConfigError, "catalogs"):
+                    dc.validate(candidate, {}, host=host)
+                catalog[host][values[0]] = []
+                with self.assertRaisesRegex(dc.ConfigError, "不支持 effort"):
+                    dc.validate(candidate, catalog, host=host)
+                del catalog[host][values[0]]
+                with self.assertRaisesRegex(dc.ConfigError, "模型目录中不存在"):
+                    dc.validate(candidate, catalog, host=host)
+
+    def test_selected_host_must_be_configured(self):
+        candidate = fixture()
+        del candidate["dispatch"]["hosts"]["codex"]
+        with self.assertRaisesRegex(dc.ConfigError, "当前宿主 codex 未配置"):
+            dc.validate(candidate, host="codex")
+        with self.assertRaisesRegex(dc.ConfigError, "未知宿主"):
+            dc.validate(candidate, host="other")
+
+    def test_cli_scopes_validate_resolve_and_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.md"
+            def yaml_lines(mapping, indent=0):
+                lines = []
+                for key, value in mapping.items():
+                    prefix = " " * indent + key + ":"
+                    if isinstance(value, dict):
+                        lines.append(prefix)
+                        lines.extend(yaml_lines(value, indent + 2))
+                    else:
+                        lines.append(prefix + " " + json.dumps(value))
+                return lines
+            config.write_text("```yaml\n" + "\n".join(yaml_lines(fixture())) + "\n```\n")
+            catalog = root / "catalog.json"
+            values = ROUTES["codex"]
+            catalog.write_text(json.dumps({"codex": {values[0]: [values[1]], values[2]: [values[3]]}}))
+            base = [sys.executable, dc.__file__]
+            options = ["--config", str(config), "--catalog", str(catalog)]
+            for command, extra in [("validate", []), ("resolve", ["--role", "supervisor"]),
+                                   ("render", ["--output", str(root / "native")])]:
+                with self.subTest(command=command):
+                    result = subprocess.run(base + [command] + options + ["--host", "codex"] + extra,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run(base + ["validate"] + options, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("必须指定 --host", result.stderr)
+
     def test_render_native_files(self):
         claude = dc.render(self.dispatch, "claude-code")
         self.assertIn("effort: medium", claude["agents/development.md"])
@@ -255,7 +312,7 @@ dispatch:
                 return subprocess.run([sys.executable, "-I", str(script), *args],
                                       capture_output=True, text=True)
 
-            validated = cli("validate", "--config", str(config), "--catalog", str(catalog))
+            validated = cli("validate", "--host", "zcode", "--config", str(config), "--catalog", str(catalog))
             self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
             output = root / "native"
             rendered = cli("render", "--config", str(config), "--host", "zcode", "--output", str(output))

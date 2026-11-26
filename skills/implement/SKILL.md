@@ -208,7 +208,7 @@ CI 模式仍按 provider MR 流程交付，但同样不在票级发起独立评�
 1. 运行：
    ```bash
    python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
-   python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+   python3 ../shared/scripts/dispatch_config.py validate --host <当前宿主> --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
    ```
    配置缺失、旧版本、字段非法、当前宿主或模型不可用时停止。A 类仓只读辅助，禁止实现。
 2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。

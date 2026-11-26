@@ -24,7 +24,7 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - `base-freeze`：由 ticket context 冻结 base 与 target；实现和评审期间不追目标分支。目标前进只能走 `delivery.rebase`，之后旧验证、评审和符合性结论全部失效并重新生成。
 - `artifact-budget / retention`：限制 impl-log / evidence 行数及 impl / integration 体积；raw / OCR / 截图按 generation manifest 管理。当前、最后成功和被引用证据始终保留，失效代际与 salvage 只能经 `close-and-clean` 预检确认后清理。
 - `integration-runtime`：显式配置开发服务与 verify-instance 的启动、就绪、停止和租约；运行记录绑定 candidate。停止服务、释放租约失败时不得清集成 worktree。
-- `dispatch`：`supervisor-review` 用于主会话监督、feature 独立评审与 feature conformance；`development.default / escalated` 分别用于普通票和集成 / 高风险 / feature 评审 BLOCKER 后的修复票。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
+- `dispatch`：`supervisor-review` 用于主会话监督、feature 独立评审与 feature conformance；`development.default / escalated` 分别用于普通票和集成 / 高风险 / feature 评审 BLOCKER 后的修复票。先运行 `agents_config.py validate`，再运行 `dispatch_config.py validate --host <当前宿主> --catalog` 和 `resolve`；模型 / effort 不在实时目录、缺当前宿主或角色文件过期即停。原生角色只由配置生成，`render --check` 只读核对，不手改第二份真源。
 - `enforcement`：声明评审信任级别与宿主 / 分支 / SHA 能力要求。宿主不能证明独立评审身份时不得冒充 host-verified；非 server-enforced 不得宣称具有服务端分支保护。
 - `ocr.mode`：默认 `delegate`，OCR 只筛文件与规则，由独立宿主对话评审；`local / ci` 为可选增强，必须配置对应端点和 CI。
 
