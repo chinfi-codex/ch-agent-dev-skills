@@ -19,7 +19,6 @@ ROUTES = {
     "claude-code": ("claude-opus-5-5", "medium", "claude-sonnet-5-5", "medium"),
     "zcode": ("bigmodel-api/GLM-5.3", "high", "deepseek/deepseek-flash", "high"),
     "dsh": ("deepseek-official/deepseek-v4-pro", "high", "deepseek-official/deepseek-flash", "high"),
-    "opencode": ("bigmodel/GLM-5.3", "high", "bigmodel/GLM-5.3-Flash", "high"),
 }
 
 
@@ -53,8 +52,6 @@ class DispatchConfigTest(unittest.TestCase):
             "claude-code": {"subagent_type": "development", "model": "claude-sonnet-5-5", "effort": "medium"},
             "zcode": {"subagent_type": "development", "model": "deepseek/deepseek-flash", "thoughtLevel": "high"},
             "dsh": {"provider": "deepseek-official", "model": "deepseek-flash", "reasoning_effort": "high"},
-            "opencode": {"provider": "bigmodel", "model": "GLM-5.3-Flash", "reasoning_effort": "high",
-                         "agent_type": "development"},
         }
         for host, native in expected.items():
             with self.subTest(host=host):
@@ -68,7 +65,6 @@ class DispatchConfigTest(unittest.TestCase):
             "claude-code": "effortLevel",
             "zcode": "thoughtLevel",
             "dsh": "reasoningEffort",
-            "opencode": "reasoningEffort",
         }
         for host in dc.HOSTS:
             with self.subTest(host=host):
@@ -83,10 +79,10 @@ class DispatchConfigTest(unittest.TestCase):
                 self.assertNotIn("subagent_type", supervisor["native"])
 
     def test_development_escalated_uses_distinct_native_role(self):
-        for host in ("codex", "claude-code", "zcode", "opencode"):
+        for host in ("codex", "claude-code", "zcode"):
             with self.subTest(host=host):
                 result = dc.resolve(self.dispatch, host, "development", "escalated")
-                key = "agent_type" if host in ("codex", "opencode") else "subagent_type"
+                key = "agent_type" if host == "codex" else "subagent_type"
                 self.assertEqual(result["native"][key], "development-escalated")
                 self.assertEqual(result["tier"], "escalated")
 
@@ -256,13 +252,7 @@ dispatch:
             self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
             self.assertIn("agents/development.md", stale.stdout)
 
-
-    def test_opencode_and_dsh_dev_render(self):
-        opencode = dc.render(self.dispatch, "opencode")
-        self.assertIn(".opencode/agents/development.md", opencode)
-        text = opencode[".opencode/agents/development.md"]
-        self.assertIn("mode: subagent", text)
-        self.assertIn("model: bigmodel/GLM-5.3-Flash#high", text)
+    def test_dsh_dev_render(self):
         developer = dc.render(self.dispatch, "dsh", "dev")["cordis.patch.yml"]
         self.assertIn("provider: deepseek-official", developer)
         self.assertIn("- insert:", developer)

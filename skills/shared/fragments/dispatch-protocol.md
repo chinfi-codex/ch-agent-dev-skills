@@ -42,7 +42,6 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 | ZCode | 当前会话须核对 `supervisor-review.model` / `thoughtLevel` | `Agent`；角色 frontmatter 绑定 model / thoughtLevel；复审和回答后可按 agentId 用 `SendMessage` 续接 | 同 Claude Code |
 | Codex | 项目 config 的 `model` / `model_reasoning_effort` | 原生多代理；`agent_type` 同上，角色 TOML 绑定模型 / effort | 自管沙箱必须由 adapter 回报路径和可达性；异文件系统不可达时保留唯一分支并报 external-pending |
 | DSH | profile `agent-default-model` 的 provider / model / reasoningEffort | `subagent` 显式传 provider / model / reasoning_effort，只取 resolve 选出的 allowedModels | 以真实 adapter 能力为准；主会话 `git worktree prune` 不能冒充异文件系统清理；dev 会话必须叠加 `--patch dev-overlay.yml` 覆盖主机 workspace/默认模型 |
-| OpenCode（备选） | agent/model 配置的 provider/model | 自定义 agents（`mode: subagent`）绑 model；`native_session_command` 负责 session 读写；`opencode run/serve` 为无头入口 | 同 DSH；v2 需在 `opencode.json` 显式 `skills: [<skills-root>]`，CLI 用 `--standalone` 继承 `dev.env`；权限未硬化前不得作为默认宿主 |
 
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
@@ -52,10 +51,10 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 
 ### 远端执行面：Herdr 手动启动
 
-- 判读机上的 dsh / OpenCode 由用户通过 Herdr（`hc`/herdr-core）手动启动和管理；套件不自动 `hc run/send/kill`，不配置常驻或无人值守。
+- 判读机上的 dsh 由用户通过 Herdr（`hc`/herdr-core）手动启动和管理；套件不自动 `hc run/send/kill`，不配置常驻或无人值守。
 - 启动后记录双 id：`herdr_terminal`（如 `judge/t7`，仅活性/定位参考）+ agent CLI 的 `session_id`（派发、续接与评审回执的唯一真源）。
 - `hc` 终端活性不等于 agent 会话有效（core 重启后终端可能降为 shell）；两者 unknown 时保留 worktree / 分支，禁止清理。
-- 用户关闭窗口/更新 Herdr 不影响 core 终端；恢复用 dsh `--session-id` 或 OpenCode `--continue/-s`，由用户执行。
+- 用户关闭窗口/更新 Herdr 不影响 core 终端；恢复用 dsh `--session-id`，由用户执行。
 - 主会话在判读机；mac 会话不得向判读机派发。需要切换时由用户把自包含提示词带入判读机会话。
 
 ### 清场触发与统一入口

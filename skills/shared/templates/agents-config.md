@@ -23,7 +23,7 @@ schema-version: 2
 #     worktree-root: /home/pandu/dev/project/.worktrees
 #     interpreter: /home/pandu/dev/venv/bin/python
 #     skills-root: /home/pandu/.dsh/skills
-#     hosts: [dsh, opencode]
+#     hosts: [dsh]
 #     closeout: pr
 #     ci: disabled
 #     push: per-campaign
@@ -171,14 +171,6 @@ dispatch:
         escalated:
           model: deepseek-official/deepseek-flash
           effort: high
-    # opencode:                 # 备选宿主（判读机 npm 安装）
-    #   supervisor-review:
-    #     model: bigmodel/GLM-5.3
-    #     effort: high
-    #   native_session_command: "python3 /path/to/opencode-session.py {session}"
-    #   development:
-    #     default: {model: bigmodel/GLM-5.3-Flash, effort: high}
-    #     escalated: {model: bigmodel/GLM-5.3-Flash, effort: high}
 
 # 证据与独立性的信任边界。非 server-enforced 时必须去掉 protected-branch / expected-SHA 声明，不得自动降级。
 enforcement:

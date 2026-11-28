@@ -21,12 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-HOSTS = ("claude-code", "codex", "zcode", "dsh", "opencode")
+HOSTS = ("claude-code", "codex", "zcode", "dsh")
 ALIASES = {"claude": "claude-code", "claude-code": "claude-code",
-           "deepseek": "dsh", "dsh": "dsh", "codex": "codex", "zcode": "zcode",
-           "opencode": "opencode"}
-STATE_HOST = {"claude-code": "claude", "codex": "codex", "zcode": "zcode",
-              "dsh": "deepseek", "opencode": "opencode"}
+           "deepseek": "dsh", "dsh": "dsh", "codex": "codex", "zcode": "zcode"}
+STATE_HOST = {"claude-code": "claude", "codex": "codex", "zcode": "zcode", "dsh": "deepseek"}
 CAPABILITIES = ("independent_session", "resume_session", "session_activity",
                 "worktree_reachable", "browser", "runtime")
 STATUSES = ("declared", "available", "unavailable", "unknown")
@@ -125,9 +123,6 @@ def require_independent_review(host, config=None, probes=None):
 
 
 def _read_state(host):
-    if host == "opencode":
-        # OpenCode 的会话绑定由 native_session_command 侧车管理；没有 session_title 状态文件。
-        return {}
     import session_title
     path = session_title.state_path(STATE_HOST[host])
     try:
@@ -220,8 +215,8 @@ def session_resource_state(repo, subject, worktrees=(), config=None, probes=None
                 blockers.append("活动会话仍绑定资源：%s" % key)
             else:
                 blockers.append("会话活性未知，阻止删除 worktree：%s" % key)
-            if host in ("codex", "dsh", "opencode") and reachable != "available":
-                blockers.append("%s 外部 worktree 不可达，保留唯一分支：%s" % (host, key))
+            if host in ("codex", "dsh") and reachable != "available":
+                blockers.append("Codex/DSH 外部 worktree 不可达，保留唯一分支：%s" % key)
     return {"status": "blocked" if blockers else "available",
             "sessions": sessions, "blockers": list(dict.fromkeys(blockers))}
 
@@ -230,7 +225,7 @@ def preservation_requirements(host, capabilities, unique_branch=True):
     """Return conservative branch/worktree policy for external host resources."""
     host = canonical_host(host)
     values = capabilities.get("capabilities", capabilities)
-    preserve_branch = bool(unique_branch and host in ("codex", "dsh", "opencode")
+    preserve_branch = bool(unique_branch and host in ("codex", "dsh")
                            and values.get("worktree_reachable") != "available")
     block_worktree = values.get("session_activity") != "available"
     return {"preserve_branch": preserve_branch, "block_worktree": block_worktree,
@@ -373,35 +368,26 @@ def _claude_native_session(reviewer, native_proof, session_id):
     raise HostCapabilityError("Claude 原生 Task/session 记录不存在或不可读")
 
 
-def _command_native_session(host, reviewer, config, session_id):
-    host_config = _host_config(config, host)
+def _dsh_native_session(reviewer, config, session_id):
+    host_config = _host_config(config, "dsh")
     command = host_config.get("native_session_command")
     if not command:
-        raise HostCapabilityError("%s 原生 session 查询未配置，无法证明" % host)
+        raise HostCapabilityError("DSH 原生 session 查询未配置，无法证明")
     if isinstance(command, str):
         command = shlex.split(command)
     if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
-        raise HostCapabilityError("%s native_session_command 配置无效" % host)
+        raise HostCapabilityError("DSH native_session_command 配置无效")
     command = [item.replace("{session}", session_id) for item in command]
-    env = dict(os.environ, AGENT_DEV_SESSION_ID=session_id, AGENT_DEV_SESSION_QUERY="review",
-               AGENT_DEV_SESSION_HOST=host)
+    env = dict(os.environ, AGENT_DEV_SESSION_ID=session_id, AGENT_DEV_SESSION_QUERY="review")
     result = subprocess.run(command, capture_output=True, text=True, timeout=10, env=env,
                             cwd=reviewer.get("cwd") or reviewer.get("repo") or os.getcwd())
     if result.returncode:
-        raise HostCapabilityError("%s 原生 session 查询失败：%s" % (host, (result.stderr or result.stdout).strip()))
+        raise HostCapabilityError("DSH 原生 session 查询失败：" + (result.stderr or result.stdout).strip())
     try:
         value = json.loads(result.stdout)
     except ValueError as exc:
-        raise HostCapabilityError("%s 原生 session 查询未返回 JSON" % host) from exc
+        raise HostCapabilityError("DSH 原生 session 查询未返回 JSON") from exc
     return _native_record_from_json(value, session_id)
-
-
-def _dsh_native_session(reviewer, config, session_id):
-    return _command_native_session("dsh", reviewer, config, session_id)
-
-
-def _opencode_native_session(reviewer, config, session_id):
-    return _command_native_session("opencode", reviewer, config, session_id)
 
 
 def read_native_review_session(host, reviewer, native_proof=None, config=None):
@@ -417,8 +403,6 @@ def read_native_review_session(host, reviewer, native_proof=None, config=None):
         return _codex_native_session(reviewer, session_id)
     if host == "claude-code":
         return _claude_native_session(reviewer, native_proof, session_id)
-    if host == "opencode":
-        return _opencode_native_session(reviewer, config, session_id)
     return _dsh_native_session(reviewer, config, session_id)
 
 
@@ -474,38 +458,29 @@ def _write_codex_binding(reviewer, review, session_id):
     return "codex-native-title-marker"
 
 
-def _write_command_binding(host, reviewer, review, config, session_id):
-    host_config = _host_config(config, host)
+def _write_dsh_binding(reviewer, review, config, session_id):
+    host_config = _host_config(config, "dsh")
     command = host_config.get("native_session_command")
     if not command:
-        raise HostCapabilityError("%s native_session_command 未配置，无法原生写入评审绑定" % host)
+        raise HostCapabilityError("DSH native_session_command 未配置，无法原生写入评审绑定")
     if isinstance(command, str):
         command = shlex.split(command)
     if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
-        raise HostCapabilityError("%s native_session_command 配置无效" % host)
+        raise HostCapabilityError("DSH native_session_command 配置无效")
     command = [item.replace("{session}", session_id) for item in command]
     env = dict(os.environ, AGENT_DEV_SESSION_ID=session_id, AGENT_DEV_SESSION_QUERY="review",
-               AGENT_DEV_SESSION_WRITE="1", AGENT_DEV_SESSION_HOST=host,
-               AGENT_DEV_REVIEW_METADATA=json.dumps(review, ensure_ascii=False, sort_keys=True),
+               AGENT_DEV_SESSION_WRITE="1", AGENT_DEV_REVIEW_METADATA=json.dumps(review, ensure_ascii=False, sort_keys=True),
                AGENT_DEV_REVIEW_MARKER=_review_marker(review))
     result = subprocess.run(command, capture_output=True, text=True, timeout=10, env=env,
                             cwd=reviewer.get("cwd") or reviewer.get("repo") or os.getcwd())
     if result.returncode:
-        raise HostCapabilityError("%s 原生评审绑定写入失败：%s" % (host, (result.stderr or result.stdout).strip()))
+        raise HostCapabilityError("DSH 原生评审绑定写入失败：" + (result.stderr or result.stdout).strip())
     if result.stdout.strip():
         try:
             _native_record_from_json(json.loads(result.stdout), session_id)
         except ValueError as exc:
-            raise HostCapabilityError("%s 原生写入响应不是 JSON" % host) from exc
-    return "%s-native-command" % host
-
-
-def _write_dsh_binding(reviewer, review, config, session_id):
-    return _write_command_binding("dsh", reviewer, review, config, session_id)
-
-
-def _write_opencode_binding(reviewer, review, config, session_id):
-    return _write_command_binding("opencode", reviewer, review, config, session_id)
+            raise HostCapabilityError("DSH 原生写入响应不是 JSON") from exc
+    return "dsh-native-command"
 
 
 def _write_claude_binding(reviewer, review, session_id):
@@ -554,8 +529,6 @@ def write_review_binding(host, reviewer, implementer, review, config=None):
         channel = _write_codex_binding(reviewer, binding, session_id)
     elif host == "dsh":
         channel = _write_dsh_binding(reviewer, binding, config, session_id)
-    elif host == "opencode":
-        channel = _write_opencode_binding(reviewer, binding, config, session_id)
     else:
         # Claude hook application is asynchronous. An already applied binding is
         # authoritative native state and must not produce another instruction.

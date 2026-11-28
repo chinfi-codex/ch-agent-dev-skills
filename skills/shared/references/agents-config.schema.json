@@ -205,8 +205,7 @@
             "codex": {"$ref": "#/definitions/host-routes"},
             "claude-code": {"$ref": "#/definitions/host-routes"},
             "zcode": {"$ref": "#/definitions/host-routes"},
-            "dsh": {"$ref": "#/definitions/host-routes"},
-            "opencode": {"$ref": "#/definitions/host-routes"}
+            "dsh": {"$ref": "#/definitions/host-routes"}
           }
         }
       }
@@ -331,7 +330,7 @@
           "type": "array",
           "uniqueItems": true,
           "minItems": 1,
-          "items": {"enum": ["codex", "claude-code", "zcode", "dsh", "opencode"]}
+          "items": {"enum": ["codex", "claude-code", "zcode", "dsh"]}
         },
         "closeout": {"enum": ["local-human", "pr"]},
         "ci": {"enum": ["disabled", "enabled"]},

@@ -16,8 +16,8 @@ import session_title
 
 
 class HostAdapterTest(unittest.TestCase):
-    def test_five_canonical_hosts_and_statuses(self):
-        self.assertEqual(hosts.HOSTS, ("claude-code", "codex", "zcode", "dsh", "opencode"))
+    def test_four_canonical_hosts_and_statuses(self):
+        self.assertEqual(hosts.HOSTS, ("claude-code", "codex", "zcode", "dsh"))
         config = {"dispatch": {"hosts": {"codex": {
             "model": "configured-model",
             "capabilities": {"independent_session": True, "browser": False},
@@ -68,7 +68,7 @@ class HostAdapterTest(unittest.TestCase):
             self.assertEqual(transcript.read_text(), "keep\n")
 
     def test_external_unreachable_codex_dsh_preserve_unique_branch(self):
-        for host in ("codex", "dsh", "opencode"):
+        for host in ("codex", "dsh"):
             policy = hosts.preservation_requirements(host, {"worktree_reachable": "unknown"}, unique_branch=True)
             self.assertTrue(policy["preserve_branch"])
         policy = hosts.preservation_requirements("zcode", {"worktree_reachable": "unknown"}, unique_branch=True)
