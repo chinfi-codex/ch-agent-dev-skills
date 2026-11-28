@@ -17,8 +17,6 @@
   ],
   "properties": {
     "schema-version": {"const": 2},
-    "active-plane": {"enum": ["local", "remote"]},
-    "execution-planes": {"$ref": "#/definitions/execution-planes"},
     "tracker": {"enum": ["local", "gitlab"]},
     "main-branch": {"$ref": "#/definitions/branch"},
     "repo-level": {"enum": ["A", "B", "C"]},
@@ -312,39 +310,6 @@
             "escalated": {"$ref": "#/definitions/route"}
           }
         }
-      }
-    },
-    "execution-plane": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo", "hosts", "closeout", "push"],
-      "properties": {
-        "host": {"type": "string", "minLength": 1},
-        "access": {"enum": ["local", "manual-ssh", "manual-herdr"]},
-        "session-manager": {"enum": ["none", "herdr"]},
-        "repo": {"$ref": "#/definitions/path"},
-        "worktree-root": {"$ref": "#/definitions/path"},
-        "interpreter": {"$ref": "#/definitions/path"},
-        "skills-root": {"type": ["string", "null"], "minLength": 1},
-        "hosts": {
-          "type": "array",
-          "uniqueItems": true,
-          "minItems": 1,
-          "items": {"enum": ["codex", "claude-code", "zcode", "dsh"]}
-        },
-        "closeout": {"enum": ["local-human", "pr"]},
-        "ci": {"enum": ["disabled", "enabled"]},
-        "push": {"enum": ["user-on-closeout", "per-campaign"]},
-        "unattended": {"type": "boolean"}
-      }
-    },
-    "execution-planes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["local", "remote"],
-      "properties": {
-        "local": {"$ref": "#/definitions/execution-plane"},
-        "remote": {"$ref": "#/definitions/execution-plane"}
       }
     }
   }

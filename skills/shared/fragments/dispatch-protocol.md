@@ -17,19 +17,12 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 - 原生角色只从配置生成。`render --check` 只读检查缺失或过期；确需更新由 `/setup-dev` 明确重生，不手改第二份模型真源，也不静默覆盖项目配置。
 - 旧 dispatch.model、缺字段、当前宿主无条目、模型 / effort 不在实时目录或角色过期即停，不跨宿主套用、不自动降级。
 
-### 执行面（execution-planes）
-
-- 一个 campaign 只属于一个执行面：`local`（本机）或 `remote`（判读机）。票、worktree、集成分支、评审、证据与决策包必须同面；跨机只走 git refs，不拆主/子。
-- `local`：mac 保持 `feature-closeout.mode=local-human` 与用户本机统一 push。
-- `remote`：`access=manual-herdr`、`session-manager=herdr`、`closeout=pr`、`ci=disabled`、`push=per-campaign`、`unattended=false`；repo 不得在 `/opt/pandu` 下。
-- 建 campaign 时把执行面写入 campaign 记录与 `dev/remote/plane.json`；中途换面必须显式迁移并保留原面证据，不能两边同时续写。
-
 ### 派发原语与结构化回报
 
 - 派发 = 主会话启动独立对话执行 `/implement issue-NNN` 或 `/ai-review`；新对话不继承、也不依赖主会话上下文。
-- 提示词必须包含：票、tech-spec、agents-config、feature-module / slug、ticket context（开工后）、execution context（有人 / 无人值守）、execution-plane、dispatch_id、parent_session_id，以及必要的 worktree / 分支和报告路径。
-- 真实派发前，主会话按 Progress Events 在票 frontmatter 写 `dispatch` 块（plane / host / model / dispatched-at / attempts / dispatch_id / session_id / parent_session_id；Herdr 场景另记 `session_manager` / `herdr_terminal`）并追加 `dispatch` 事件。session ID 尚未分配时可暂空，宿主返回后立即补齐。
-- remote campaign 的推送按 campaign 授权；实现子 agent 不 push，主会话或用户执行。local campaign 仍由用户本机统一 push。
+- 提示词必须包含：票、tech-spec、agents-config、feature-module / slug、ticket context（开工后）、execution context（有人 / 无人值守）、dispatch_id、parent_session_id，以及必要的 worktree / 分支和报告路径。
+- 真实派发前，主会话按 Progress Events 在票 frontmatter 写 `dispatch` 块（host / model / dispatched-at / attempts / dispatch_id / session_id / parent_session_id）并追加 `dispatch` 事件。session ID 尚未分配时可暂空，宿主返回后立即补齐。
+- `pr` 模式集成分支的推送按 campaign 授权，由主会话或用户执行，实现子 agent 不 push；`local-human` 仍由用户本机统一 push。
 - 成功回报包含分支、worktree、MR、ticket context、verification、process-check-ticket、impl-log 和遗留；它只是线索，不是验收证据。
 - 需要人裁决时，实现与评审子会话只返回未持久化 human-decision envelope，不直接问人、不写 returned / mr-submitted。主会话统一持久化、提问和路由。
 - resume 沿用 dispatch/session，attempts 不增；redispatch 新开独立对话，主会话更新 dispatch 块、attempts +1 并写新 dispatch 事件。路由没有真实 ack 前票保持 needs-human，结果不明不得重派。
@@ -41,21 +34,13 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 | Claude Code | 项目 settings 的 `model` / `effortLevel` | `Task`；`subagent_type = supervisor-review / development / development-escalated`；环境变量覆盖模型 / effort 时即停 | 同机注册 worktree；session / worktree 活性未知时保留 |
 | ZCode | 当前会话须核对 `supervisor-review.model` / `thoughtLevel` | `Agent`；角色 frontmatter 绑定 model / thoughtLevel；复审和回答后可按 agentId 用 `SendMessage` 续接 | 同 Claude Code |
 | Codex | 项目 config 的 `model` / `model_reasoning_effort` | 原生多代理；`agent_type` 同上，角色 TOML 绑定模型 / effort | 自管沙箱必须由 adapter 回报路径和可达性；异文件系统不可达时保留唯一分支并报 external-pending |
-| DSH | profile `agent-default-model` 的 provider / model / reasoningEffort | `subagent` 显式传 provider / model / reasoning_effort，只取 resolve 选出的 allowedModels | 以真实 adapter 能力为准；主会话 `git worktree prune` 不能冒充异文件系统清理；dev 会话必须叠加 `--patch dev-overlay.yml` 覆盖主机 workspace/默认模型 |
+| DSH | profile `agent-default-model` 的 provider / model / reasoningEffort | `subagent` 显式传 provider / model / reasoning_effort，只取 resolve 选出的 allowedModels | 以真实 adapter 能力为准；主会话 `git worktree prune` 不能冒充异文件系统清理 |
 
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
 - 宿主完全没有独立对话能力时，主会话只能产出自包含提示词与 resolve 结果，请人在对应模型的新对话启动；无法确认实际模型不得开工，也不得在主会话顺便实现。评审没有独立环境时同样停止，绝不自评。
 - feature 复审优先续接原评审对话，输入为新 candidate 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨 feature 一律新开。票级不再发起独立评审。
 - 宿主能力由 `host_adapters.py` 区分 available / unavailable / unknown。配置里写了能力不等于实际可用；评审定稿先 `write_review_binding` 通过宿主原生接口附着本次 issue / round / head / tree / report 绑定，再 `verify_review_session` 实时重读。`host-probes.json` 只保存写回执供对账，单独文件或 capability bool 不构成证明。浏览器不可用时 AC 记 unverified 或转人工，session 活性 unknown 时禁止删除其 worktree。
-
-### 远端执行面：Herdr 手动启动
-
-- 判读机上的 dsh 由用户通过 Herdr（`hc`/herdr-core）手动启动和管理；套件不自动 `hc run/send/kill`，不配置常驻或无人值守。
-- 启动后记录双 id：`herdr_terminal`（如 `judge/t7`，仅活性/定位参考）+ agent CLI 的 `session_id`（派发、续接与评审回执的唯一真源）。
-- `hc` 终端活性不等于 agent 会话有效（core 重启后终端可能降为 shell）；两者 unknown 时保留 worktree / 分支，禁止清理。
-- 用户关闭窗口/更新 Herdr 不影响 core 终端；恢复用 dsh `--session-id`，由用户执行。
-- 主会话在判读机；mac 会话不得向判读机派发。需要切换时由用户把自包含提示词带入判读机会话。
 
 ### 清场触发与统一入口
 

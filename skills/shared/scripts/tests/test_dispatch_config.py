@@ -252,12 +252,6 @@ dispatch:
             self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
             self.assertIn("agents/development.md", stale.stdout)
 
-    def test_dsh_dev_render(self):
-        developer = dc.render(self.dispatch, "dsh", "dev")["cordis.patch.yml"]
-        self.assertIn("provider: deepseek-official", developer)
-        self.assertIn("- insert:", developer)
-        self.assertIn("allowedModels:", developer)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,28 +7,6 @@
 ```yaml
 schema-version: 2
 
-# 执行面（可选；remote 必须写）。local 保持本机 local-human；remote = 判读机 manual-herdr。
-# active-plane: remote
-# execution-planes:
-#   local:
-#     repo: /Users/you/project
-#     hosts: [zcode, codex, claude-code]
-#     closeout: local-human
-#     push: user-on-closeout
-#   remote:
-#     host: judge
-#     access: manual-herdr
-#     session-manager: herdr
-#     repo: /home/pandu/dev/project
-#     worktree-root: /home/pandu/dev/project/.worktrees
-#     interpreter: /home/pandu/dev/venv/bin/python
-#     skills-root: /home/pandu/.dsh/skills
-#     hosts: [dsh]
-#     closeout: pr
-#     ci: disabled
-#     push: per-campaign
-#     unattended: false
-
 # issue 发布面：gitlab = glab CLI；local = dev/features/**/issues/ 本地票文件
 tracker: gitlab
 main-branch: main

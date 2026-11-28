@@ -265,7 +265,7 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
             f"      - provider: {route['provider']}",
             f"        model: {route['model']}",
         ])
-    if dsh_profile in ("headless", "dev"):
+    if dsh_profile == "headless":
         lines.append("- insert:")
         lines.extend(f"    {line}" if line else "" for line in settings)
     elif dsh_profile == "desktop":
@@ -311,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog", type=Path, help="可选：{host: {model: [effort...]}} 实时模型目录")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check", action="store_true", help="render：只读检查原生角色是否缺失或过期")
-    parser.add_argument("--dsh-profile", choices=("headless", "desktop", "dev"), default="headless")
+    parser.add_argument("--dsh-profile", choices=("headless", "desktop"), default="headless")
     args = parser.parse_args(argv)
     try:
         catalogs = json.loads(args.catalog.read_text(encoding="utf-8")) if args.catalog else None

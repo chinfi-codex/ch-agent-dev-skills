@@ -8,13 +8,9 @@ if ($env:OS -eq "Windows_NT" -or $PSVersionTable.Platform -eq "Win32NT") {
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Pack = Join-Path $Root "skills"
-$NodeBin = if ($env:SKILL_NODE) { $env:SKILL_NODE } else { "node" }
 
-& $NodeBin --experimental-strip-types (Join-Path $Pack "scripts\gen-skill-docs.ts") --check
-if ($LASTEXITCODE -ne 0) {
-  Write-Error "skill doc generator failed; Node >= 24 (or a build with TypeScript strip support) is required; set SKILL_NODE=<path>"
-  exit $LASTEXITCODE
-}
+node --experimental-strip-types (Join-Path $Pack "scripts\gen-skill-docs.ts") --check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $PythonCache = Get-ChildItem -Path $Pack -Recurse -Force | Where-Object { $_.Name -eq "__pycache__" -or $_.Name -match '\.py[cod]$' } | Select-Object -First 1
 if ($PythonCache) {
   Write-Error "refuse: Python cache artifacts found under $Pack; remove them before sync"

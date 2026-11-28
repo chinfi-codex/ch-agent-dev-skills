@@ -488,48 +488,6 @@ def _check_rate(value: Any) -> None:
         raise ConfigError("conformance.sample-rate must be > 0 and <= 1")
 
 
-def _check_planes(config: Dict[str, Any]) -> None:
-    planes = config.get("execution-planes")
-    active = config.get("active-plane")
-    if planes is None:
-        if active not in (None, "local"):
-            raise ConfigError("active-plane=remote requires execution-planes")
-        return
-    if active not in ("local", "remote"):
-        raise ConfigError("execution-planes requires active-plane=local|remote")
-    known_hosts = set(config["dispatch"]["hosts"])
-    for name in ("local", "remote"):
-        plane = planes[name]
-        if not Path(plane["repo"]).is_absolute():
-            raise ConfigError("execution-planes.%s.repo must be an absolute path" % name)
-        for key in ("worktree-root", "interpreter", "skills-root"):
-            value = plane.get(key)
-            if value is not None and not Path(value).is_absolute():
-                raise ConfigError("execution-planes.%s.%s must be an absolute path" % (name, key))
-        unknown = sorted(set(plane["hosts"]) - known_hosts)
-        if unknown:
-            raise ConfigError("execution-planes.%s.hosts not configured in dispatch.hosts: %s"
-                              % (name, ", ".join(unknown)))
-    local, remote = planes["local"], planes["remote"]
-    if local.get("closeout") != "local-human" or local.get("push") != "user-on-closeout":
-        raise ConfigError("local plane must use closeout=local-human and push=user-on-closeout")
-    if remote.get("closeout") != "pr":
-        raise ConfigError("remote plane must use closeout=pr")
-    if remote.get("ci") != "disabled":
-        raise ConfigError("remote plane must use ci=disabled")
-    if remote.get("push") != "per-campaign":
-        raise ConfigError("remote plane must use push=per-campaign")
-    if remote.get("access") != "manual-herdr" or remote.get("session-manager") != "herdr":
-        raise ConfigError("remote plane must use access=manual-herdr and session-manager=herdr")
-    if remote.get("unattended") is not False:
-        raise ConfigError("remote plane must set unattended=false")
-    if Path(remote["repo"]).as_posix().startswith("/opt/pandu"):
-        raise ConfigError("remote plane repo must not live under /opt/pandu")
-    expected = remote["closeout"] if active == "remote" else local["closeout"]
-    if config["feature-closeout"]["mode"] != expected:
-        raise ConfigError("feature-closeout.mode must match active execution plane (%s)" % expected)
-
-
 def _check_modes(config: Dict[str, Any]) -> None:
     if config["host-budget"]["max-runs"] > config["host-budget"]["total"]:
         raise ConfigError("host-budget.max-runs cannot exceed total workers")
@@ -620,7 +578,6 @@ def validate_config(config: Dict[str, Any], schema_path: Any = None) -> Dict[str
         raise ConfigError(str(exc))
     _check_paths(result)
     _check_modes(result)
-    _check_planes(result)
     return result
 
 
