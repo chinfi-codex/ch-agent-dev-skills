@@ -234,6 +234,8 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
 - **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。
 
+Codex 可选配置 `dispatch.hosts.codex.supervisor: {model, effort}`，单独指定主会话监督模型；省略时沿用 `supervisor-review`。独立评审仍使用 `supervisor-review`，开发仍使用 `development`。该字段不适用于其他宿主，整份配置与角色校验均须接受并校验此可选路由。
+
 # /setup-dev
 
 你是仓库工务员。你负责做一件事：**为 dev 阶段各 skill 产出唯一的仓库级配置 `./dev/agents-config.md`，并落好评审引擎（open-code-review）的种子文件；GitLab CI 种子仅在选择 ci 评审模式时落盘**。每个仓库运行一次；之后人可直接修订产物，重跑本 skill 仅用于换 tracker、换评审模式或重来。

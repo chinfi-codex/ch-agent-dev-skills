@@ -75,6 +75,45 @@ class AgentsConfigTest(unittest.TestCase):
         self.assertTrue(result["integration-runtime"]["ready-timeout-seconds"] > 0)
         self.assertEqual(result["retention"]["keep-generations"], 2)
 
+    def test_codex_supervisor_passes_whole_config_and_preserves_roles(self):
+        import dispatch_config as dc
+        raw = ac.read_first_yaml_block(TEMPLATE)
+        route = {"model": "gpt-6.2-sol", "effort": "high"}
+        raw["dispatch"]["hosts"]["codex"]["supervisor"] = route
+        result = ac.validate_config(raw)
+        dispatch = result["dispatch"]
+        self.assertEqual(dc.resolve(dispatch, "codex", "supervisor")["model"], route["model"])
+        self.assertEqual(dc.resolve(dispatch, "codex", "review")["model"],
+                         dispatch["hosts"]["codex"]["supervisor-review"]["model"])
+        rendered = dc.render(dispatch, "codex")
+        self.assertIn('model = "gpt-6.2-sol"', rendered["config.toml"])
+        self.assertNotIn('model = "gpt-6.2-sol"', rendered["agents/supervisor-review.toml"])
+        for bad_route in ({"model": "gpt-6.2-sol"}, {"model": "inherit", "effort": "high"},
+                          {"model": "gpt-6.2-sol", "effort": "invalid"}):
+            with self.subTest(route=bad_route):
+                bad = copy.deepcopy(raw)
+                bad["dispatch"]["hosts"]["codex"]["supervisor"] = bad_route
+                with self.assertRaises(ac.ConfigError):
+                    ac.validate_config(bad)
+        for host in ("claude-code", "zcode", "dsh"):
+            with self.subTest(host=host):
+                bad = copy.deepcopy(raw)
+                bad["dispatch"]["hosts"][host]["supervisor"] = route
+                with self.assertRaises(ac.ConfigError):
+                    ac.validate_config(bad)
+
+    def test_supervisor_load_and_cli_use_updated_schema(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        text = text.replace("    codex:\n", "    codex:\n      supervisor: {model: gpt-6.2-sol, effort: high}\n", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agents-config.md"
+            path.write_text(text, encoding="utf-8")
+            loaded = ac.load(path)
+            self.assertEqual(loaded["dispatch"]["hosts"]["codex"]["supervisor"]["model"], "gpt-6.2-sol")
+            result = subprocess.run([sys.executable, "-I", str(SCRIPTS / "agents_config.py"),
+                                     "validate", "--config", str(path)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_current_template_is_valid_v2_without_json_migration(self):
         parsed = ac.read_first_yaml_block(TEMPLATE)
         self.assertEqual(parsed["schema-version"], 2)
