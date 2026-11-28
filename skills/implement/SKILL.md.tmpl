@@ -49,7 +49,7 @@ allowed-tools:
 ```text
 confirmed → delivery start → TDD + runner evidence → process_check --phase ticket
 → 主会话 delivery merge 到集成分支 → merged（解锁下游）
-→ 全部票 merged → freeze → 整需求评审 → 候选 supervisor 复跑 → feature conformance
+→ 全部票 merged → freeze → [整需求评审 ∥ 候选 supervisor 复跑] → feature conformance
 → report / check verify → 人确认 → promote（内含 merge 核验） → finalize
 → merged → done + accepted + 清理
 ```
@@ -61,7 +61,7 @@ CI / PR 模式仍按 provider MR/PR 流程交付，但同样不在票级发起�
 1. 运行：
    ```bash
    python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
-   python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+   python3 ../shared/scripts/dispatch_config.py validate --host <当前宿主> --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
    ```
    配置缺失、旧版本、字段非法、当前宿主或模型不可用时停止。A 类仓只读辅助，禁止实现。
 2. 用 `resolve --role development` 核对当前原生角色；普通票取 default，集成 / 高风险及评审预警后的续修取 escalated。原生角色必须另经 `render --check` 核对，过期则由 `/setup-dev` 重生，不静默继承。

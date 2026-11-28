@@ -75,7 +75,7 @@ dispatch:
 | 票 | `merged` | 已合入目标集成分支，但尚未验收；附 `host`、合并 `commit`、精确 `branch` / `target` 与 `source_head`，供 finalize 与后续清理复核。写此事件不等于 `done` |
 | 票 | `accepted` | feature finalize 验收通过后把 `merged` 票转为 `done`；附 `commit` / `target` 与验收依据，作为唯一 `merged → done` 的状态事件 |
 | 票 | `circuit-break` | 无人值守熔断及原因 |
-| 票 / 需求 | `digest` | 阶段摘要、无人值守心跳或关闭说明；不冒充具体状态迁移 |
+| 票 / 需求 | `digest` | 阶段摘要、无人值守心跳或关闭说明；不冒充具体状态迁移。需求阶段计时使用 `kind: feature-phase-timing`，绑定 candidate/tree/candidate.json SHA256/round 与 `phase / state / started_at / ended_at / duration_seconds`，由 `feature_closeout.py phase` 幂等写入 |
 | 需求，`issue: feature` | `feature-verified` | local-human 自动阶段完成且报告已生成；未验证项仍明确保留 |
 | 需求，`issue: feature` | `feature-confirmed` | 人已完成合并前确认 |
 | 需求，`issue: feature` | `feature-merged` | 需求已合入 main；附 commit |

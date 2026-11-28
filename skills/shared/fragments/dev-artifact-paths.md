@@ -31,6 +31,7 @@
             integration/                # 本 campaign 收口产物；可选 integration/<round>/ 为内部执行轮次，不改变 campaign 身份或分支；结构见 shared/templates/feature-closeout.md
               candidate.json            #   冻结候选、票组、merged commit 与计划哈希（freeze 写）
               acceptance-plan.json      #   冻结时的计划快照
+              review-handoff.json       #   完整评审范围、上轮 findings 与修复证据定位（freeze 写，不是通过结论）
               feature-review.md         #   整需求独立评审报告（main_head..candidate）
               feature-review-receipt.json  # 候选级评审回执：diff / plan / 报告 / 全部 implementer 身份
               candidate-verification.json  # 逐票冻结 DoD+fast 在候选上的 supervisor 复跑汇总

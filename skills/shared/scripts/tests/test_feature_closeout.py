@@ -236,6 +236,10 @@ class FeatureCloseoutTest(unittest.TestCase):
         return json.loads((self.fdir / "integration" / "candidate.json").read_text())
 
     @property
+    def handoff(self):
+        return json.loads((self.fdir / "integration" / "review-handoff.json").read_text())
+
+    @property
     def tree(self):
         return self.candidate["candidate_tree"]
 
@@ -282,18 +286,19 @@ class FeatureCloseoutTest(unittest.TestCase):
             "environment": {"name": "integration-test"}, "items": items}))
         self.write_feature_gate()
 
-    def write_feature_gate(self):
+    def write_feature_gate(self, findings=None, review_round=1, previous_receipt_sha256=None):
         integ = self.fdir / "integration"
         report = integ / "feature-review.md"
         report.write_text("# Feature review\n\nverdict: pass\n", encoding="utf-8")
         payload = dict(self.candidate)
         payload.update({
-            "review_round": 1,
+            "review_round": review_round,
+            "previous_receipt_sha256": previous_receipt_sha256,
             "reviewer": {
                 "host": "zcode", "agent": "supervisor-review", "session": "review-1",
                 "model": "provider/supervisor", "effort": "high", "role": "review",
             },
-            "findings": [], "verdict": "pass", "trust": "operator-attested",
+            "findings": findings or [], "verdict": "pass", "trust": "operator-attested",
             "attestation": {
                 "operator": "user", "statement": "独立评审已完成，未发现阻断问题。",
                 "confirmed_at": "2026-11-16T00:00:00Z",
@@ -345,6 +350,29 @@ class FeatureCloseoutTest(unittest.TestCase):
             json.dumps({"records": [{"id": "DoD-1"}]}), encoding="utf-8")
         self.write_conformance("conform", "issue-002")
         self.write_merged(self.merged_commit, "issue-002", append=True)
+
+    def add_repair_issue(self, issue_id, findings, merged_commit, evidence=True):
+        path = self.fdir / "issues" / (issue_id + "-repair.md")
+        path.write_text(
+            f"---\nissue-id: {issue_id}\nfeature-slug: {SLUG}\nstatus: done\n"
+            f"review-findings: {json.dumps(findings)}\n"
+            f"dispatch:\n  host: zcode\n  model: provider/dev\n  session_id: impl-{issue_id}\n"
+            "  agent: development\ntech-spec: demo-tech-spec-2026-11-14.md\n---\n# repair\n",
+            encoding="utf-8")
+        impl = self.fdir / "impl" / issue_id
+        impl.mkdir(parents=True, exist_ok=True)
+        if evidence:
+            for name in ("ticket-context.json", "process-check-ticket.json", "verification-implementer.json"):
+                (impl / name).write_text(json.dumps({"issue": issue_id, "source": name}), encoding="utf-8")
+            generation = impl / "raw" / ("repair-" + issue_id)
+            generation.mkdir(parents=True)
+            (generation / "artifact-generation-manifest.json").write_text(json.dumps({
+                "schema": "agent-dev.artifact-generation/v2", "subject": issue_id,
+                "generation": "repair-" + issue_id, "candidate_tree": self.tree,
+                "status": "current", "created_at": "2026-11-16T00:00:00Z", "artifacts": [],
+            }), encoding="utf-8")
+        self.write_merged(merged_commit, issue_id=issue_id, append=True)
+        return path
 
     def feature_conformance_text(self):
         spec = self.fdir / "demo-tech-spec-2026-11-14.md"
@@ -523,6 +551,145 @@ baseline_ac:
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("human_expect", result.stdout)
         self.assertIn("evidence", result.stdout)
+
+    def test_first_freeze_handoff_binds_full_diff_and_inputs(self):
+        result = self.freeze()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        handoff = self.handoff
+        self.assertEqual(handoff["schema"], "agent-dev.review-handoff/v1")
+        self.assertEqual(handoff["purpose"], "review-location-only")
+        self.assertIsNone(handoff["previous"])
+        self.assertEqual(handoff["candidate"], self.head)
+        self.assertEqual(handoff["candidate_tree"], self.tree)
+        self.assertEqual(handoff["review_base"], self.candidate["main_head"])
+        self.assertEqual(handoff["diff"], {
+            "base": self.candidate["main_head"], "candidate": self.head,
+            "sha256": rr._feature_diff_sha(self.wt, self.candidate["main_head"], self.head),
+            "files": rr._changed_paths(self.wt, self.candidate["main_head"], self.head),
+        })
+        self.assertEqual(handoff["diff"]["files"], ["src/a.py", "src/test_a.py", "t.py"])
+        self.assertEqual(handoff["closure_rows"], [])
+        self.assertEqual(handoff["repairs"], [])
+        self.assertEqual(handoff["input_changes"], {"spec": "unknown", "config": "unknown", "plan": "unknown"})
+        self.assertEqual(len(handoff["inputs"]["spec"]), 1)
+        for artifact in handoff["inputs"]["spec"] + [handoff["inputs"]["config"], handoff["inputs"]["plan"]]:
+            self.assertFalse(Path(artifact["path"]).is_absolute())
+            self.assertNotIn("..", Path(artifact["path"]).parts)
+            self.assertEqual(artifact["sha256"], hashlib.sha256((self.root / artifact["path"]).read_bytes()).hexdigest())
+
+    def test_same_candidate_refreeze_is_byte_idempotent_and_not_self_previous(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        candidate_path = self.fdir / "integration" / "candidate.json"
+        handoff_path = self.fdir / "integration" / "review-handoff.json"
+        first_candidate = json.loads(candidate_path.read_text())
+        first = handoff_path.read_bytes()
+        self.assertEqual(self.freeze().returncode, 0)
+        self.assertEqual(handoff_path.read_bytes(), first)
+        self.assertIsNone(self.handoff["previous"])
+        self.assertNotEqual(json.loads(candidate_path.read_text())["frozen_at"], first_candidate["frozen_at"])
+        before_failed_freeze = candidate_path.read_bytes()
+        self.write_issue("in-progress")
+        self.assertEqual(self.freeze().returncode, 1)
+        self.assertEqual(handoff_path.read_bytes(), first)
+        self.assertEqual(candidate_path.read_bytes(), before_failed_freeze)
+
+    def test_same_candidate_refreeze_compares_immediate_input_hashes(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        spec = self.fdir / "demo-tech-spec-2026-11-14.md"
+        spec.write_text(spec.read_text() + "\n补充同候选的验收边界\n", encoding="utf-8")
+        result = self.freeze()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.handoff["input_changes"]["spec"], "changed")
+        self.assertEqual(self.handoff["input_changes"]["config"], "unchanged")
+        self.assertEqual(self.handoff["input_changes"]["plan"], "unchanged")
+
+    def test_refreeze_rejects_tampered_previous_report_bytes(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        self.write_feature_gate(findings=[])
+        integ = self.fdir / "integration"
+        receipt = json.loads((integ / "feature-review-receipt.json").read_text())
+        report = receipt["artifacts"]["report"]["path"]
+        report_path = Path(report) if Path(report).is_absolute() else integ / report
+        report_path.write_text(report_path.read_text() + "\n未授权改动\n", encoding="utf-8")
+        before = (integ / "candidate.json").read_bytes()
+        sh(self.wt, "commit", "-q", "--allow-empty", "-m", "new review candidate")
+        result = self.freeze()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("实际 SHA256", result.stderr)
+        self.assertEqual((integ / "candidate.json").read_bytes(), before)
+
+    def test_refreeze_handoff_maps_findings_to_multiple_repair_tickets(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        findings = [
+            {"id": "F-1", "severity": "medium", "status": "open",
+             "location": "src/a.py:1", "message": "边界行为需要修复", "closure": ""},
+            {"id": "F-2", "severity": "low", "status": "closed",
+             "location": "t.py:1", "message": "补充说明", "closure": "原评审已核对"},
+        ]
+        self.write_feature_gate(findings=findings)
+        first_handoff = self.handoff
+        old_candidate = self.candidate
+        old_receipt_path = self.fdir / "integration" / "feature-review-receipt.json"
+        old_receipt_sha = hashlib.sha256(old_receipt_path.read_bytes()).hexdigest()
+        old_report = json.loads(old_receipt_path.read_text())["artifacts"]["report"]
+        (self.wt / "src" / "a.py").write_text("x = 3\n")
+        (self.wt / "src" / "repair.py").write_text("repair = True\n")
+        sh(self.wt, "add", "src/a.py", "src/repair.py")
+        sh(self.wt, "commit", "-qm", "review repairs")
+        repair_commit = sh(self.wt, "rev-parse", "HEAD")
+        self.add_repair_issue("issue-002", ["F-1"], repair_commit, evidence=True)
+        self.add_repair_issue("issue-003", ["F-1"], repair_commit, evidence=False)
+        self.add_repair_issue("issue-004", [], repair_commit, evidence=True)
+        result = self.freeze()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("新候选全部重跑", result.stdout)
+        handoff = self.handoff
+        previous = handoff["previous"]
+        self.assertEqual(previous["candidate"], old_candidate["candidate"])
+        self.assertEqual(previous["candidate_tree"], old_candidate["candidate_tree"])
+        self.assertEqual(previous["main_head"], old_candidate["main_head"])
+        self.assertEqual(previous["plan_sha256"], old_candidate["acceptance_plan"]["sha256"])
+        self.assertEqual(previous["inputs"], first_handoff["inputs"])
+        self.assertEqual(previous["receipt"]["sha256"], old_receipt_sha)
+        self.assertEqual(previous["receipt"]["round"], 1)
+        self.assertIsNone(previous["receipt"]["previous_receipt_sha256"])
+        self.assertEqual(previous["receipt"]["findings"], findings)
+        self.assertEqual(previous["receipt"]["report"]["sha256"], old_report["sha256"])
+        self.assertFalse(Path(previous["receipt"]["report"]["path"]).is_absolute())
+        self.assertEqual(previous["incremental_diff"], {
+            "base": old_candidate["candidate"], "candidate": self.head,
+            "sha256": rr._feature_diff_sha(self.wt, old_candidate["candidate"], self.head),
+            "files": ["src/a.py", "src/repair.py"],
+        })
+        self.assertEqual(previous["ticket_changes"]["added"], ["issue-002", "issue-003", "issue-004"])
+        self.assertEqual(previous["ticket_changes"]["removed"], [])
+        self.assertEqual([repair["issue"] for repair in handoff["repairs"]],
+                         ["issue-002", "issue-003", "issue-004"])
+        self.assertEqual([row["finding"]["id"] for row in handoff["closure_rows"]], ["F-1", "F-2"])
+        first_row, second_row = handoff["closure_rows"]
+        self.assertEqual(first_row["finding"], findings[0])
+        self.assertEqual([repair["issue"] for repair in first_row["repairs"]], ["issue-002", "issue-003"])
+        self.assertEqual(second_row["repairs"], [])
+        self.assertNotIn("closed", first_row)
+        full = first_row["repairs"][0]
+        missing = first_row["repairs"][1]
+        self.assertEqual(full["merged_commit"], repair_commit)
+        for key in ("ticket_context", "process_check_ticket", "verification_implementer", "artifact_manifest"):
+            self.assertEqual(full[key]["status"], "present")
+            self.assertEqual(full[key]["sha256"], hashlib.sha256(
+                (self.fdir / full[key]["path"]).read_bytes()).hexdigest())
+            self.assertEqual(missing[key]["status"], "missing")
+            self.assertIsNone(missing[key]["sha256"])
+        unassigned = handoff["repairs"][2]
+        self.assertEqual(unassigned["review_findings"], [])
+        self.assertNotIn("issue-004", [repair["issue"] for repair in first_row["repairs"]])
+
+        # Repeating the same new candidate preserves the earlier transition,
+        # rather than replacing it with a candidate -> itself transition.
+        before = (self.fdir / "integration" / "review-handoff.json").read_bytes()
+        self.assertEqual(self.freeze().returncode, 0)
+        self.assertEqual((self.fdir / "integration" / "review-handoff.json").read_bytes(), before)
+        self.assertEqual(self.handoff["previous"]["candidate"], old_candidate["candidate"])
 
     def test_freeze_green_binds_full_merged_ancestor_and_plan(self):
         result = self.freeze()
@@ -809,6 +976,102 @@ baseline_ac:
         facts = fc.manifest_facts(self.fdir / "integration")
         self.assertEqual(len([fact for fact in facts if fact["status"] == "current"]), 1)
 
+    def test_phase_timing_start_finish_replay_cli_and_drift_rejection(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        with self.assertRaisesRegex(fc.InputError, "须已有"):
+            fc.record_phase(self.fdir, self.wt, "review", "finish")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:00Z"):
+            start = fc.record_phase(self.fdir, self.wt, "review", "start")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:30Z"):
+            replay = fc.record_phase(self.fdir, self.wt, "review", "start")
+        self.assertEqual(replay, start)
+        self.assertEqual(start["event"], "digest")
+        self.assertEqual(start["issue"], "feature")
+        self.assertEqual(start["kind"], "feature-phase-timing")
+        self.assertEqual(start["candidate"], self.head)
+        self.assertEqual(start["candidate_tree"], self.tree)
+        self.assertEqual(start["state"], "running")
+        self.assertEqual(start["duration_seconds"], 0)
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:05.250000Z"):
+            finish = fc.record_phase(self.fdir, self.wt, "review", "finish")
+        self.assertEqual(finish["started_at"], start["started_at"])
+        self.assertEqual(finish["ended_at"], "2026-11-16T10:00:05.250000Z")
+        self.assertEqual(finish["duration_seconds"], 5.25)
+        self.assertEqual(finish["state"], "finished")
+        self.assertNotEqual(finish["event_id"], start["event_id"])
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:01:00Z"):
+            self.assertEqual(fc.record_phase(self.fdir, self.wt, "review", "finish"), finish)
+        events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
+        self.assertEqual(len([event for event in events if event.get("kind") == "feature-phase-timing"]), 2)
+        self.assertEqual(len([event for event in events if event.get("event") == "merged"]), 1)
+
+        output = self.fdir / "integration" / "phase-event.json"
+        cli = self.run_cli("phase", "--feature-dir", str(self.fdir), "--repo", str(self.wt),
+                           "--phase", "conformance", "--event", "start", "--json", str(output))
+        self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
+        self.assertEqual(json.loads(cli.stdout)["event_id"], json.loads(output.read_text())["event_id"])
+        cli_replay = self.run_cli("phase", "--feature-dir", str(self.fdir), "--repo", str(self.wt),
+                                  "--phase", "conformance", "--event", "start")
+        self.assertEqual(cli_replay.returncode, 0, cli_replay.stdout + cli_replay.stderr)
+        self.assertEqual(json.loads(cli_replay.stdout)["started_at"], json.loads(cli.stdout)["started_at"])
+
+        (self.wt / "src" / "drift.py").write_text("drift = True\n")
+        sh(self.wt, "add", "src/drift.py")
+        sh(self.wt, "commit", "-qm", "candidate drift")
+        with self.assertRaisesRegex(fc.InputError, "漂移"):
+            fc.record_phase(self.fdir, self.wt, "review", "start")
+        with self.assertRaisesRegex(fc.InputError, "漂移"):
+            fc.record_phase(self.fdir, self.wt, "acceptance", "start")
+        self.assertEqual(len([line for line in (self.fdir / "progress.jsonl").read_text().splitlines()
+                              if '"feature-phase-timing"' in line]), 3)
+
+    def test_phase_timing_restarts_when_candidate_plan_bytes_change(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:00Z"):
+            old_start = fc.record_phase(self.fdir, self.wt, "review", "start")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:05Z"):
+            fc.record_phase(self.fdir, self.wt, "review", "finish")
+        third = command_case()
+        third["source"]["anchor"] = "AC-3"
+        self.cases["AC-3"] = third
+        self.prd.write_text(self.prd.read_text() +
+                            "- AC-3：Given 新计划，When 重冻结，Then 阶段重新计时\n",
+                            encoding="utf-8")
+        self.write_plan()
+        self.assertEqual(self.freeze().returncode, 0)
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:01:00Z"):
+            new_start = fc.record_phase(self.fdir, self.wt, "review", "start")
+        self.assertNotEqual(new_start["event_id"], old_start["event_id"])
+        self.assertNotEqual(new_start["candidate_sha256"], old_start["candidate_sha256"])
+        rows = fc.phase_timing_summary(self.fdir, self.candidate)
+        self.assertEqual([(row["phase"], row["state"], row["started_at"]) for row in rows],
+                         [("review", "running", "2026-11-16T10:01:00Z")])
+
+    def test_report_summarizes_only_real_current_candidate_phase_times(self):
+        self.assertEqual(self.freeze().returncode, 0)
+        self.write_evidence([self.auto_result(), self.human_result(True)])
+        self.assertEqual(self.report().returncode, 0)
+        report_path = self.fdir / "integration" / "acceptance-report.md"
+        self.assertNotIn("## 阶段耗时", report_path.read_text())
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:00Z"):
+            fc.record_phase(self.fdir, self.wt, "review", "start")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:05Z"):
+            fc.record_phase(self.fdir, self.wt, "review", "finish")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:06Z"):
+            fc.record_phase(self.fdir, self.wt, "acceptance", "start")
+        rows = fc.phase_timing_summary(self.fdir, self.candidate)
+        self.assertEqual([(row["phase"], row["state"], row["duration_seconds"]) for row in rows],
+                         [("review", "finished", 5.0), ("acceptance", "running", 0.0)])
+        self.assertEqual(self.report().returncode, 0)
+        first = report_path.read_bytes()
+        text = first.decode()
+        self.assertIn("## 阶段耗时", text)
+        self.assertIn("| review | 已完成 | 2026-11-16T10:00:00Z | 2026-11-16T10:00:05Z | 5 |", text)
+        self.assertIn("| acceptance | 进行中（截至开始） | 2026-11-16T10:00:06Z | — | 0 |", text)
+        self.assertNotIn("| candidate-verification |", text)
+        self.assertEqual(self.report().returncode, 0)
+        self.assertEqual(report_path.read_bytes(), first)
+
     def test_report_is_hash_stable_when_confirmation_is_added(self):
         self.freeze()
         self.write_evidence([self.auto_result(), self.human_result(True)])
@@ -818,6 +1081,32 @@ baseline_ac:
         self.report()
         after = (self.fdir / "integration" / "acceptance-report.md").read_bytes()
         self.assertEqual(before, after)
+
+    def test_final_timed_report_is_confirmed_after_timing_and_merge_stable(self):
+        self.write_issue("done")
+        self.assertEqual(self.freeze().returncode, 0)
+        self.write_evidence([self.auto_result(), self.human_result(True)])
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:00Z"):
+            fc.record_phase(self.fdir, self.wt, "acceptance", "start")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:01Z"):
+            fc.record_phase(self.fdir, self.wt, "report", "start")
+        self.assertEqual(self.report().returncode, 0)
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:02Z"):
+            fc.record_phase(self.fdir, self.wt, "report", "finish")
+        with mock.patch.object(fc, "_phase_now", return_value="2026-11-16T10:00:03Z"):
+            fc.record_phase(self.fdir, self.wt, "acceptance", "finish")
+        self.assertEqual(self.report().returncode, 0)
+        report_path = self.fdir / "integration" / "acceptance-report.md"
+        final = report_path.read_bytes()
+        self.assertIn("| report | 已完成 |", final.decode())
+        self.assertIn("| acceptance | 已完成 |", final.decode())
+        self.confirm()
+        self.assertEqual(report_path.read_bytes(), final)
+        self.assertEqual(self.report().returncode, 0)
+        self.assertEqual(report_path.read_bytes(), final)
+        result = self.check("merge")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report_path.read_bytes(), final)
 
     # ---- local-human merge authorization ----
     def test_merge_requires_scope_empty_conditions_and_matching_hashes(self):
@@ -867,6 +1156,17 @@ baseline_ac:
         text = (self.fdir / "integration" / "conformance-feature.md").read_text()
         self.assertEqual(2, text.count("verification-supervisor.json#DoD-1"))
         self.assertEqual(self.check("verify", generate_report=False).returncode, 0)
+
+    def test_ticket_identity_key_matches_progress_load_issues_for_campaign(self):
+        import progress
+        campaign = self.root / "dev" / "features" / "mod" / SLUG / "campaigns" / "demo-20260101"
+        (campaign / "issues").mkdir(parents=True)
+        issue = campaign / "issues" / "issue-001-x.md"
+        issue.write_text("---\nissue-id: issue-001\nfeature-slug: demo\nstatus: done\n---\n")
+        identity = fc._ticket_identity(campaign, issue, "issue-001")
+        loaded = progress.load_issues(self.root, campaign, [], {})
+        loaded = next(item for item in loaded if item["id"] == "issue-001")
+        self.assertEqual(loaded["key"], identity["key"])
 
     def test_candidate_empty_coverage_and_missing_leaf_fail(self):
         self.ready_local()

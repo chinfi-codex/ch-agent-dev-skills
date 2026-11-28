@@ -6,12 +6,17 @@
 
 | 产物 | 产生方式 | 必须绑定 | 阻塞条件 |
 | --- | --- | --- | --- |
-| `integration/feature-review.md` + `integration/feature-review-receipt.json` | 独立 `/ai-review` 一次审 `main_head..candidate`；`review_receipt.py create-feature` 生成回执 | candidate / tree / merge_base / diff_sha256 / plan_sha256 / 报告哈希 / 全部 implementer 身份 | reviewer 与任一 implementer 同 session/agent；verdict=blocked；critical/high 未闭合；候选、报告或覆盖变化 |
-| `integration/candidate-verification.json` | `verify_issue.py run-candidate --candidate ... --repo <集成 worktree>` 逐票真实执行冻结 DoD+fast | candidate / tree / main_head / plan_sha256；每票 `verification_path` + SHA256 | 任一票失败、漏票、额外票、证据哈希不匹配或候选不 clean |
+| `integration/review-handoff.json` | `feature_closeout.py freeze` 从结构化 candidate / receipt / 修复票证据确定性生成 | 新 candidate / tree / review_base、完整 diff 与文件清单；复审另含上轮 receipt/findings、增量 diff 和修复票证据哈希 | 只作定位线索，不作为通过结论；增量不得替代完整 diff，旧 finding 是否闭合仍由本轮独立评审判断 |
+| `integration/feature-review.md` + `integration/feature-review-receipt.json` | 独立 `/ai-review` 一次审 `main_head..candidate`；`review_receipt.py create-feature` 生成回执；与候选复跑并行发起 | candidate / tree / merge_base / diff_sha256 / plan_sha256 / 报告哈希 / 全部 implementer 身份 | reviewer 与任一 implementer 同 session/agent；verdict=blocked；critical/high 未闭合；候选、报告或覆盖变化 |
+| `integration/candidate-verification.json` | `verify_issue.py run-candidate --candidate ... --repo <集成 worktree>` 逐票真实执行冻结 DoD+fast；与独立评审并行 | candidate / tree / main_head / plan_sha256；每票 `verification_path` + SHA256 | 任一票失败、漏票、额外票、证据哈希不匹配或候选不 clean |
 | `integration/conformance-feature.md` | 主会话或独立监督会话按 tech-spec 全节 + 全部票矩阵并集核对 | candidate / tree / coverage.issues / specs hash | verdict≠conform、漏票、漏 spec、空表或证据指针无效 |
 | arch-check + `docs/ARCHITECTURE.md` | `feature_closeout` freeze/check 从 candidate 读取 `docs/ARCH-CHECK.json`，运行 Python AST 检查并 `render check` | rules / guide SHA256 写入 `candidate.json` | error 违规、总览缺失 / 过期、首次架构影响后仍是骨架、冻结后规则或总览变更 |
 
 票级不再生成 `review-receipt.json`、不再跑 supervisor 复跑或 `conformance-<issue>.md`；票级覆盖矩阵保留在 impl-log，供 feature conformance 汇总。
+
+候选复跑再次调用时，先逐票重验同 candidate 的完整证据；完整通过则不重复执行。中断 / 部分失败后显式加 `--resume`，只重跑缺失、失败或复验不通过的票。复验覆盖 candidate 字节、commit/tree、冻结票上下文和命令、身份、声明环境、原始日志及哈希；旧格式缺绑定或任何一项变化均真实重跑。新 candidate（包括同 tree 的新 commit）不得复用旧候选证据。
+
+评审、候选复跑、conformance、验收和报告通过 `feature_closeout.py phase --phase <阶段> --event start|finish` 写入 `progress.jsonl` 的 digest 计时事件；候选复跑由 runner 自动记录。事件绑定 candidate/tree/candidate.json SHA256/round，重复 start/finish 保留首次事实，不能靠重试刷新耗时；同提交换计划或配置会开始新计时并隐藏旧计时。报告只读这些真实事件汇总，不要求另写时间文件。
 
 ## 1. evidence.md（关联自动检查）
 
@@ -122,7 +127,7 @@ full-deferred: ci           # 本机证据不代表完整套件通过
 由 `feature_closeout.py report --feature-dir <需求目录> --repo <集成 worktree>` 生成，**不得手改**。报告从冻结计划、实际结果、关联证据与人工确认确定性生成；`check --phase verify|merge` 会逐字核对是否过期。
 
 - 自动阶段完成后生成一次：给出关联自动检查、每条 AC 的 AI 结果、未验证项，以及“哪些仍需人工、为什么、操作步骤与期望”。
-- 人工结果写回并记录合并确认后再生成一次：形成最终逐条结果、分类调整、豁免和明确合并建议。
+- 人工结果写回、acceptance / report 等会影响报告的计时全部结束后再生成最终报告：形成最终逐条结果、分类调整、豁免、阶段耗时和明确合并建议；随后让人确认并把这个最终报告哈希写入 confirmation.md。确认后重复 report 必须字节不变，不得再追加会改变报告的计时。
 - 报告结论只分事实：不可合并 / 等待自动验收 / 等待人工处理 / 验收条件已满足（有豁免时醒目标注）。报告不代替人的合并、发布或 push 授权。
 - 候选 tree 或计划哈希变化后，旧报告不能重新生成，必须重新冻结并刷新结果。
 

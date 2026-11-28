@@ -46,6 +46,12 @@ def _model(value, host: str, path: str) -> str:
         if ((host == "dsh" and len(parts) != 2)
                 or (host == "zcode" and len(parts) < 2) or not all(parts)):
             raise ConfigError(f"{path} 必须使用 <provider>/<model> 完整路由")
+    elif host == "codex":
+        # Codex 可写具体模型 ID，也可写 <namespace>/<route> 形式的路由组；
+        # 这里只管语法，是否真实存在仍由实时目录校验。
+        parts = value.split("/")
+        if len(parts) > 2 or not all(parts):
+            raise ConfigError(f"{path} 必须是具体模型 ID 或 <namespace>/<route>")
     elif "/" in value:
         raise ConfigError(f"{path} 不得包含宿主 provider 前缀")
     return value
@@ -63,7 +69,8 @@ def _route(value: dict, host: str, path: str) -> dict:
     return {"model": model, "effort": effort}
 
 
-def validate(config: dict, catalogs: dict | None = None) -> dict:
+def validate(config: dict, catalogs: dict | None = None, *, host: str | None = None) -> dict:
+    """Validate one execution host, or all hosts for an explicit config audit."""
     dispatch = _mapping(config.get("dispatch"), "dispatch")
     if "model" in dispatch:
         raise ConfigError("dispatch.model 已废止；请迁移为 dispatch.hosts.<宿主>.supervisor-review / development")
@@ -81,6 +88,13 @@ def validate(config: dict, catalogs: dict | None = None) -> dict:
     unknown = sorted(set(hosts) - set(HOSTS))
     if unknown:
         raise ConfigError(f"dispatch.hosts 含未知宿主: {', '.join(unknown)}")
+
+    if host is not None:
+        if host not in HOSTS:
+            raise ConfigError(f"未知宿主: {host}")
+        if host not in hosts:
+            raise ConfigError(f"当前宿主 {host} 未配置；不得跨宿主套用模型")
+        hosts = {host: hosts[host]}
 
     validated = {"schema-version": 1, "executor": "subagent", "parallel-max": parallel, "hosts": {}}
     for host, raw_host in hosts.items():
@@ -118,8 +132,8 @@ def validate(config: dict, catalogs: dict | None = None) -> dict:
     return validated
 
 
-def load(path: Path) -> dict:
-    return validate(read_first_yaml_block(path))
+def load(path: Path, *, host: str | None = None) -> dict:
+    return validate(read_first_yaml_block(path), host=host)
 
 
 def _split_route(route: dict) -> tuple[str, str]:
@@ -315,7 +329,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         catalogs = json.loads(args.catalog.read_text(encoding="utf-8")) if args.catalog else None
-        dispatch = validate(read_first_yaml_block(args.config), catalogs)
+        if not args.host:
+            raise ConfigError(f"{args.command} 必须指定 --host（当前执行宿主）")
+        dispatch = validate(read_first_yaml_block(args.config), catalogs, host=args.host)
         if args.command == "validate":
             result = {"ok": True, "hosts": sorted(dispatch["hosts"])}
         else:

@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从 /pd-plan 出发的研发流水线全景 · ch-agent-dev-skills</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --ink-soft: #556070;
+    --line: #e3e6eb;
+    --upstream: #64748b;
+    --req: #2563eb;
+    --plan: #0d9488;
+    --test: #7c3aed;
+    --exec: #d97706;
+    --retro: #e11d48;
+    --gate: #dc2626;
+    --ok: #16a34a;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.65;
+    font-size: 15px;
+  }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: #eef1f5; border-radius: 4px; padding: 1px 5px; color: #0f172a; }
+  a { color: var(--req); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    background: linear-gradient(135deg, #111c33 0%, #1e2f52 55%, #25406e 100%);
+    color: #f1f5f9;
+    padding: 44px 24px 38px;
+  }
+  .hero-inner { max-width: 1180px; margin: 0 auto; }
+  .hero h1 { font-size: 27px; font-weight: 700; letter-spacing: 0.5px; }
+  .hero p.sub { margin-top: 10px; color: #b9c5d8; max-width: 880px; }
+  .hero .meta { margin-top: 14px; font-size: 12.5px; color: #8fa0b8; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; color: #dbe4f0; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px;
+    padding: 1px 9px; vertical-align: 1px; white-space: nowrap;
+  }
+  .b-auto  { background: #dcfce7; color: #166534; }   /* 自动化 */
+  .b-human { background: #fee2e2; color: #991b1b; }   /* 人工 */
+  .b-machine { background: #dbeafe; color: #1e40af; } /* 机器校验 */
+  .b-art   { background: #fef9c3; color: #854d0e; }   /* 产物 */
+  .b-loop  { background: #ede9fe; color: #5b21b6; }   /* 循环/回流 */
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.94); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .nav-inner { max-width: 1180px; margin: 0 auto; display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 24px; }
+  nav a {
+    text-decoration: none; color: var(--ink-soft); font-size: 13.5px; font-weight: 600;
+    padding: 5px 12px; border-radius: 8px;
+  }
+  nav a:hover { background: #eef1f5; color: var(--ink); }
+  nav a.n-upstream { border-bottom: 3px solid var(--upstream); }
+  nav a.n-req  { border-bottom: 3px solid var(--req); }
+  nav a.n-plan { border-bottom: 3px solid var(--plan); }
+  nav a.n-test { border-bottom: 3px solid var(--test); }
+  nav a.n-exec { border-bottom: 3px solid var(--exec); }
+  nav a.n-retro{ border-bottom: 3px solid var(--retro); }
+  nav a.n-idx  { border-bottom: 3px solid #94a3b8; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 30px 24px 80px; }
+
+  section { margin-top: 56px; scroll-margin-top: 64px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .sec-no {
+    font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff;
+    border-radius: 8px; padding: 3px 10px;
+  }
+  .sec-head h2 { font-size: 22px; font-weight: 700; }
+  .sec-head .tagline { color: var(--ink-soft); font-size: 13.5px; }
+  .sec-desc { margin-top: 8px; color: var(--ink-soft); max-width: 940px; }
+
+  /* ---------- overview pipeline ---------- */
+  .pipeline-wrap { overflow-x: auto; padding: 18px 2px 6px; }
+  .pipeline { display: flex; align-items: stretch; gap: 0; min-width: 1000px; }
+  .stage {
+    flex: 1; border-radius: 14px; background: var(--card); border: 1px solid var(--line);
+    border-top: 4px solid var(--stage-color, #94a3b8);
+    padding: 12px 10px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 148px;
+  }
+  .stage h3 { font-size: 14px; color: var(--stage-color); font-weight: 700; }
+  .stage .stage-note { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+  .node {
+    background: #f8fafc; border: 1px solid var(--line); border-radius: 9px;
+    padding: 7px 9px; font-size: 12.5px;
+  }
+  .node b { display: block; font-size: 13px; }
+  .node small { color: var(--ink-soft); display: block; line-height: 1.45; margin-top: 1px; }
+  .node.gate { border: 1.5px dashed var(--gate); background: #fef5f5; }
+  .stage-arrow {
+    align-self: center; color: #9aa5b3; font-size: 18px; padding: 0 4px; flex: 0 0 auto;
+    font-weight: 700;
+  }
+  .pipeline-foot { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+  .shortcut, .crosscut {
+    flex: 1; min-width: 320px; border-radius: 12px; padding: 12px 16px; font-size: 13px;
+    border: 1px dashed #b9c2cf; background: #fbfcfe;
+  }
+  .shortcut b, .crosscut b { display: block; margin-bottom: 4px; font-size: 13.5px; }
+  .callout {
+    border-radius: 12px; padding: 14px 18px; margin-top: 18px; font-size: 13.5px;
+    border: 1px solid var(--line); background: var(--card);
+  }
+  .callout b.t { display: block; margin-bottom: 6px; font-size: 14px; }
+  .callout.why { border-left: 4px solid var(--ok); }
+  .callout.risk { border-left: 4px solid var(--gate); }
+  .callout.note { border-left: 4px solid var(--req); }
+
+  /* ---------- vertical flow ---------- */
+  .flow { margin-top: 22px; display: flex; flex-direction: column; }
+  .fstep { display: flex; gap: 14px; position: relative; padding-bottom: 18px; }
+  .fstep::before {
+    content: ""; position: absolute; left: 17px; top: 36px; bottom: 0;
+    width: 2px; background: var(--line);
+  }
+  .fstep:last-child::before { display: none; }
+  .fnum {
+    flex: 0 0 36px; height: 36px; border-radius: 50%; background: #fff;
+    border: 2px solid var(--stage-color, #94a3b8); color: var(--stage-color, #475569);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; font-family: var(--mono); z-index: 1;
+  }
+  .fbody { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 16px; }
+  .fbody h4 { font-size: 15px; }
+  .fbody h4 .sk { font-family: var(--mono); font-size: 12.5px; color: var(--stage-color, #475569); font-weight: 700; margin-right: 6px; }
+  .fbody p { color: var(--ink-soft); font-size: 13.5px; margin-top: 5px; }
+  .fbody ul { margin: 6px 0 2px 18px; color: var(--ink-soft); font-size: 13.5px; }
+  .fbody ul li { margin-top: 3px; }
+  .fbody .badges { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .floop {
+    margin-top: 10px; border: 1.5px dashed #c4b5fd; background: #faf5ff; border-radius: 10px;
+    padding: 9px 13px; font-size: 13px; color: #4c1d95;
+  }
+  .floop b { color: #5b21b6; }
+
+  /* ---------- mechanism cards ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; margin-top: 20px; }
+  .mcard { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--stage-color, #94a3b8);
+    border-radius: 12px; padding: 14px 16px; }
+  .mcard h4 { font-size: 14.5px; margin-bottom: 6px; }
+  .mcard p, .mcard li { font-size: 13px; color: var(--ink-soft); }
+  .mcard ul { margin-left: 17px; margin-top: 4px; }
+  .mcard li { margin-top: 3px; }
+  .mcard .kw { color: var(--ink); font-weight: 600; }
+
+  /* ---------- two-col ---------- */
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  @media (max-width: 900px) { .cols2 { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px; }
+  .panel h4 { font-size: 14.5px; margin-bottom: 8px; }
+  .panel ul { margin-left: 17px; font-size: 13px; color: var(--ink-soft); }
+  .panel li { margin-top: 4px; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; background: var(--card);
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--line); font-size: 13px; }
+  th { background: #f1f4f8; text-align: left; padding: 9px 12px; font-size: 12.5px; color: #334155;
+    border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eef1f5; vertical-align: top; color: var(--ink-soft); }
+  tr:last-child td { border-bottom: none; }
+  td .mono { white-space: nowrap; }
+  .stage-chip { display: inline-block; font-size: 11px; font-weight: 700; color: #fff; border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
+
+  details { margin-top: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  details summary { cursor: pointer; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+  details .inner { margin-top: 8px; font-size: 13px; color: var(--ink-soft); }
+  details ul { margin-left: 17px; }
+  details li { margin-top: 3px; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 70px; padding: 24px; text-align: center;
+    color: #8b94a3; font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="hero-inner">
+    <h1>从 /pd-plan 出发的研发流水线全景</h1>
+    <p class="sub">把整条「需求 → 计划 → 执行 → 验收 → 复盘」链路画成一张图，重点拆解四件事：需求段怎么产出<b>完整需求</b>、开发计划怎么做到<b>高质量</b>、测试计划怎么做到<b>可自动执行</b>、以及<b>自动化执行</b>如何闭环。</p>
+    <div class="meta">来源：ch-agent-dev-skills 仓库各 SKILL.md 与 shared/ fragments 的真实规则 · 生成于 2026-11-22</div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--upstream)"></i>上游判断</span>
+      <span><i class="dot" style="background:var(--req)"></i>需求段</span>
+      <span><i class="dot" style="background:var(--plan)"></i>开发计划段</span>
+      <span><i class="dot" style="background:var(--test)"></i>测试与验证</span>
+      <span><i class="dot" style="background:var(--exec)"></i>自动化执行</span>
+      <span><i class="dot" style="background:var(--retro)"></i>复盘段</span>
+      <span><span class="badge b-auto">自动化</span>无需人</span>
+      <span><span class="badge b-human">人工</span>必须人</span>
+      <span><span class="badge b-machine">机器校验</span>脚本门禁</span>
+      <span><span class="badge b-art">产物</span>落盘文档/证据</span>
+      <span><span class="badge b-loop">回流</span>循环/经验回流</span>
+    </div>
+  </div>
+</div>
+
+<nav><div class="nav-inner">
+  <a href="#overview" class="n-upstream">① 全景总览</a>
+  <a href="#req" class="n-req">② 需求段：产出完整需求</a>
+  <a href="#plan" class="n-plan">③ 计划段：高质量开发计划</a>
+  <a href="#test" class="n-test">④ 测试计划与验证体系</a>
+  <a href="#exec" class="n-exec">⑤ 自动化执行</a>
+  <a href="#index" class="n-idx">⑥ 机制索引</a>
+</div></nav>
+
+<main>
+
+<!-- ================= ① OVERVIEW ================= -->
+<section id="overview">
+  <div class="sec-head">
+    <span class="sec-no" style="background:var(--upstream)">①</span>
+    <h2>全景总览：一条主线，两处人工门</h2>
+    <span class="tagline">官方主线（README）：/prd → /pd-review → 现状查证 → /tech-spec → /issue-split → 门② → 逐票 /implement → freeze → /ai-review → 复跑+conformance → promote → finalize → /review</span>
+  </div>
+  <p class="sec-desc">整条流水线的核心设计：<b>人只出现在两个固定位置</b>——门②（拆票清单人审）与最终 merge-main 确认；其余所有异常收敛为 <code>human-decision</code> 决策包，由主会话单点问人。段与段之间靠 frontmatter 状态机衔接（<code>待写PRD → 定稿 → 已确认（待拆解）→ confirmed → merged → done</code>），每一环不满足门禁就停，不降级跳过。</p>
+
+  <div class="pipeline-wrap">
+    <div class="pipeline">
+      <div class="stage" style="--stage-color:var(--upstream)">
+        <h3>上游判断</h3>
+        <div class="stage-note">只答「值不值得做」，绝不下沉执行层</div>
+        <div class="node"><b>/ceo-office</b><small>战略判断 → 决策卡 / project memo</small></div>
+      </div>
+      <div class="stage-arrow">→</div>
+      <div class="stage" style="--stage-color:var(--req)">
+        <h3>需求段</h3>
+        <div class="stage-note">把想法拷打成交付级 PRD</div>
+        <div class="node"><b>/pd-plan</b><small>拷打澄清 → feature brief</small></div>
+        <div class="node"><b>/prd</b><small>行为契约 → PRD（草稿）</small></div>
+        <div class="node"><b>/pd-review</b><small>7 维评分 + 直接修订 → 定稿</small></div>
+      </div>
+      <div class="stage-arrow">→</div>
+      <div class="stage" style="--stage-color:var(--plan)">
+        <h3>开发计划段</h3>
+        <div class="stage-note">方案可拆、票可判定</div>
+        <div class="node"><b>/setup-dev + /how /why</b><small>仓库初始化 + 现状查证</small></div>
+        <div class="node"><b>/tech-spec</b><small>How/Why → 方案 + 3.1 树 + acceptance-plan</small></div>
+        <div class="node"><b>/issue-split</b><small>垂直切片 + 粒度红线</small></div>
+        <div class="node gate"><b>门② 人审</b><small>唯一例行人工确认点</small></div>
+      </div>
+      <div class="stage-arrow">→</div>
+      <div class="stage" style="--stage-color:var(--exec)">
+        <h3>自动化执行</h3>
+        <div class="stage-note">主会话按 DAG 逐票派发监督</div>
+        <div class="node"><b>/implement</b><small>一票一 worktree · TDD 内环</small></div>
+        <div class="node"><b>票级内环</b><small>见红→实现→DoD+fast→process_check</small></div>
+        <div class="node"><b>delivery merge</b><small>复核后合入集成分支</small></div>
+      </div>
+      <div class="stage-arrow">→</div>
+      <div class="stage" style="--stage-color:var(--test)">
+        <h3>验收段</h3>
+        <div class="stage-note">整需求一次性把关</div>
+        <div class="node"><b>freeze</b><small>绑定 candidate/票组/计划哈希</small></div>
+        <div class="node"><b>/ai-review</b><small>独立实例全量 diff 评审</small></div>
+        <div class="node"><b>复跑 + conformance + AC</b><small>候选复跑 · 需求级 AC 执行</small></div>
+        <div class="node gate"><b>人确认 merge-main</b><small>原话+时间+候选 tree 落 confirmation</small></div>
+      </div>
+      <div class="stage-arrow">→</div>
+      <div class="stage" style="--stage-color:var(--retro)">
+        <h3>复盘段</h3>
+        <div class="stage-note">经验回流下一个需求</div>
+        <div class="node"><b>promote + finalize</b><small>合 main · 逐票清场</small></div>
+        <div class="node"><b>/review</b><small>复盘 → 两级经验库</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pipeline-foot">
+    <div class="shortcut">
+      <b>小变更捷径</b>
+      存量功能的小范围更新不走整条需求段：<code>/issue</code> 产出 change-request（baseline_ac retain/replace/retire + AC-D 场景 + 代码改动文档树）→ 直达 <code>/tech-spec</code>，不重走 /prd、/pd-review。全新功能、新模块、主链路重构不适用此捷径，回 /pd-plan 或 /prd。
+    </div>
+    <div class="crosscut">
+      <b>横切机制（贯穿全程）</b>
+      <code>/prototype</code>：拷打答不出的「手感类」问题出一次性原型，verdict 回流三段；<code>human-decision</code>：唯一问人协议，子会话只构造请求、主会话统一问人；<code>无人值守熔断</code>：预算 80% / 连续 2 次心跳无推进即停；三份项目级真源：<code>GLOSSARY.md</code>（术语口径）、<code>ARCH-CHECK.json → ARCHITECTURE.md</code>（架构契约，机器渲染禁手改）、<code>EXPERIENCE.md</code>（两级经验库的项目级）。
+    </div>
+  </div>
+
+  <div class="callout why">
+    <b class="t">为什么这条主线能「自动跑起来还不出格」</b>
+    ① 每段产物带 frontmatter 状态机，下一环节开工前先验状态，状态不对直接阻塞——不靠自觉；② 关键校验都做成确定性脚本（<code>spec_tree.py</code>、<code>ticket_context.py check-plan</code>、<code>process_check.py</code>、<code>verify_issue.py</code>、<code>delivery.py</code>、<code>feature_closeout.py</code>），模型结论必须能对回机器证据；③ 人只守两个门，其余异常走统一决策协议，既不失控也不被频繁打断；④ 评审/复跑/符合性只在 feature 候选冻结后做一次，票级只跑内环——质量门集中在收口，成本可控。
+  </div>
+</section>
+
+<!-- ================= ② 需求段 ================= -->
+<section id="req">
+  <div class="sec-head">
+    <span class="sec-no" style="background:var(--req)">②</span>
+    <h2>需求段：怎么把「一句话想法」逼成「完整需求」</h2>
+    <span class="tagline">/pd-plan → /prd → /pd-review（横切：/prototype）</span>
+  </div>
+  <p class="sec-desc">需求段的质量不靠「写得认真」，靠三台机器：<b>拷打轮次</b>（用决策树保证问题问完）、<b>行为契约</b>（FR 必须可观察、可测试）、<b>修订式评审</b>（pd-review 发现缺口直接改文档而不是提建议）。三者首尾相接，缺什么当场补进文档。</p>
+
+  <div class="flow" style="--stage-color:var(--req)">
+    <div class="fstep">
+      <div class="fnum">0</div>
+      <div class="fbody">
+        <h4><span class="sk">/pd-plan</span>读上下文与模块归属</h4>
+        <p>按固定顺序读：<code>GLOSSARY → 最新 project memo → EXPERIENCE「需求阶段经验」节 → 已绑定 feature brief → 已绑定 PRD → pd-review-report</code>。命中经验规则的坑直接进缺口清单，不重复问。新需求先确认 <code>feature-module</code> 归属（用户最终确认后才建目录，禁止「杂项」模块，粒度预算 4–10 个）。</p>
+        <div class="badges"><span class="badge b-auto">自动化</span><span class="badge b-art">产物：上下文总结</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">1</div>
+      <div class="fbody">
+        <h4><span class="sk">/pd-plan</span>先判断需求意义，再谈方案</h4>
+        <p>解决什么问题、谁受影响、为什么现在值得做、不做的代价、做完的成功标准——这五问没说清之前，<b>不进入方案设计</b>。同时判定阶段模式：<b>MVP</b>（初期验证）/ <b>STABILITY</b>（成熟链路，优先边界与回退）/ <b>DECOMPOSE</b>（大需求先拆）/ <b>COMPLETE</b>（小需求防碎片化）。</p>
+        <div class="badges"><span class="badge b-machine">默认「必须问」：意义是否成立 / 模式是否选错 / 方案是否误导实现</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">2</div>
+      <div class="fbody">
+        <h4><span class="sk">/pd-plan</span>拷打轮次：把需求当决策树走完</h4>
+        <p>每轮把 frontier（前提已定、现在就能问）上的问题<b>一次问完</b>，每题给推荐答案；回答后 frontier 外推、重算，进入下一轮。未决问题强制三归类：<b>可假设继续</b>（写出假设）/ <b>必须提问后继续</b>（不许绕过）/ <b>仅记录为风险</b>。</p>
+        <ul>
+          <li><b>事实自查</b>：代码/文档/环境查得到的（现有字段、入口、指标现状）自己 Read/Grep，<b>不问用户</b>；</li>
+          <li><b>不可拷打出口</b>：同一问题追两轮仍抽象、答案依赖「看到实物」→ 标记「待确认（需原型）」，交给 <code>/prototype</code>，拿到 verdict 后以一行答案回流继续拷打；</li>
+          <li><b>终止条件</b>：frontier 为空 <b>且</b> 11 个覆盖维度每一项都有归属——不允许静默跳过。</li>
+        </ul>
+        <div class="floop"><b>11 覆盖维度</b>：需求意义 / 目标用户 / 触发时机 / 范围边界 / 主流程 / 异常与边界 / 状态流转 / 权限差异 / 数据口径 / 成功与验收标准 / 依赖与风险——每项标「已确认 / 假设 / 待确认」。</div>
+        <div class="badges"><span class="badge b-human">人工：回答问题</span><span class="badge b-loop">循环至 frontier 空</span><span class="badge b-loop">/prototype verdict 回流</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">3</div>
+      <div class="fbody">
+        <h4><span class="sk">/pd-plan</span>共识确认 → Feature Brief</h4>
+        <p>先输出<b>共识摘要</b>（关键决策清单 + 维度归属，用「都谈拢的 / 先按假设走的 / 还没定的」分组说人话）+ <b>产品逻辑结构图</b>（节点 ≤12、边 ≤20，假设/待确认画虚线，Mermaid 源码落盘）。用户确认后才产出 Feature Brief（frontmatter <code>status: 待写PRD / 待验证 / 不进入</code>）；推翻任一条则回到对应分支继续拷打。</p>
+        <div class="badges"><span class="badge b-human">人工：共识确认</span><span class="badge b-art">产物：feature-brief-*.md</span><span class="badge b-machine">/prd 以 status=待写PRD 为开工门禁</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">4</div>
+      <div class="fbody">
+        <h4><span class="sk">/prd</span>把 brief 转成技术友好的行为契约</h4>
+        <p>开工门禁：brief 存在且 <code>status=待写PRD</code>，brief 里的「待确认」未闭环的<b>不得写入正式要求</b>。按 14 章固定骨架写，每模块写齐：功能目标 / 前置条件 / 用户操作 / <b>FR</b> / 业务规则 / <b>状态迁移表</b> / 异常边界 / <b>权限矩阵</b>（角色×操作×允许拒绝×拒绝反馈）/ <b>字段级输入输出表</b>（空值语义、枚举全列）/ 判定口径（公式、单位、精度、舍入、时区、窗口）。</p>
+        <div class="badges"><span class="badge b-auto">自动化</span><span class="badge b-art">产物：prd-*.md（status: 草稿）</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">5</div>
+      <div class="fbody">
+        <h4><span class="sk">/pd-review</span>修订式评审：低于 8 分直接改，不是提建议</h4>
+        <p>7 个维度 0–10 分评分：<b>目标完整 / 范围完整 / 规则完整（判定分支含边界值、FR 单一可观察行为）/ 状态·异常完整（迁移表、空值语义、枚举、权限矩阵）/ 交接就绪（不依赖口头补充）/ 验收就绪（指标与事件可执行）/ 术语口径一致</b>。每一个低于 8 分的维度，<b>当场修改 PRD</b> 补到当前结构。评审重点还包括「是否把关键决策错误地下放给实现阶段」；三个行为覆盖抽检（字段 / 状态 / SM 埋点）答不出的，对应维度不得高于 7 分。</p>
+        <p>结论三档：<b>可交付 / 可交付但有风险 / 阻塞</b>。修订完成且非阻塞 → PRD 置 <code>status: 定稿</code>（FR 编号自此「不复用、不重排」），报告 <code>verdict</code> 成为 /tech-spec 的开工门禁字段。</p>
+        <div class="badges"><span class="badge b-machine">verdict≠阻塞 才能进 /tech-spec</span><span class="badge b-art">产物：PRD 定稿版 + pd-review-report</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards" style="--stage-color:var(--req)">
+    <div class="mcard">
+      <h4>FR 规则：一条 = 一个可观察行为</h4>
+      <ul>
+        <li>EARS 句式，全局编号 <code>FR-&lt;模块号&gt;-&lt;序号&gt;</code>，复合行为必须拆条；</li>
+        <li>每个用户操作步骤至少被一条 FR 覆盖，硬性要求一律写成 FR；</li>
+        <li>每条 FR 至少带一条<b>可测试后果</b>——写不出的降级移入「待确认问题」，不允许伪装成需求。</li>
+      </ul>
+    </div>
+    <div class="mcard">
+      <h4>输出前 10 条自检清单</h4>
+      <ul>
+        <li>无边界表述检查（禁「体验更好」「后续再细化」）；</li>
+        <li>成功度量必须承接、假设（AS 编号）与阻塞项分置；</li>
+        <li>一级章节不可删（无内容写「本次无」）；</li>
+        <li>三个行为覆盖抽检：字段 / 状态 / SM 埋点各抽一条对得回 FR；</li>
+        <li>AC 编号稳定，可被技术方案逐条引用。</li>
+      </ul>
+    </div>
+    <div class="mcard">
+      <h4>术语与口径强一致</h4>
+      <p>读文档先读 GLOSSARY；指标必须带口径（定义 / 窗口 / 来源）；用法与表内定义冲突时先裁决再写；讨论中确定的新术语<b>立即回写</b>，淘汰说法记入「拒绝词」防回潮。</p>
+    </div>
+    <div class="mcard">
+      <h4>/prototype：不可拷打问题的专用出口</h4>
+      <p>识别信号：两轮追问仍只有抽象回答，或答案本质依赖「看到、点到实物」。一个原型只回答一个问题（LOGIC 规则类 / UI 多变体类），用户上手裁决后落 verdict；其中「决策性片段」（状态机 / reducer / schema）是 tech-spec 3.5 节<b>唯一允许内联的代码来源</b>。</p>
+    </div>
+    <div class="mcard">
+      <h4>文档写作纪律</h4>
+      <p>每句话可验证、有判断标准；关键规则当场裁决，<b>不留「开发时再决定」</b>；假设写成可见条目，不藏在叙述里；tradeoff 必须写明选择、放弃项与原因。</p>
+    </div>
+    <div class="mcard">
+      <h4>需求段防的坑</h4>
+      <ul>
+        <li>漏维度 → 11 维清单逐项归属，不许静默跳过；</li>
+        <li>需求悬空 → FR 必须可测试，否则降级；</li>
+        <li>评审走过场 → 低分维度直接改文档，答案不了抽检就压分；</li>
+        <li>歧义扩散到开发 → GLOSSARY 口径先裁决，拒绝词防回潮。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ③ 计划段 ================= -->
+<section id="plan">
+  <div class="sec-head">
+    <span class="sec-no" style="background:var(--plan)">③</span>
+    <h2>开发计划段：怎么让方案与拆票高质量</h2>
+    <span class="tagline">/setup-dev → /how /why 现状查证 → /tech-spec → /issue-split → 门②</span>
+  </div>
+  <p class="sec-desc">计划段的高质量来自三层保证：<b>现状真实</b>（How/Why 查证，不凭记忆写方案）、<b>结构机器可校验</b>（3.1 文档树是机器契约，树↔票 scope 闭合检查）、<b>拆票有硬红线</b>（文件数 / LOC / scope 可枚举性是确定性数字，不是感觉）。</p>
+
+  <div class="flow" style="--stage-color:var(--plan)">
+    <div class="fstep">
+      <div class="fnum">1</div>
+      <div class="fbody">
+        <h4><span class="sk">/tech-spec · Step 1</span>How 现状建模 + Why 历史约束</h4>
+        <p>现状查证<b>必做</b>——先搞清系统现在真实怎么运转；Why 按决策相关性触发——查清历史动机防止「顺手推翻过去的教训」。轻量证据直接写进 spec 2.1 证据表；复杂或可复用的调查才归档 research/。</p>
+        <div class="badges"><span class="badge b-auto">自动化（按需升级深度）</span><span class="badge b-art">产物：2.1 How/Why 证据表</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">2</div>
+      <div class="fbody">
+        <h4><span class="sk">/tech-spec · Step 2</span>候选方案综合，不拍脑袋</h4>
+        <p><b>承重决策</b>（公共接口、ownership、持久化、并发共享状态、技术选型）每项至少 2 个<b>结构不同</b>的候选 + 3–6 条评分准则，综合结果落 3.6 DEC-ID 表；公共接口 usage-first 先写调用方怎么用；旧实现清理属方案范围（不留兼容层）。</p>
+        <div class="badges"><span class="badge b-machine">每项承重决策可追溯 DEC-ID</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">3</div>
+      <div class="fbody">
+        <h4><span class="sk">/tech-spec · Step 3–4</span>技术拷打 → 共识 → 落盘</h4>
+        <p>技术决策同样按拷打轮次制，<b>frontier 未清空前不输出完整方案</b>。共识确认后产出两份产物：</p>
+        <ul>
+          <li><code>&lt;feature-summary&gt;-tech-spec-*.md</code>（status: <code>已确认（待拆解）</code> = /issue-split 的开工门禁）；</li>
+          <li><code>acceptance-plan.yaml</code>（测试计划，详见 ④ 节）。</li>
+        </ul>
+        <div class="badges"><span class="badge b-human">人工：共识确认</span><span class="badge b-art">产物：tech-spec + acceptance-plan</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">4</div>
+      <div class="fbody">
+        <h4><span class="sk">/issue-split</span>垂直切片拆票（tracer bullet）</h4>
+        <p>每票<b>纵向切穿所有层</b>、独立可演示；首张票是最细的端到端贯通；票间阻塞关系构成 DAG；宽改造按 expand–contract 拆。每票写<b>可自动判定的 DoD</b>：1–3 条「命令 + 期望退出码（+ 可选期望输出）」；bug 票 DoD 必含复现回归测试命令。DoD 覆盖性自查产出「<b>需求点 → 票 / DoD</b>」覆盖表，防漏防重。</p>
+        <div class="badges"><span class="badge b-machine">DoD 会被 verify_issue.py 逐条真实执行</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">5</div>
+      <div class="fbody">
+        <h4><span class="sk">门②</span>唯一例行人工确认点</h4>
+        <p>先跑两道只读机器检查（<code>validate-plan</code> + <code>check-plan</code>，有规则变更再加 <code>arch_check.py validate</code>），全过才向用户呈现：编号票清单 + 覆盖表 + 验收分工摘要（AI 完整验收 / AI 执行人工复核 / 纯人工各几条）+ DAG 依赖顺序。确认后 proposed → confirmed，此后<b>标题 / DoD / declared-scope / 方案切片不得单方面修改</b>。</p>
+        <div class="badges"><span class="badge b-human">人工：唯一的拆票确认</span><span class="badge b-machine">机器检查先于人审</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols2" style="--stage-color:var(--plan)">
+    <div class="panel">
+      <h4>3.1 模块拆解文档树：机器契约（spec-tree-version: 1）</h4>
+      <ul>
+        <li>树形列出将改动的每个文件：路径 + 动作（新增/修改/退役）+ 一句计划变动逻辑；<b>禁 glob、禁绝对路径、缺说明即拒收</b>；</li>
+        <li><b>树↔scope 闭合检查</b>（<code>check-plan</code>，门②前强制）：树文件无人认领（漏拆）、票 scope 路径不在树中（扩围）、glob 零命中、切片与重算投影不一致——任一命中直接拦门②；</li>
+        <li>每票定稿后由 <code>spec_tree.py slice</code> 确定性生成「方案切片」（按 SHA256 校验来源），scope 修订必须重新生成，<b>不得手改</b>。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>3.2 架构影响：规则变更有唯一通道</h4>
+      <ul>
+        <li>总览 11 节 + 层/组动作表（new | modify | retire），写入唯一真源 <code>docs/ARCH-CHECK.json</code> 后 <code>render write</code> 生成 <code>ARCHITECTURE.md</code>（禁手改）；</li>
+        <li>规则变更（新增 / 删除 / 放宽 / 改阈值）必须写进 3.2 + 承接票 declared-scope；ai-review 把「删除/放宽规则」当高风险项审查；</li>
+        <li><b>票级不设架构门</b>——架构检查只在 feature candidate 的 freeze/check 强制跑，pre-push 只做预警。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout risk" style="--stage-color:var(--plan)">
+    <b class="t">粒度红线：确定性数字，不是感觉</b>
+    预计生产代码 <b>文件数 &gt; 10</b>、<b>LOC &gt; 400</b>，或 scope 不可枚举（只能写出目录级 glob）→ 本票<b>必须再拆</b>；单票横跨 &gt; 2 个模块 → 自动再拆或标记人工裁决。粒度取向<b>取少不取多</b>，红线是上限不是目标；任何额外的测试都不能豁免红线。实现期 changed path 越界直接 FAIL。
+  </div>
+
+  <div class="callout why">
+    <b class="t">为什么开发计划能高质量</b>
+    ① <b>追溯分层</b>：FR 定义可观察行为 → 规则表定义分支/计算/权限 → spec 定义实现与决策 → 票定义交付边界与 DoD → 验收计划定义完整可执行 case，下游用稳定 ID + 来源引用承接，不重写上游；② <b>机器契约</b>：3.1 树让「计划改动面」从散文变成可校验数据，漏拆/扩围/越界全部脚本拦下；③ <b>决策留痕</b>：承重决策双候选+评分准则，被实现证伪时走 redesign 换代（supersedes），而不是在旧文档上悄悄改口径；④ <b>确认前置</b>：所有机器检查跑在门②之前，人只看检查过、核对过的清单。
+  </div>
+</section>
+
+<!-- ================= ④ 测试计划与验证 ================= -->
+<section id="test">
+  <div class="sec-head">
+    <span class="sec-no" style="background:var(--test)">④</span>
+    <h2>测试计划与验证体系：怎么做到「计划可执行、结果可信」</h2>
+    <span class="tagline">acceptance-plan.yaml 双轴 AC · 四层验证 · TDD 见红强制 · 防伪造证据</span>
+  </div>
+  <p class="sec-desc">测试计划不是开发完再补的文档，而是 tech-spec 阶段的<b>确定性产物</b>（每 campaign 一份 YAML），从 PRD 的 AC 场景逐条演化而来；执行时逐层收紧：票级内环 → 候选复跑 → 需求级 AC → CI full。</p>
+
+  <div class="cards" style="--stage-color:var(--test)">
+    <div class="mcard">
+      <h4>双轴验收矩阵：谁执行 × 谁判定</h4>
+      <p>每条 AC case 声明两个独立维度：</p>
+      <ul>
+        <li><span class="kw">executor</span>：<code>command</code> / <code>browser-agent</code> / <code>human</code>——谁来跑、采集证据；</li>
+        <li><span class="kw">oracle</span>：<code>auto</code> / <code>auto+human-review</code> / <code>human</code>——谁做最终判定。</li>
+      </ul>
+      <p>浏览器操作不能替代人的业务判断；纯人工必须写 <code>human_reason</code>（固定六词表：intent / visual-ux / domain-judgment / high-risk / no-reliable-oracle / environment-unavailable）。</p>
+    </div>
+    <div class="mcard">
+      <h4>case 结构：每条都可执行</h4>
+      <ul>
+        <li><code>source</code>：来源文档 + anchor（锚到 PRD/CR 具体位置）；</li>
+        <li><code>preconditions</code>：环境 / 初始状态 / 测试数据；</li>
+        <li><code>steps</code>：操作 + 输入 + <b>每步预期</b>；</li>
+        <li><code>expected</code>：最终<b>量化</b>结果 + assertions / human_expect；</li>
+        <li><code>documents</code>：用 path + <b>SHA256</b> 绑定真实 PRD / change-request——上游变了计划立即失配，不能悄悄换源。</li>
+      </ul>
+    </div>
+    <div class="mcard">
+      <h4>阈值纪律</h4>
+      <p>所有阈值必须来自 PRD / change-request / 已确认决策，<b>不得编造</b>；验收收口只能向<b>更严</b>方向调整，降低人工要求必须回技术方案修订计划。整案通过的判定：全部 required case 自动 + 人工标准满足且证据齐备。</p>
+    </div>
+    <div class="mcard">
+      <h4>门②呈现验收分工</h4>
+      <p>拆票确认时同时呈现：AI 完整验收几条、AI 执行人工复核几条、纯人工验收几条——人在门②就能看到「验收自动化率」，而不是等收口才发现一堆要手测。</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:34px;font-size:17px;">四层验证体系（当前实现，已废除旧 light/scoped/full 档位）</h3>
+  <table>
+    <tr><th>层级</th><th>跑什么</th><th>在哪跑</th><th>失败怎么办</th></tr>
+    <tr>
+      <td><b>1 · 票级内环</b></td>
+      <td>TDD 见红 + 本票 DoD + fast 套件（<code>verify_issue.py run implementer</code>）——每轮回修<b>只重跑本票 DoD + fast</b>，完整套件不冒充 CI full</td>
+      <td>票 worktree</td>
+      <td>自修复 ≤ max-fix-rounds，达上限 human-decision，「停止，不硬磨」</td>
+    </tr>
+    <tr>
+      <td><b>2 · 候选复跑</b></td>
+      <td>freeze 后 <code>verify_issue.py run-candidate</code>：对每票冻结的 DoD + fast <b>原样复跑一次</b>，防「过期证据」</td>
+      <td>集成 worktree</td>
+      <td>任一失败阻塞收口</td>
+    </tr>
+    <tr>
+      <td><b>3 · 需求级 AC</b></td>
+      <td><code>scoped_select.py</code> 关联选择集（direct 全跑、indirect 跑到预算停）+ acceptance-plan 的 command / browser-agent AC 真实执行 + generation 证据</td>
+      <td>本机候选环境</td>
+      <td>漏项 / 重复 / 额外 AC 都会被 <code>check --phase verify</code> 抓出</td>
+    </tr>
+    <tr>
+      <td><b>4 · CI full</b></td>
+      <td><b>full 只有 CI 一个入口</b>（含 daily regression）；本机、票 worktree、监督循环一律不得跑 full；CI 不可用时保持「未验证」状态，<b>不降级本机补跑</b></td>
+      <td>远端 CI</td>
+      <td>main push 后 CI full 是安全网</td>
+    </tr>
+  </table>
+
+  <div class="cols2">
+    <div class="panel">
+      <h4>TDD 见红不是口头声明</h4>
+      <ul>
+        <li>写实现前先跑 <code>verify_issue.py red</code>，必须产生<b>指向预期行为差异的断言失败</b>——语法错误、导入错误、运行崩溃、或「首次就通过」均无效，重写后再跑；</li>
+        <li>新增测试必须登记并由 runner 留见红证据；既有测试修改必须映射真实 DoD / tech-spec 行为变化，<b>无映射、删测试、放宽无关断言 → 停止</b>；</li>
+        <li><b>bug 票 revert 闭环</b>：<code>bug-regression</code> 三段缺一不可——修复后绿 → 在一次性 detached worktree revert 生产修复<b>必须见红</b> → 恢复后绿。专防「测试本来就会过」的假回归。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>证据防伪造：只认机器链路</h4>
+      <ul>
+        <li><code>process_check.py --phase ticket</code> 的 evidence 只接受 <b>verification JSON + 哈希 raw log</b>；Markdown 只是 JSON 的确定性渲染，手写 all-passed 不算数；</li>
+        <li>没有 runner JSON、真实日志和精确候选绑定，不得宣称完成或 CI full 通过；</li>
+        <li>生成物核对：在独立临时工作区重跑生成器并比较 tree，「只改了个字段」的文字声明无效；</li>
+        <li>不接受手写测试通过、commit 前缀复用、同会话自评或本地 CI 自证。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout why">
+    <b class="t">为什么测试计划能高质量</b>
+    ① <b>前置产出</b>：计划在 tech-spec 阶段就成形，拆票时校验、实现时执行、收口时复跑——同一份计划贯穿三段，没有「实现完再想怎么测」的空窗；② <b>双轴分工</b>：executor 与 oracle 分离，把「谁来跑」和「谁说了算」拆开，自动化率显式化、人工项逐条给理由；③ <b>逐层收紧</b>：票级快（DoD+fast）、候选严（复跑+conformance）、CI 兜底（full+daily），质量门集中在该集中的位置；④ <b>证据可回放</b>：每条结论都能对回 JSON 与哈希，「说测过了」不等于「测过了」。
+  </div>
+</section>
+
+<!-- ================= ⑤ 自动化执行 ================= -->
+<section id="exec">
+  <div class="sec-head">
+    <span class="sec-no" style="background:var(--exec)">⑤</span>
+    <h2>自动化执行：怎么在「少问人」和「不失控」之间闭环</h2>
+    <span class="tagline">主会话监督循环 · /implement 票级内环 · human-decision · 无人值守熔断 · /ai-review</span>
+  </div>
+  <p class="sec-desc">门②之后进入全自动段：主会话按 DAG 逐票派发 <code>/implement</code>，实现会话在独立 worktree 里完成「冻结→TDD→门禁→回报」，主会话复核后合入集成分支；普通过程<b>无人工检查点</b>，只有五类事件会停下来找人。</p>
+
+  <div class="flow" style="--stage-color:var(--exec)">
+    <div class="fstep">
+      <div class="fnum">1</div>
+      <div class="fbody">
+        <h4><span class="sk">/implement</span>启动校验：不过就不动代码</h4>
+        <p>配置校验（agents/dispatch config + 角色解析）→ 只接受 <code>confirmed</code> 票 → <code>blocked-by</code> 全部 merged → 读票全文、tech-spec、PRD、GLOSSARY、ARCHITECTURE、EXPERIENCE「开发阶段经验」（已知坑开工前带回）。</p>
+        <div class="badges"><span class="badge b-machine">状态/依赖机器判定</span><span class="badge b-loop">经验回流点</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">2</div>
+      <div class="fbody">
+        <h4><span class="sk">delivery.py start</span>冻结上下文，一票一 worktree</h4>
+        <p>创建票分支（<code>feat/&lt;module&gt;/&lt;feature&gt;/&lt;campaign&gt;-&lt;issue-id&gt;</code>）与 worktree，dev/ 软链回主工作区；冻结 target / base / HEAD / tree / scope / 票 / DoD / spec / config 哈希到 <code>ticket-context.json</code>——开工后一切对照冻结值，漂移即停。</p>
+        <div class="badges"><span class="badge b-machine">哈希冻结 · ticket-context v3</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">3</div>
+      <div class="fbody">
+        <h4>票级内环：TDD 实现 + 自修复</h4>
+        <p>每次改动前后检查：deny 路径命中即停、测试修改必须映射 DoD、派生物只由生成器产生、每轮对照冻结 declared-scope、超 10 文件 / 400 LOC 即停 re-split。然后 TDD：<code>red</code>（行为断言失败）→ 写实现到绿（替代即删除，不留旧实现）→ 自修复轮 ≤ 上限，达上限保存轨迹返回 human-decision，<b>不硬磨</b>。</p>
+        <div class="floop"><b>内环循环</b>：写测试 → 见红 → 实现 → 重跑本票 DoD + fast →（失败）自修复 → 重跑……成功标准只认真实 runner 证据。承重决策被证伪 → <code>operation=redesign</code> 退回 proposed，回 /tech-spec 换代。</div>
+        <div class="badges"><span class="badge b-auto">自动化</span><span class="badge b-loop">内环循环</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">4</div>
+      <div class="fbody">
+        <h4>票级门禁 + 结构化回报</h4>
+        <p><code>process_check.py --phase ticket</code> 只读聚合：context/scope/deny、票粒度、见红与测试修改映射、生成物、dev 软链、预算、manifest、bug regression、活动 decision、implementer verification。全过 → 回报主会话；<b>实现会话不自行 merge、不问人</b>。</p>
+        <div class="badges"><span class="badge b-machine">process_check</span><span class="badge b-art">证据：verification JSON + 哈希日志</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">5</div>
+      <div class="fbody">
+        <h4><span class="sk">主会话</span>监督循环：合并与打回</h4>
+        <p>每轮先 <code>progress.py reconcile</code> 只读对账，再按 DAG 派发下一票；<code>delivery.py merge</code> 复核「target 未前进 + 票级门禁 + implementer 证据 + 无活动 decision」后 no-ff 合入集成分支。失败票：verify-fails +1 并写 verify-fail，<b>未达 2 次退回实现会话，达 2 次创建 human-decision，不再自动打回</b>。</p>
+        <div class="badges"><span class="badge b-auto">自动化</span><span class="badge b-machine">merge 复核</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">6</div>
+      <div class="fbody">
+        <h4>全部票 merged → freeze → /ai-review 整需求评审</h4>
+        <p><code>feature_closeout.py freeze</code> 绑定 candidate / tree / 票组 / 计划哈希；<b>独立实例</b>（session/agent 不得与任何 implementer 相同）评审 <code>review_base..candidate</code> 全量 diff：先<b>反向枚举需求</b>（不看覆盖矩阵独立列行为点）再核代码；preview 中每个文件必须 reviewed 或 skipped（带原因），不得静默遗漏。检查维度：需求覆盖（跨票拼出完整主/失败路径）、架构一致性、接口契约、规则无 error 且删/宽有依据、测试映射、生成物洁净、<b>旧实现残留（双路径 = high）</b>、测试质量。</p>
+        <p>结论 pass / pass-with-notes / blocked；BLOCKER（critical/high）→ 开修复票走内环 → 重新 freeze → <b>新 candidate 必须重新评审</b>，receipt round 递增，旧 receipt / 复跑 / conformance / 人工确认<b>全部失效</b>。</p>
+        <div class="badges"><span class="badge b-machine">独立性 + receipt 哈希链</span><span class="badge b-loop">blocked → 修复票 → 重新冻结评审</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">7</div>
+      <div class="fbody">
+        <h4>候选复跑 + conformance + AC 执行 + 报告</h4>
+        <p><code>run-candidate</code> 逐票复跑冻结 DoD；<b>conformance</b>：先反向枚举需求，再按 tech-spec 全节 + 全部票覆盖矩阵并集逐条核对（评审与符合性<b>两次独立判断各自保留</b>，不共享「通过」结论）；候选环境跑需求级 AC（command / browser-agent 真实执行 + 截图与 console 证据）；<code>report</code> 生成 acceptance-report，<code>check --phase verify --record</code> 核 receipt / 复跑 / conformance / AC 漏项重复 / 证据环境。</p>
+        <div class="badges"><span class="badge b-machine">机器门禁聚合</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">8</div>
+      <div class="fbody">
+        <h4><span class="sk">人工</span>最终验收 → promote → finalize</h4>
+        <p>展示实际通过 / 失败 / 未验证 / 待人工原因；人明确给出 <b>merge-main 原话 + 时间 + 候选 tree + 无附加条件</b>，写入 confirmation.md 后重新 report——<b>沉默、取消、超时都不算确认</b>。随后 <code>delivery.py promote</code> 在同一授权进程内复核 receipt / 复跑 / conformance / 报告 / 确认哈希再合 main；<code>finalize</code> 逐票 close-and-clean、清理 integration worktree，任何一步失败保持 needs-attention，不用总结掩盖残留。push / Prod / rollback 永远需要另行授权。</p>
+        <div class="badges"><span class="badge b-human">人工：merge-main 确认</span><span class="badge b-machine">promote 复核</span></div>
+      </div>
+    </div>
+    <div class="fstep">
+      <div class="fnum">9</div>
+      <div class="fbody">
+        <h4><span class="sk">/review</span>复盘与经验回流</h4>
+        <p>全部票 done + 人确认发布后：重建过程全景（时间线、自修复轮次、评审 round、验证统计、逃逸缺陷、规则巡检）→ 经验分级沉淀到两级库（项目级 <code>EXPERIENCE.md</code> / 通用级 <code>~/.pd-workflow/general-experience.md</code>）→ 落盘 retro 报告。<b>规则级先判</b>：根治靠改流水线规则的（模板缺章节、阈值失准）不进经验库，写「流水线改进建议」。库操作四件套：<b>去重</b>（阶段+场景+语义）、<b>晋升</b>（项目→通用）、<b>引入</b>（通用→项目）、<b>退役</b>（触发场景消失即删）。下一个 feature 的 /pd-plan、/prd、/tech-spec、/implement 前置读取自动回流——飞轮闭合。</p>
+        <div class="badges"><span class="badge b-art">产物：retro + EXPERIENCE 更新</span><span class="badge b-loop">回流下个需求</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols2">
+    <div class="panel">
+      <h4>human-decision：唯一的问人通道</h4>
+      <ul>
+        <li><b>分工</b>：子会话只构造决策请求（不能问人、不能写包）；主会话是唯一写者，统一呈现、记录、路由；</li>
+        <li><b>决策包</b>：唯一真源 <code>decisions/&lt;id&gt;.json</code>；basis 三哈希（票/HEAD/报告）回答时必须一致，变了必须 supersede；2–4 个互斥选项各带受控 route；证据 ≤12 条带哈希摘要；</li>
+        <li><b>路由词表</b>：continue（resume/redispatch）/ supervisor（reconcile-routing、re-split、request-review、collect-evidence）/ defer / cancel——<b>禁止 shell/命令字段、路径逃逸、秘密</b>；</li>
+        <li><b>状态机</b>：pending → waiting → answered → routing → resolved；取消/超时=尚未回答，不等于选了推荐项；同票最多一个活动包；宿主 ack 持久化后才许解除 needs-human。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>无人值守：熔断策略</h4>
+      <ul>
+        <li><b>授权前置</b>：<code>unattended.md</code> 写明可自主事项 / 禁止事项 / 预算 / 停止条件，人过目后开跑；合 main、Prod、push <b>永不因它获得授权</b>；</li>
+        <li><b>默认串行</b>：同项目只跑一个循环，授权明确才允许 parallel-max；</li>
+        <li><b>不问人</b>：越界问题只建 human-decision 包保持 needs-human，继续其他无依赖票，不调用提问组件、不干等；</li>
+        <li><b>熔断即停</b>：额度达阈值（默认 <b>80%</b>）/ 耗尽 / 持续限流 / 鉴权失败 / <b>连续 2 次心跳无实质推进</b> → 立即停止派发与合并、写 circuit-break、撤销心跳、<b>不自动 retry</b>；</li>
+        <li><b>心跳从紧</b>：定时唤醒间隔 ≥2 小时且上一轮须有实质进展；续跑另起新会话，不反复唤醒同一长会话；</li>
+        <li><b>停止条件</b>：frontier 空 + 全票 merged/done + finalize，或剩余票全部等待 / 预算时限到——收口需人确认 merge-main 时就停在那道门。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout why">
+    <b class="t">为什么自动化执行不会失控</b>
+    ① <b>冻结对抗漂移</b>：开工即哈希冻结，之后每次判断都对照冻结值，scope 越界 / 基线漂移自动暴露；② <b>打回有预算</b>：自动回修最多 2 轮（自修复轮 ≤ 上限 + verify-fails < 2），超限即升级给人——机器不跟死循环较劲；③ <b>问人单点化</b>：全流程唯一问人通道是 human-decision，主会话统一问、统一路由，子会话永不直接抓人；④ <b>离场有熔断</b>：预算 80%、心跳双确认、失败不自动重试，代价可控地停下来等人，而不是烧光额度或做出危险动作；⑤ <b>评审独立性</b>：整需求评审由独立实例做，receipt 哈希链保证任何上游变动都使旧结论失效——不存在「用旧证书放行新代码」。
+  </div>
+</section>
+
+<!-- ================= ⑥ 机制索引 ================= -->
+<section id="index">
+  <div class="sec-head">
+    <span class="sec-no" style="background:#475569">⑥</span>
+    <h2>机制索引：一张表看全流水线的质量防线</h2>
+    <span class="tagline">按「防线防的是什么坑」组织</span>
+  </div>
+  <table>
+    <tr><th>机制</th><th>所在段</th><th>一句话作用</th><th>防的坑</th></tr>
+    <tr><td>拷打轮次 + 11 维覆盖清单</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>frontier 外推式提问，维度逐项归属</td><td>问题问一半就开写、维度静默漏掉</td></tr>
+    <tr><td>事实自查（自己查不问人）</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>代码/文档可查的事实不占用提问</td><td>拿用户当百科、问题又多又浅</td></tr>
+    <tr><td>/prototype 原型出口</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>不可拷打问题一次性原型，verdict 回流</td><td>「手感」问题空对空争论或拍脑袋</td></tr>
+    <tr><td>FR 单一可观察行为 + 可测试后果</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>写不出测试后果的条目降级为待确认</td><td>不可验证的「需求」混进交付</td></tr>
+    <tr><td>状态迁移表 / 权限矩阵 / 字段表</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>行为契约结构化到字段级</td><td>边界、空值、权限靠开发脑补</td></tr>
+    <tr><td>pd-review 修订式评审（7 维 &lt;8 直接改）</td><td><span class="stage-chip" style="background:var(--req)">需求</span></td><td>低分维度当场补文档</td><td>评审=罗列建议、问题原样带到下游</td></tr>
+    <tr><td>frontmatter 状态机门禁</td><td><span class="stage-chip" style="background:#475569">全线</span></td><td>待写PRD / 定稿 / 已确认（待拆解）/ confirmed…</td><td>上游没定稿就开工、跳段执行</td></tr>
+    <tr><td>How/Why 现状查证</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>现状必查、历史动机按需查，证据进 2.1</td><td>凭记忆写方案、推翻过去的教训</td></tr>
+    <tr><td>承重决策双候选 + 评分准则</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>DEC-ID 表留痕，证伪走 redesign 换代</td><td>方案只有一条路、错了悄悄改口径</td></tr>
+    <tr><td>3.1 文档树 + spec-tree 闭合校验</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>树↔scope 闭合、切片确定性生成</td><td>漏拆、扩围、glob 糊弄改动面</td></tr>
+    <tr><td>粒度红线（10 文件 / 400 LOC / scope 可枚举）</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>超线必拆，测试不能豁免</td><td>巨石票、评审与验证形同虚设</td></tr>
+    <tr><td>可判定 DoD（命令+退出码）+ 覆盖表</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>验收标准机器可执行、需求点逐条认领</td><td>「完成」靠主观判断、需求点漏接</td></tr>
+    <tr><td>门② 人审（唯一例行人工点）</td><td><span class="stage-chip" style="background:var(--plan)">计划</span></td><td>机器检查先行，人确认票清单与验收分工</td><td>错误方案直接进自动执行</td></tr>
+    <tr><td>acceptance-plan 双轴（executor × oracle）</td><td><span class="stage-chip" style="background:var(--test)">测试</span></td><td>谁执行、谁判定显式分工，SHA256 绑上游</td><td>测试计划事后补、人工项无理由</td></tr>
+    <tr><td>TDD 见红强制（red 必须是行为断言失败）</td><td><span class="stage-chip" style="background:var(--test)">测试</span></td><td>runner 留见红证据，首过/崩溃无效</td><td>「先写实现再补测试」的假 TDD</td></tr>
+    <tr><td>bug 票 revert 闭环（绿→revert红→恢复绿）</td><td><span class="stage-chip" style="background:var(--test)">测试</span></td><td>回归测试证明自己真能抓 bug</td><td>本来就会过的假回归测试</td></tr>
+    <tr><td>process_check 只认 JSON+哈希证据</td><td><span class="stage-chip" style="background:var(--exec)">执行</span></td><td>evidence 可回放、确定性渲染</td><td>手写 all-passed、自评自证</td></tr>
+    <tr><td>开工冻结（ticket-context 哈希）</td><td><span class="stage-chip" style="background:var(--exec)">执行</span></td><td>target/base/scope/DoD 全冻结</td><td>边做边改需求、基线悄悄漂移</td></tr>
+    <tr><td>自修复上限 + verify-fails&lt;2 打回</td><td><span class="stage-chip" style="background:var(--exec)">执行</span></td><td>超限即 human-decision，不硬磨</td><td>死循环空转烧额度</td></tr>
+    <tr><td>human-decision 协议（受控路由）</td><td><span class="stage-chip" style="background:var(--exec)">执行</span></td><td>唯一问人通道，决策包+状态机+词表</td><td>子会话乱问人、决策无痕、路由失控</td></tr>
+    <tr><td>无人值守熔断（80% 预算 / 2 次心跳）</td><td><span class="stage-chip" style="background:var(--exec)">执行</span></td><td>异常即停 + circuit-break，不自动重试</td><td>离场后失控烧光额度/做危险动作</td></tr>
+    <tr><td>/ai-review 独立评审 + receipt 哈希链</td><td><span class="stage-chip" style="background:var(--test)">验收</span></td><td>独立实例反向枚举需求评全量 diff</td><td>实现者自评、上游一变旧结论照用</td></tr>
+    <tr><td>候选复跑 + conformance（双独立判断）</td><td><span class="stage-chip" style="background:var(--test)">验收</span></td><td>冻结候选上原样复跑、逐条核对覆盖矩阵</td><td>过期证据放行、覆盖表自说自话</td></tr>
+    <tr><td>merge-main 确认（原话+时间+tree 落盘）</td><td><span class="stage-chip" style="background:var(--test)">验收</span></td><td>沉默/超时不算确认，promote 复核哈希</td><td>无人默认通过、口头授权无凭据</td></tr>
+    <tr><td>finalize 清场 + salvage</td><td><span class="stage-chip" style="background:var(--retro)">复盘</span></td><td>close-and-clean 预检+apply，失败保持 needs-attention</td><td>残留 worktree/分支没人管</td></tr>
+    <tr><td>/review 两级经验库（去重/晋升/引入/退役）</td><td><span class="stage-chip" style="background:var(--retro)">复盘</span></td><td>规则级先判，经验回流各段前置读取</td><td>同样的坑下个需求再踩一遍</td></tr>
+    <tr><td>GLOSSARY / ARCH-CHECK / EXPERIENCE 三真源</td><td><span class="stage-chip" style="background:#475569">全线</span></td><td>术语口径、架构契约、经验库唯一真源</td><td>口径漂移、架构手改、经验散落对话</td></tr>
+  </table>
+
+  <div class="callout note">
+    <b class="t">贯穿全线的三个设计取向</b>
+    <b>1 · 文档优先</b>：pd-plan / prd / tech-spec 默认 DOC_MODE，只写文档不动代码，切实现模式需要明确批准；<b>2 · 机器判底</b>：所有「是否完成 / 是否越界 / 是否通过」最终由确定性脚本裁决，模型结论必须能对回机器证据；<b>3 · 集中放人</b>：例行决策全自动，例外决策单点化（门②、merge-main、human-decision），人的注意力花在真正的分叉点上。
+  </div>
+
+  <details>
+    <summary>附录：产物文件与归属路径速查</summary>
+    <div class="inner">
+      <ul>
+        <li>产品产物根：<code>docs/features/&lt;feature-module&gt;/&lt;feature-slug&gt;/campaigns/&lt;campaign-id&gt;/</code>——feature-brief / prd / change-request / pd-review-report / retro（文件名 = <code>&lt;feature-summary&gt;-&lt;类型&gt;-YYYY-MM-DD.md</code>）；</li>
+        <li>开发产物根：<code>dev/features/&lt;module&gt;/&lt;feature&gt;/campaigns/&lt;campaign-id&gt;/</code>——tech-spec、acceptance-plan.yaml、issues/、impl/、integration/、decisions/、progress.jsonl；</li>
+        <li>项目级真源：<code>docs/GLOSSARY.md</code> · <code>docs/ARCH-CHECK.json</code>（唯一机器真源）· <code>docs/ARCHITECTURE.md</code>（render 生成禁手改）· <code>docs/EXPERIENCE.md</code> · <code>docs/decisions/</code> · <code>docs/project-memos/</code>；</li>
+        <li>分支与目录：集成分支 <code>feat/&lt;module&gt;/&lt;feature&gt;/&lt;campaign&gt;</code>，票分支追加 <code>-&lt;issue-id&gt;</code>，worktree 在 <code>.worktrees/&lt;…&gt;/&lt;issue-id&gt;/</code>，worktree 内 dev/ 必须软链主工作区；</li>
+        <li>关键脚本：<code>arch_check.py</code> · <code>spec_tree.py</code> · <code>ticket_context.py</code> · <code>verify_issue.py</code> · <code>process_check.py</code> · <code>delivery.py</code> · <code>feature_closeout.py</code> · <code>progress.py</code> · <code>scoped_select.py</code> · <code>artifact_text.py</code>。</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+</main>
+
+<footer>
+  基于 ch-agent-dev-skills 仓库 2026-11-22 主线状态整理 · 内容取自各 SKILL.md、shared/fragments、shared/scripts 与 templates 的现行规则 · 旧 light/scoped/full 验证档位已废除，现行四层验证体系以本页 ④ 节为准
+</footer>
+
+<script>
+  // 平滑滚动
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+</script>
+</body>
+</html>

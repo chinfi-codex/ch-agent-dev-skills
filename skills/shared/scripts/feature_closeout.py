@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib
 import json
@@ -39,6 +40,10 @@ CANDIDATE_VERIFICATION_SCHEMA = "agent-dev.candidate-verification/v1"
 CANDIDATE_VERIFICATION_SCHEMA_PATH = (Path(__file__).resolve().parent.parent / "references"
                                       / "candidate-verification.schema.json")
 FEATURE_REVIEW_RECEIPT = "feature-review-receipt.json"
+REVIEW_HANDOFF = "review-handoff.json"
+REVIEW_HANDOFF_SCHEMA = "agent-dev.review-handoff/v1"
+PHASE_TIMING_KIND = "feature-phase-timing"
+PHASES = ("review", "candidate-verification", "conformance", "acceptance", "report")
 CANDIDATE_VERIFICATION = "candidate-verification.json"
 FEATURE_CONFORMANCE = "conformance-feature.md"
 PLAN_SCHEMA = "agent-dev.feature-acceptance/v2"
@@ -481,13 +486,238 @@ def _idempotent_merged_event(feature_dir: Path, event: dict):
 
 
 def integ_dir(args) -> Path:
-    base = Path(args.feature_dir) / "integration"
-    return base / args.round if getattr(args, "round", None) else base
+    fdir = Path(args.feature_dir)
+    base = fdir / "integration"
+    round_name = getattr(args, "round", None)
+    if round_name:
+        relative = Path(str(round_name))
+        if relative.is_absolute() or len(relative.parts) != 1 or str(round_name) in (".", ".."):
+            raise InputError("--round 必须是单个安全目录名")
+        base = base / relative
+    try:
+        base.resolve().relative_to(fdir.resolve())
+    except ValueError:
+        raise InputError("integration 路径不得逃逸 feature 目录")
+    return base
 
 
 def head_info(repo: Path):
     head = git(repo, "rev-parse", "HEAD").strip()
     return head, git(repo, "rev-parse", "HEAD^{tree}").strip()
+
+
+# ---------- candidate phase timing (append-only digest events) ----------
+
+
+def _phase_now():
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _phase_time(value, label):
+    if not isinstance(value, str) or not value.strip():
+        raise InputError(f"{label} 缺 RFC3339 时间")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise InputError(f"{label} 不是 RFC3339 时间：{value!r}")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise InputError(f"{label} 必须含时区")
+    return parsed
+
+
+def _phase_event_id(candidate, round_name, phase, action):
+    path = integ_dir(SimpleNamespace(feature_dir=str(candidate["feature_dir"]), round=round_name)) / "candidate.json"
+    binding = {
+        "candidate": candidate["candidate"], "candidate_tree": candidate["candidate_tree"],
+        "candidate_sha256": candidate["candidate_sha256"], "round": round_name,
+        "phase": phase, "action": action,
+    }
+    material = json.dumps(binding, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    event_id = "feature-phase:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return event_id, path
+
+
+def _phase_candidate(feature_dir: Path, repo: Path, round_name):
+    integ = integ_dir(SimpleNamespace(feature_dir=str(feature_dir), round=round_name))
+    cand = _json_object(integ / "candidate.json", missing=None)
+    if not cand:
+        raise InputError("integration/candidate.json 不存在：先 freeze")
+    candidate = _oid(cand.get("candidate"), "candidate.candidate")
+    tree = _oid(cand.get("candidate_tree"), "candidate.candidate_tree")
+    if cand.get("round") != round_name:
+        raise InputError("candidate.round 与请求 round 不一致")
+    head, head_tree = head_info(repo)
+    if head != candidate or head_tree != tree:
+        raise InputError("当前 HEAD/tree 已漂移，不得记录或重放旧 candidate 阶段计时")
+    cand = dict(cand)
+    cand["candidate_sha256"] = sha256_file(integ / "candidate.json")
+    cand["feature_dir"] = str(feature_dir)
+    return cand
+
+
+def _matching_phase_events(events, cand, round_name, phase):
+    matched = []
+    for event in events:
+        if event.get("kind") != PHASE_TIMING_KIND:
+            continue
+        if (event.get("candidate") != cand.get("candidate")
+                or event.get("candidate_tree") != cand.get("candidate_tree")
+                or event.get("candidate_sha256") != cand.get("candidate_sha256")
+                or event.get("round") != round_name or event.get("phase") != phase):
+            continue
+        if event.get("event") != "digest" or event.get("issue") != "feature":
+            raise InputError("feature-phase-timing 必须是 issue=feature 的 digest 事件")
+        matched.append(event)
+    return matched
+
+
+def _seconds(value, label):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise InputError(f"{label} 必须是非负秒数")
+    return float(value)
+
+
+def _finish_duration(start, finish):
+    started_at = _phase_time(start.get("started_at"), "phase started_at")
+    ended_at = _phase_time(finish.get("ended_at"), "phase ended_at")
+    if finish.get("started_at") != start.get("started_at"):
+        raise InputError("phase finish.started_at 与 start 不一致")
+    elapsed = (ended_at - started_at).total_seconds()
+    if elapsed < 0:
+        raise InputError("phase ended_at 早于 started_at")
+    recorded = _seconds(finish.get("duration_seconds"), "phase duration_seconds")
+    if abs(recorded - elapsed) > 0.000001:
+        raise InputError("phase duration_seconds 与起止时间不一致")
+    return recorded
+
+
+def _validate_running_phase(start):
+    if start.get("state") != "running" or start.get("action") != "start":
+        raise InputError("阶段 start 事件 state/action 非法")
+    started = _phase_time(start.get("started_at"), "phase started_at")
+    if start.get("ended_at") is not None or _seconds(start.get("duration_seconds"), "phase duration_seconds") != 0:
+        raise InputError("阶段 running 事件时间字段非法")
+    return started
+
+
+def record_phase(feature_dir: Path, repo: Path, phase: str, action: str, round=None):
+    """Record/replay one candidate-bound start or finish without resetting time."""
+    feature_dir, repo = Path(feature_dir), Path(repo)
+    if phase not in PHASES:
+        raise InputError("phase 必须是 " + "/".join(PHASES))
+    if action not in ("start", "finish"):
+        raise InputError("phase action 必须是 start/finish")
+    cand = _phase_candidate(feature_dir, repo, round)
+    events = load_progress_events(feature_dir)
+    matched = _matching_phase_events(events, cand, round, phase)
+    start_id, candidate_path = _phase_event_id(cand, round, phase, "start")
+    finish_id, finish_path = _phase_event_id(cand, round, phase, "finish")
+    if finish_path != candidate_path:
+        raise InputError("阶段计时 candidate 路径不一致")
+    by_id = {event.get("event_id"): event for event in matched}
+    if len(by_id) != len(matched):
+        raise InputError("阶段计时事件缺稳定 event_id")
+    allowed = {start_id, finish_id}
+    unexpected = sorted(set(by_id) - allowed)
+    if unexpected:
+        raise InputError("阶段计时 event_id 与 candidate/tree/round/phase 不匹配：" + ", ".join(unexpected))
+    start = by_id.get(start_id)
+    finish = by_id.get(finish_id)
+    if start is not None:
+        _validate_running_phase(start)
+    if finish is not None and (finish.get("state") != "finished" or finish.get("action") != "finish"):
+        raise InputError("阶段 finish 事件 state/action 非法")
+
+    if action == "start" and start is not None:
+        return start
+    if action == "finish":
+        if start is None:
+            raise InputError("finish 须已有同 candidate/tree/round/phase 的 start")
+        _phase_time(start.get("started_at"), "phase started_at")
+        if finish is not None:
+            _finish_duration(start, finish)
+            return finish
+
+    if sha256_file(candidate_path) != cand["candidate_sha256"]:
+        raise InputError("candidate.json 字节在计时期间漂移，拒绝追加旧候选事件")
+    timestamp = _phase_now()
+    if action == "start":
+        event = {
+            "event_id": start_id, "ts": timestamp, "event": "digest", "issue": "feature",
+            "kind": PHASE_TIMING_KIND, "candidate": cand["candidate"],
+            "candidate_tree": cand["candidate_tree"], "candidate_sha256": cand["candidate_sha256"],
+            "round": round, "phase": phase,
+            "state": "running", "action": "start", "started_at": timestamp,
+            "ended_at": None, "duration_seconds": 0,
+        }
+    else:
+        elapsed = (_phase_time(timestamp, "phase ended_at")
+                   - _phase_time(start["started_at"], "phase started_at")).total_seconds()
+        if elapsed < 0:
+            raise InputError("当前时间早于阶段 started_at，拒绝记录负耗时")
+        event = {
+            "event_id": finish_id, "ts": timestamp, "event": "digest", "issue": "feature",
+            "kind": PHASE_TIMING_KIND, "candidate": cand["candidate"],
+            "candidate_tree": cand["candidate_tree"], "candidate_sha256": cand["candidate_sha256"],
+            "round": round, "phase": phase,
+            "state": "finished", "action": "finish", "started_at": start["started_at"],
+            "ended_at": timestamp, "duration_seconds": elapsed,
+        }
+    try:
+        store = importlib.import_module("state_store")
+        store.append_event_once(feature_dir / JOURNAL, event, event["event_id"])
+    except (ImportError, ValueError, OSError) as exc:
+        raise InputError(f"无法追加阶段计时事件：{exc}")
+    return event
+
+
+def phase_timing_summary(feature_dir: Path, cand: dict, round=None):
+    """Return only real running/finished rows for the current candidate."""
+    if round is None:
+        round = cand.get("round")
+    for key in ("candidate", "candidate_tree"):
+        _oid(cand.get(key), "candidate." + key)
+    feature_dir = Path(feature_dir)
+    candidate_path = integ_dir(SimpleNamespace(
+        feature_dir=str(feature_dir), round=round)) / "candidate.json"
+    candidate_sha256 = sha256_file(candidate_path)
+    events = load_progress_events(feature_dir)
+    cand = dict(cand)
+    cand["candidate_sha256"] = candidate_sha256
+    cand["feature_dir"] = str(feature_dir)
+    rows = []
+    for phase in PHASES:
+        matched = _matching_phase_events(events, cand, round, phase)
+        start_id, _ = _phase_event_id(cand, round, phase, "start")
+        finish_id, _ = _phase_event_id(cand, round, phase, "finish")
+        by_id = {event.get("event_id"): event for event in matched}
+        if len(by_id) != len(matched) or set(by_id) - {start_id, finish_id}:
+            raise InputError(f"{phase} 阶段计时 event_id 不完整或不匹配")
+        start, finish = by_id.get(start_id), by_id.get(finish_id)
+        if start is None:
+            if finish is not None:
+                raise InputError(f"{phase} 有 finish 但缺 start")
+            continue
+        started_at = _validate_running_phase(start)
+        row = {"phase": phase, "state": "running", "started_at": start["started_at"],
+               "ended_at": None, "duration_seconds": 0.0}
+        if finish is not None:
+            if finish.get("state") != "finished" or finish.get("action") != "finish":
+                raise InputError(f"{phase} finish state/action 非法")
+            row.update({"state": "finished", "ended_at": finish.get("ended_at"),
+                        "duration_seconds": _finish_duration(start, finish)})
+        # Keep this parse in the summary path too: a no-finish row still has a
+        # real timezone-aware start, not an arbitrary display string.
+        row["started_at"] = started_at.isoformat().replace("+00:00", "Z")
+        rows.append(row)
+    return rows
+
+
+def _phase_seconds_text(value):
+    seconds = float(value)
+    if seconds.is_integer():
+        return str(int(seconds))
+    return ("%.6f" % seconds).rstrip("0").rstrip(".")
 
 
 # ---------- 验收计划 ----------
@@ -538,6 +768,418 @@ def check_plan_unchanged(rep: Report, feature_dir: Path, cand: dict):
         rep.add("plan-source", "FAIL", str(exc))
 
 
+
+
+def _json_object(path: Path, *, missing=None):
+    """Strict JSON object reader for review materials (duplicate keys are corruption)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return missing
+    except (OSError, UnicodeError) as exc:
+        raise InputError(f"无法读取 {path}：{exc}")
+    try:
+        value = json.loads(text, object_pairs_hook=_unique_json_object,
+                           parse_constant=_reject_json_constant)
+    except (ValueError, InputError) as exc:
+        raise InputError(f"{path} 不是合法 JSON：{exc}")
+    if not isinstance(value, dict):
+        raise InputError(f"{path} 顶层必须是 JSON object")
+    return value
+
+
+def _oid(value, label):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise InputError(f"{label} 必须是完整小写 Git OID")
+    return value
+
+
+def _review_base(cand):
+    return _oid(cand.get("review_base") or cand.get("main_head"), "candidate review_base")
+
+
+def _diff_facts(repo: Path, base: str, head: str):
+    try:
+        rr = importlib.import_module("review_receipt")
+        return {"base": base, "candidate": head,
+                "sha256": rr._feature_diff_sha(repo, base, head),
+                "files": rr._changed_paths(repo, base, head)}
+    except (ImportError, ValueError, OSError) as exc:
+        raise InputError(f"无法计算评审 diff {base}..{head}：{exc}")
+
+
+def _repo_artifact(path: Path, root: Path):
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+    except (OSError, ValueError) as exc:
+        raise InputError(f"输入路径不存在或逃逸主仓库：{path}（{exc}）")
+    if path.is_symlink() or not resolved.is_file():
+        raise InputError(f"输入必须是主工作区普通文件：{path}")
+    return {"path": resolved.relative_to(root.resolve()).as_posix(),
+            "sha256": sha256_file(resolved)}
+
+
+def _current_handoff_inputs(fdir: Path, cand: dict):
+    """Hash only main-workspace inputs, never a candidate checkout's dev/ copy."""
+    root = repo_root_of(fdir)
+    try:
+        tc = importlib.import_module("ticket_context")
+    except ImportError as exc:
+        raise InputError(f"ticket_context 不可用：{exc}")
+    wanted = {str(item.get("id")) for item in cand.get("issues") or []}
+    specs = {}
+    seen = set()
+    for issue in sorted((fdir / "issues").glob("issue-*.md")):
+        fm = read_frontmatter(issue)
+        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+        if iid not in wanted:
+            continue
+        if iid in seen:
+            raise InputError(f"重复票号：{iid}")
+        seen.add(iid)
+        try:
+            spec = tc.find_spec(issue, root)
+        except (ValueError, OSError) as exc:
+            raise InputError(f"无法定位 {iid} 的 tech-spec：{exc}")
+        artifact = _repo_artifact(spec, root)
+        specs[artifact["path"]] = artifact
+    if seen != wanted:
+        raise InputError("candidate 票文件不完整：" + ", ".join(sorted(wanted - seen)))
+    return {
+        "spec": [specs[path] for path in sorted(specs)],
+        "config": _repo_artifact(root / "dev" / "agents-config.md", root),
+        "plan": _repo_artifact(plan_source(fdir), root),
+    }
+
+
+def _validate_previous_value(previous):
+    if previous is None:
+        return
+    if not isinstance(previous, dict):
+        raise InputError("旧 review-handoff previous 必须是 object/null")
+    for key in ("candidate", "candidate_tree", "main_head"):
+        _oid(previous.get(key), "handoff previous." + key)
+    if not isinstance(previous.get("plan_sha256"), str) or not re.fullmatch(
+            r"[0-9a-f]{64}", previous["plan_sha256"]):
+        raise InputError("handoff previous.plan_sha256 非法")
+    issues = previous.get("issues")
+    if not isinstance(issues, list) or any(not isinstance(item, dict) or not item.get("id") for item in issues):
+        raise InputError("handoff previous.issues 非法")
+    if len({item["id"] for item in issues}) != len(issues):
+        raise InputError("handoff previous.issues 含重复票")
+    if previous.get("inputs") != "unknown" and not isinstance(previous.get("inputs"), dict):
+        raise InputError("handoff previous.inputs 必须是 object/unknown")
+    receipt = previous.get("receipt")
+    if receipt is not None:
+        if not isinstance(receipt, dict):
+            raise InputError("handoff previous.receipt 必须是 object/null")
+        if not isinstance(receipt.get("findings"), list):
+            raise InputError("handoff previous.receipt.findings 必须是 list")
+        identifiers = []
+        for finding in receipt["findings"]:
+            if not isinstance(finding, dict) or not isinstance(finding.get("id"), str) or not finding["id"]:
+                raise InputError("handoff 旧 finding 缺有效 id")
+            identifiers.append(finding["id"])
+        if len(set(identifiers)) != len(identifiers):
+            raise InputError("handoff 旧 finding id 重复")
+
+
+def _load_old_handoff(integ: Path, old: dict):
+    value = _json_object(integ / REVIEW_HANDOFF, missing=None)
+    if value is None:
+        return None
+    if value.get("schema") != REVIEW_HANDOFF_SCHEMA:
+        raise InputError("旧 review-handoff schema 不匹配")
+    if not old:
+        raise InputError("旧 review-handoff 没有对应 candidate.json")
+    if (value.get("candidate") != old.get("candidate")
+            or value.get("candidate_tree") != old.get("candidate_tree")
+            or value.get("review_base") != _review_base(old)):
+        raise InputError("旧 review-handoff 与 candidate.json 绑定不一致")
+    _validate_previous_value(value.get("previous"))
+    if isinstance(value.get("previous"), dict) and value["previous"].get("candidate") == old.get("candidate"):
+        raise InputError("旧 review-handoff 不得把自身 candidate 当作 previous")
+    if not isinstance(value.get("inputs"), dict):
+        raise InputError("旧 review-handoff.inputs 必须是 object")
+    return value
+
+
+def _stable_receipt_artifact(artifact, integ: Path, root: Path, repo: Path):
+    if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
+        raise InputError("旧 receipt report 指针非法")
+    digest = artifact.get("sha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise InputError("旧 receipt report sha256 非法")
+    raw = Path(artifact["path"])
+    source = raw if raw.is_absolute() else integ / raw
+    if source.is_symlink() or not source.is_file():
+        raise InputError("旧 receipt report 必须存在且为普通文件")
+    resolved = source.resolve()
+    if sha256_file(resolved) != digest:
+        raise InputError("旧 receipt report 的实际 SHA256 与回执不一致")
+    for base in (root.resolve(), repo.resolve()):
+        try:
+            relative = resolved.relative_to(base)
+            return {"path": relative.as_posix(), "sha256": digest}
+        except ValueError:
+            continue
+    raise InputError("旧 receipt report 指针逃逸 feature 主仓库与 candidate repo")
+
+
+def _capture_previous_receipt(integ: Path, old: dict, root: Path, repo: Path):
+    path = integ / FEATURE_REVIEW_RECEIPT
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise InputError("旧 feature-review-receipt.json 必须是普通文件")
+    receipt = _json_object(path)
+    try:
+        rr = importlib.import_module("review_receipt")
+        errors = rr._feature_schema_errors(receipt)
+    except (ImportError, ValueError, OSError) as exc:
+        raise InputError(f"旧 feature receipt schema 不可用：{exc}")
+    if errors:
+        raise InputError("旧 feature receipt 无效：" + "; ".join(errors))
+    expected_base = _review_base(old)
+    if (receipt.get("head") != old.get("candidate") or receipt.get("tree") != old.get("candidate_tree")
+            or receipt.get("base") != expected_base
+            or receipt.get("plan_sha256") != (old.get("acceptance_plan") or {}).get("sha256")):
+        raise InputError("旧 feature receipt 与旧 candidate 的 candidate/tree/base/plan 不一致")
+    report = receipt["artifacts"]["report"]
+    if report.get("sha256") != receipt["report_sha256"]:
+        raise InputError("旧 feature receipt report 哈希字段不一致")
+    return {
+        "path": FEATURE_REVIEW_RECEIPT,
+        "sha256": sha256_file(path),
+        "round": receipt["round"],
+        "previous_receipt_sha256": receipt["previous_receipt_sha256"],
+        "reviewer": copy.deepcopy(receipt["reviewer"]),
+        "findings": copy.deepcopy(receipt["findings"]),
+        "report": _stable_receipt_artifact(report, integ, root, repo),
+    }
+
+
+def _previous_candidate(old: dict):
+    for key in ("candidate", "candidate_tree", "main_head"):
+        _oid(old.get(key), "old candidate." + key)
+    plan_sha = (old.get("acceptance_plan") or {}).get("sha256")
+    if not isinstance(plan_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", plan_sha):
+        raise InputError("old candidate acceptance_plan.sha256 非法")
+    issues = old.get("issues")
+    if not isinstance(issues, list) or any(not isinstance(item, dict) or not item.get("id") for item in issues):
+        raise InputError("old candidate.issues 非法")
+    return {
+        "candidate": old["candidate"], "candidate_tree": old["candidate_tree"],
+        "main_head": old["main_head"], "plan_sha256": plan_sha,
+        "issues": copy.deepcopy(issues),
+    }
+
+
+def _ticket_changes(previous_issues, current_issues):
+    before = {str(item.get("id")): item for item in previous_issues}
+    after = {str(item.get("id")): item for item in current_issues}
+    if len(before) != len(previous_issues) or len(after) != len(current_issues):
+        raise InputError("candidate 票组含重复/缺失 issue id")
+    changed = [{"id": iid, "previous": copy.deepcopy(before[iid]), "current": copy.deepcopy(after[iid])}
+               for iid in sorted(before.keys() & after.keys()) if before[iid] != after[iid]]
+    return {"added": sorted(after.keys() - before.keys()),
+            "removed": sorted(before.keys() - after.keys()), "changed": changed}
+
+
+def _repair_artifact(fdir: Path, path: Path):
+    try:
+        relative = path.relative_to(fdir).as_posix()
+    except ValueError:
+        raise InputError(f"修复票证据路径逃逸 feature：{path}")
+    if path.is_symlink():
+        raise InputError(f"修复票证据不得为软链：{relative}")
+    if not path.exists():
+        return {"path": relative, "sha256": None, "status": "missing"}
+    if not path.is_file():
+        raise InputError(f"修复票证据不是普通文件：{relative}")
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(fdir.resolve())
+    except ValueError:
+        raise InputError(f"修复票证据解析后逃逸 feature：{relative}")
+    return {"path": relative, "sha256": sha256_file(resolved), "status": "present"}
+
+
+def _current_repair_manifest(fdir: Path, impl: Path, issue_id: str):
+    raw = impl / "raw"
+    if raw.is_symlink():
+        raise InputError(f"{issue_id} artifact raw 不得为软链")
+    currents = []
+    if raw.is_dir():
+        for path in sorted(raw.glob("*/" + GENERATION_MANIFEST)):
+            try:
+                path.resolve().relative_to(impl.resolve())
+            except ValueError:
+                raise InputError(f"{issue_id} artifact manifest 逃逸 impl 目录")
+            value = _json_object(path)
+            if value.get("subject") == issue_id and value.get("status") == "current":
+                currents.append(path)
+    if len(currents) > 1:
+        raise InputError(f"{issue_id} 有多个 current artifact manifest")
+    if not currents:
+        return {"path": None, "sha256": None, "status": "missing"}
+    return _repair_artifact(fdir, currents[0])
+
+
+def _declared_review_findings(frontmatter: dict, issue: Path):
+    if "review-findings" not in frontmatter:
+        return []
+    values = frontmatter["review-findings"]
+    if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+        raise InputError(f"{issue} review-findings 必须是非空 finding id 字符串列表")
+    values = sorted(value.strip() for value in values)
+    if len(set(values)) != len(values):
+        raise InputError(f"{issue} review-findings 不允许重复 finding id")
+    return values
+
+
+def _repair_records(fdir: Path, cand: dict, added):
+    current = {str(item.get("id")): item for item in cand.get("issues") or []}
+    records = []
+    for issue in sorted((fdir / "issues").glob("issue-*.md")):
+        fm = read_frontmatter(issue)
+        match = re.match(r"issue-[0-9]+[a-z]?", issue.stem)
+        iid = str(fm.get("issue-id") or (match.group(0) if match else issue.stem))
+        declared = _declared_review_findings(fm, issue)
+        if iid not in added:
+            continue
+        if iid not in current:
+            raise InputError(f"新增修复票 {iid} 不在 candidate 中")
+        impl = fdir / "impl" / iid
+        try:
+            impl.resolve().relative_to(fdir.resolve())
+        except ValueError:
+            raise InputError(f"{iid} impl 路径逃逸 feature")
+        records.append({
+            "issue": iid,
+            "path": issue.relative_to(fdir).as_posix(),
+            "review_findings": declared,
+            "merged_commit": current[iid].get("merged_commit"),
+            "ticket_context": _repair_artifact(fdir, impl / "ticket-context.json"),
+            "process_check_ticket": _repair_artifact(fdir, impl / "process-check-ticket.json"),
+            "verification_implementer": _repair_artifact(fdir, impl / "verification-implementer.json"),
+            "artifact_manifest": _current_repair_manifest(fdir, impl, iid),
+        })
+    if {record["issue"] for record in records} != set(added):
+        raise InputError("新增修复票文件不完整")
+    return records
+
+
+def _input_changes(current, previous):
+    if previous is None or previous.get("inputs") == "unknown":
+        return {key: "unknown" for key in current}
+    old = previous.get("inputs")
+    if not isinstance(old, dict):
+        raise InputError("previous.inputs 非法")
+    return {key: ("unchanged" if old.get(key) == value else "changed")
+            for key, value in current.items()}
+
+
+def build_review_handoff(fdir: Path, repo: Path, integ: Path, old: dict,
+                         old_handoff: dict, cand: dict) -> dict:
+    """Build deterministic review-location material; never a review verdict."""
+    current_inputs = _current_handoff_inputs(fdir, cand)
+    previous = None
+    if old:
+        if old.get("candidate") == cand.get("candidate"):
+            # Re-freezing the same candidate must not create a self-transition.
+            previous = copy.deepcopy(old_handoff.get("previous")) if old_handoff else None
+        else:
+            previous = _previous_candidate(old)
+            previous["receipt"] = _capture_previous_receipt(
+                integ, old, repo_root_of(fdir), repo)
+            previous["inputs"] = (copy.deepcopy(old_handoff["inputs"])
+                                  if old_handoff else "unknown")
+    _validate_previous_value(previous)
+    if previous and previous["candidate"] == cand.get("candidate"):
+        raise InputError("review handoff previous 不得等于当前 candidate")
+
+    previous_issues = previous["issues"] if previous else []
+    changes = _ticket_changes(previous_issues, cand.get("issues") or []) if previous else None
+    if previous:
+        previous["incremental_diff"] = _diff_facts(repo, previous["candidate"], cand["candidate"])
+        previous["ticket_changes"] = changes
+    added = changes["added"] if changes else []
+    repairs = _repair_records(fdir, cand, added)
+    findings = ((previous.get("receipt") or {}).get("findings") or []) if previous else []
+    known_findings = {finding["id"] for finding in findings}
+    for repair in repairs:
+        unknown = sorted(set(repair["review_findings"]) - known_findings)
+        if unknown:
+            raise InputError(f"{repair['issue']} review-findings 引用上轮未知 finding：" + ", ".join(unknown))
+    closure_rows = []
+    for finding in sorted(findings, key=lambda item: item["id"]):
+        linked = [copy.deepcopy(repair) for repair in repairs
+                  if finding["id"] in repair["review_findings"]]
+        closure_rows.append({"finding": copy.deepcopy(finding), "repairs": linked})
+
+    if old and old.get("candidate") == cand.get("candidate") and old_handoff:
+        # A same-commit refreeze can still change spec/config/plan. Unchanged
+        # inputs retain the prior transition byte-for-byte; real changes compare
+        # with the immediately preceding freeze, not an older code candidate.
+        if old_handoff["inputs"] == current_inputs and isinstance(old_handoff.get("input_changes"), dict):
+            input_changes = copy.deepcopy(old_handoff["input_changes"])
+        else:
+            input_changes = _input_changes(current_inputs, {"inputs": old_handoff["inputs"]})
+    else:
+        input_changes = _input_changes(current_inputs, previous)
+    return {
+        "schema": REVIEW_HANDOFF_SCHEMA,
+        "purpose": "review-location-only",
+        "feature": cand.get("feature"), "round": cand.get("round"),
+        "integration_branch": cand.get("integration_branch"),
+        "candidate": _oid(cand.get("candidate"), "candidate"),
+        "candidate_tree": _oid(cand.get("candidate_tree"), "candidate_tree"),
+        "review_base": _review_base(cand),
+        "main_head": _oid(cand.get("main_head"), "candidate.main_head"),
+        "plan_sha256": (cand.get("acceptance_plan") or {}).get("sha256"),
+        "issues": copy.deepcopy(cand.get("issues") or []),
+        "diff": _diff_facts(repo, _review_base(cand), cand["candidate"]),
+        "inputs": current_inputs,
+        "input_changes": input_changes,
+        "previous": previous,
+        "repairs": repairs,
+        "closure_rows": closure_rows,
+    }
+
+
+def _atomic_freeze_artifacts(integ: Path, plan: dict, cand: dict, handoff: dict):
+    """Keep candidate/handoff untouched if any part of a freeze write fails."""
+    integ.mkdir(parents=True, exist_ok=True)
+    entries = ((integ / "acceptance-plan.json", plan),
+               (integ / "candidate.json", cand),
+               (integ / REVIEW_HANDOFF, handoff))
+    snapshots = {}
+    for path, _ in entries:
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise InputError(f"freeze 产物路径不是普通文件：{path}")
+        snapshots[path] = path.read_bytes() if path.exists() else None
+    try:
+        for path, value in entries:
+            _atomic_json(path, value)
+    except Exception as exc:
+        rollback_errors = []
+        for path, data in snapshots.items():
+            try:
+                if data is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    _module_state_store().atomic_write(path, data, mode=0o600)
+            except (OSError, ValueError) as rollback:
+                rollback_errors.append(f"{path}: {rollback}")
+        if rollback_errors:
+            raise InputError(f"freeze 写入失败且回滚不完整：{exc}；{'；'.join(rollback_errors)}")
+        if isinstance(exc, InputError):
+            raise
+        raise InputError(f"freeze 产物写入失败，已回滚：{exc}")
 
 
 # ---------- freeze ----------
@@ -723,7 +1365,8 @@ def freeze(args) -> Report:
 
     if rep.failed:
         return rep
-    old = load_json(integ / "candidate.json")
+    old = _json_object(integ / "candidate.json", missing={})
+    old_handoff = _load_old_handoff(integ, old)
     digest = sha256_file(plan_source(fdir))
     cand = {
         "schema": CANDIDATE_SCHEMA, "feature": artifact_scope.scope_key(fdir), "round": args.round,
@@ -752,13 +1395,12 @@ def freeze(args) -> Report:
         cand["review_merge_base"] = git(repo, "merge-base", stack_base["commit"], "HEAD").strip()
     if old.get("candidate_tree") and old["candidate_tree"] != tree:
         cand["supersedes"] = old["candidate_tree"]
-        rep.add("candidate", "PASS", f"新候选取代旧 tree {old['candidate_tree'][:8]}：旧证据与人工确认全部失效，按增量重跑")
+        rep.add("candidate", "PASS", f"新候选取代旧 tree {old['candidate_tree'][:8]}：旧证据与人工确认全部失效，新候选全部重跑")
     old_plan = (old.get("acceptance_plan") or {}).get("sha256")
     if old_plan and old_plan != digest:
         rep.add("plan", "PASS", "验收计划已换版：旧业务结果、人工确认与报告全部失效")
-    integ.mkdir(parents=True, exist_ok=True)
-    _atomic_json(integ / "acceptance-plan.json", plan)
-    _atomic_json(integ / "candidate.json", cand)
+    handoff = build_review_handoff(fdir, repo, integ, old, old_handoff, cand)
+    _atomic_freeze_artifacts(integ, plan, cand, handoff)
     rep.add("candidate", "PASS", f"已冻结 {branch}@{head[:8]} tree {tree[:8]}（{len(issues)} 票，{len(plan['cases'])} 条 AC，mode={mode}）")
     return rep
 
@@ -1246,6 +1888,17 @@ def render_report(fdir: Path, integ: Path, cand: dict, plan: dict) -> str:
         "本报告只说明验收事实与建议，不代替人的合并、发布或 push 授权。", "",
         "想细看：integration/evidence.md、business-results.json、acceptance-plan.json、artifacts/。", "",
     ]
+    timing_rows = phase_timing_summary(fdir, cand, cand.get("round"))
+    if timing_rows:
+        lines += ["", "## 阶段耗时", "",
+                  "| 阶段 | 状态 | 开始（RFC3339） | 结束（RFC3339） | 秒数 |",
+                  "|---|---|---|---|---:|"]
+        for row in timing_rows:
+            state = "已完成" if row["state"] == "finished" else "进行中（截至开始）"
+            lines.append("| %s | %s | %s | %s | %s |" % (
+                _md(row["phase"]), state, _md(row["started_at"]),
+                _md(row["ended_at"]), _phase_seconds_text(row["duration_seconds"])))
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -1920,8 +2573,13 @@ def record_merge(authorization, merge_result) -> Report:
 
 def _ticket_identity(fdir: Path, issue: Path, iid: str) -> dict:
     fm = read_frontmatter(issue)
+    # key 必须与 progress.load_issues 的构造一致（campaign 目录带 scope 前缀），
+    # 否则 apply_operation 用 key 复核 find_ticket 会失配并抛 StaleOperation。
+    key = issue.stem
+    if artifact_scope.campaign_id(fdir):
+        key = artifact_scope.scope_key(fdir) + "/" + key
     return {
-        "id": iid, "key": issue.stem, "title": str(fm.get("title") or iid), "status": "done",
+        "id": iid, "key": key, "title": str(fm.get("title") or iid), "status": "done",
         "feature": artifact_scope.scope_key(fdir), "feature_dir": str(fdir.resolve()),
         "issue_path": str(issue.resolve()), "fm": fm,
     }
@@ -2186,6 +2844,15 @@ def run_command_ac(args) -> Report:
             f"{args.ac} 实际 exit={record['actual_exit']}，generation={generation}，raw={artifact['path']}")
     return rep
 
+def phase_command(args) -> int:
+    event = record_phase(Path(args.feature_dir), Path(args.repo), args.phase, args.event,
+                         round=getattr(args, "round", None))
+    if args.json:
+        _atomic_json(Path(args.json), event)
+    print(json.dumps(event, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _emit(rep: Report, title: str, out) -> int:
     verdict = "FAIL" if rep.failed else "PASS"
     print(f"feature-closeout {title} → {verdict}")
@@ -2262,6 +2929,13 @@ def main(argv=None) -> int:
         if name == "run-ac":
             p.add_argument("--ac", required=True, help="冻结计划中的 command AC 编号")
             p.add_argument("--timeout", type=float, default=120.0)
+    pp = sub.add_parser("phase", help="记录当前 candidate 的阶段 start/finish 计时")
+    pp.add_argument("--feature-dir", required=True)
+    pp.add_argument("--repo", required=True, help="集成 worktree")
+    pp.add_argument("--phase", choices=list(PHASES), required=True)
+    pp.add_argument("--event", choices=["start", "finish"], required=True)
+    pp.add_argument("--round")
+    pp.add_argument("--json", help="事件 JSON 写入路径")
     pf = sub.add_parser("finalize", help="feature-merged 后转 done 并清理票/feature 资源")
     pf.add_argument("--feature-dir", required=True, help="主工作区 campaign 目录 dev/features/<module>/<feature>/campaigns/<campaign-id>；兼容历史 feature 根")
     pf.add_argument("--round", help="同一 feature 目录下的一轮需求名")
@@ -2275,6 +2949,8 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "target":
             return target(args)
+        if args.cmd == "phase":
+            return phase_command(args)
         if args.cmd == "validate-plan":
             rep = validate_plan(args)
         elif args.cmd == "report":

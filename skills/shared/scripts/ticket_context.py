@@ -191,6 +191,9 @@ def target_branch(config: Dict[str, Any], frontmatter: Dict[str, Any],
     if not isinstance(config, dict) or not isinstance(frontmatter, dict):
         raise ContextError("config and frontmatter must be mappings")
     explicit = frontmatter.get("target-branch")
+    if isinstance(explicit, dict) and not explicit:
+        # 空块（`target-branch:` 被某些解析器映射成 {}）不是分支名，按未写处理
+        explicit = None
     if explicit is not None and str(explicit).strip():
         branch = str(explicit).strip()
     else:

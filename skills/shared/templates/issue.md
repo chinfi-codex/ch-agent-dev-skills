@@ -6,6 +6,7 @@ campaign-id: <campaign-id>
 issue-id: issue-001
 title: <一句话标题，动词开头>
 type: feature         # feature / bug；bug 票须做回归有效性验证（revert 修复见红），规则见 /implement Step 5
+review-findings: []    # 仅候选回修票：填上轮 receipt 的 finding id 列表，供 review-handoff 关联证据；首轮 / 普通票留空
 status: proposed        # proposed / confirmed / in-progress / in-review / mr-submitted / merged / needs-human / done / deferred / cancelled
 blocked-by: []          # 例如 [issue-001]；merged（已合入集成分支）或 done（feature 已验收）解锁下游
 target-branch:          # 可空：由 delivery start 通过 ticket_context 解析并冻结；local-human 不得指向 main

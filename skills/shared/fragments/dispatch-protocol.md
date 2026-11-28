@@ -8,8 +8,10 @@ dev 阶段的「派发」只依赖一个宿主无关原语：**主会话通过�
 
 ```bash
 python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md
-python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
+python3 ../shared/scripts/dispatch_config.py validate --host <当前宿主> --config ./dev/agents-config.md --catalog ./dev/dispatch-model-catalog.json
 ```
+
+执行时必须从当前会话确定宿主，显式传入 `--host`；仅校验该宿主的模型、effort、实时目录及原生角色。其他宿主目录缺失或模型不可用不阻塞当前宿主，不根据模型名称推断宿主。`agents_config.py validate` 是配置结构检查，不代表任一宿主的模型可用性已经验证。
 
 - **主会话监督**：取当前宿主 `supervisor-review`，用 `resolve --role supervisor` 核对实际 model / effort。配置写入不会 retroactively 切换现有会话，不符即停。
 - **开发实现**：普通票取 `development.default`；集成 / 高风险及评审预警后的续修取 `development.escalated`，用 `resolve --role development`。不得按测试范围路由。
@@ -39,7 +41,7 @@ python3 ../shared/scripts/dispatch_config.py validate --config ./dev/agents-conf
 - 未登记宿主先扩展 schema、实时目录与 adapter，不得拿其他宿主模型名凑合。
 - frontmatter 中的 `Task` 是 Claude Code 命名；其他宿主映射为自身派发工具，协议语义不变。
 - 宿主完全没有独立对话能力时，主会话只能产出自包含提示词与 resolve 结果，请人在对应模型的新对话启动；无法确认实际模型不得开工，也不得在主会话顺便实现。评审没有独立环境时同样停止，绝不自评。
-- feature 复审优先续接原评审对话，输入为新 candidate 范围、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。跨 feature 一律新开。票级不再发起独立评审。
+- feature 复审优先续接原评审对话，输入为新 candidate 范围、同目录 `review-handoff.json`、上轮报告与 receipt；续接不得改变 supervisor-review 模型 / effort。handoff 的增量与闭合线索只安排检查顺序，完整 feature diff、全部规定输入与本轮独立判断不缩减。跨 feature 一律新开。票级不再发起独立评审。
 - 宿主能力由 `host_adapters.py` 区分 available / unavailable / unknown。配置里写了能力不等于实际可用；评审定稿先 `write_review_binding` 通过宿主原生接口附着本次 issue / round / head / tree / report 绑定，再 `verify_review_session` 实时重读。`host-probes.json` 只保存写回执供对账，单独文件或 capability bool 不构成证明。浏览器不可用时 AC 记 unverified 或转人工，session 活性 unknown 时禁止删除其 worktree。
 
 ### 清场触发与统一入口

@@ -76,7 +76,7 @@ allowed-tools:
 
 按模板落盘（写作前必须先读对应模板）：
 
-- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`），顶层 `schema-version: 2`。写完立即运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，再运行 `dispatch_config.py validate --catalog ./dev/dispatch-model-catalog.json`；任何旧字段、未知字段或非法模式组合都必须修正，不能带入后续流程
+- `./dev/agents-config.md`：按 `shared/templates/agents-config.md`（相对本 SKILL.md 为 `../shared/templates/agents-config.md`），顶层 `schema-version: 2`。写完立即运行 `python3 ../shared/scripts/agents_config.py validate --config ./dev/agents-config.md`，再运行 `dispatch_config.py validate --host <当前宿主> --catalog ./dev/dispatch-model-catalog.json`；任何旧字段、未知字段或非法模式组合都必须修正，不能带入后续流程
 - 按已确认宿主生成原生角色：`python3 ../shared/scripts/dispatch_config.py render --config ./dev/agents-config.md --host <宿主> --output <.claude|.codex|.zcode>`；渲染器拒绝覆盖已有不同文件时先展示差异并请人确认，不强行覆盖。DSH 先用 `--dsh-profile <headless|desktop>` 渲染到临时目录，再只把主模型、完整 `tool-subagent` config 与 `allowedModels` 合并进人确认的目标 profile：headless 新增白名单插件必须使用 `- insert:`，已有 config 按整体替换处理；不动其他 profile，新建 DSH 会话才采样子代理白名单
 - `.gitignore` 追加 `.worktrees/` 与 `dev/`（已存在则跳过）；探查发现 dev/ 已被 git 跟踪 → 显式警示并建议 `git rm -r --cached dev/` 出库（dev/ 不入库是 worktree dev/ 软链约定的前提；入库会让每个 worktree 自带完整副本）
 - **仅当 ocr.mode = ci 时**：

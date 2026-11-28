@@ -609,6 +609,11 @@ def _run_tasks(*, issue_id, runner, base, repo, impl_dir, tasks, timeout, config
     """Execute frozen tasks in *repo* and persist one self-contained generation."""
     before = _snapshot(repo)
     document = _new_document(issue_id, runner, base, before, identity)
+    if candidate_flow is not None:
+        try:
+            document["candidate_flow"] = json.loads(candidate_flow)
+        except (TypeError, ValueError) as exc:
+            raise VerificationError("candidate flow binding is not valid JSON: %s" % exc)
     auxiliary_documents = {}
     if prepare is not None:
         prepare(document, auxiliary_documents)
@@ -1120,7 +1125,8 @@ def _task_sequence_errors(records, tasks, repo: Path):
 
 def validate_verification(document, document_path: Path, repo: Path,
                           expected_runner=None, expected_issue=None, require_fast=True,
-                          expected_tasks=None):
+                          expected_tasks=None, expected_candidate_flow=None,
+                          expected_identity=None):
     """Return validation errors; never trust the supplied top-level pass bit."""
     repo = Path(repo).resolve()
     document_path = Path(document_path).resolve()
@@ -1156,6 +1162,17 @@ def validate_verification(document, document_path: Path, repo: Path,
             errors.append("cannot reconcile frozen DoD/fast commands: %s" % exc)
     if require_fast and not any(r["kind"] == "fast" for r in document["records"]):
         errors.append("fast execution record is missing")
+    if expected_candidate_flow is not None:
+        if document.get("candidate_flow") != expected_candidate_flow:
+            errors.append("candidate flow binding differs from the frozen candidate bytes/context")
+        if document.get("identity") != expected_identity:
+            errors.append("supervisor identity differs from the requested candidate run")
+        tasks_by_id = {task["id"]: task for task in (expected_tasks or [])}
+        for record in document["records"]:
+            task_id = str(record.get("id") or "").split(":load-flake-retry", 1)[0]
+            task = tasks_by_id.get(task_id)
+            if task is not None and record.get("environment") != _environment(task):
+                errors.append("%s execution environment differs from the current candidate run" % task_id)
     ids = set()
     document_generation = None
     if require_fast:
@@ -1329,7 +1346,7 @@ def _candidate_entry(issue_id: str):
 
 
 def _candidate_entry_from_evidence(issue_id, path, repo, candidate_oid, candidate_tree,
-                                   base_dir, tasks):
+                                   base_dir, tasks, expected_flow=None, identity=None):
     """Read back one real verification and trust it only after full validation."""
     entry = _candidate_entry(issue_id)
     if not path.is_file():
@@ -1346,7 +1363,9 @@ def _candidate_entry_from_evidence(issue_id, path, repo, candidate_oid, candidat
     entry["head"] = document.get("head") if isinstance(document.get("head"), str) else None
     entry["tree"] = document.get("tree") if isinstance(document.get("tree"), str) else None
     errors = validate_verification(document, path, repo, expected_runner="supervisor",
-                                   expected_issue=issue_id, expected_tasks=tasks)
+                                   expected_issue=issue_id, expected_tasks=tasks,
+                                   expected_candidate_flow=expected_flow,
+                                   expected_identity=identity)
     if errors:
         return entry, "; ".join(errors)
     if document.get("pass") is not True:
@@ -1357,15 +1376,100 @@ def _candidate_entry_from_evidence(issue_id, path, repo, candidate_oid, candidat
     return entry, ""
 
 
+def _candidate_flow(candidate_path, candidate_sha, issue_id, frozen, plan_sha):
+    return {
+        "candidate_path": str(candidate_path), "candidate_sha256": candidate_sha,
+        "issue_id": issue_id, "candidate": frozen["candidate"],
+        "candidate_tree": frozen["candidate_tree"], "main_head": frozen["main_head"],
+        "plan_sha256": plan_sha,
+    }
+
+
+def _candidate_phase(feature_dir, repo, frozen, action):
+    """Best-effort timing must never change a real verification verdict."""
+    try:
+        closeout = _sibling("feature_closeout")
+    except (ImportError, OSError, ValueError) as exc:
+        print("verify-issue run-candidate: phase timing unavailable (%s); verification continues" % exc,
+              file=sys.stderr)
+        return
+    try:
+        closeout.record_phase(feature_dir, repo, "candidate-verification", action,
+                              round=frozen.get("round"))
+    except (closeout.InputError, ImportError, OSError, ValueError) as exc:
+        print("verify-issue run-candidate: phase timing unavailable (%s); verification continues" % exc,
+              file=sys.stderr)
+
+
+def _candidate_prior(base_dir: Path, frozen, plan_sha, output_dir):
+    """Locate only the standard aggregate for this exact frozen candidate."""
+    if output_dir:
+        return None, None
+    path = base_dir / "candidate-verification.json"
+    if not path.is_file() or path.is_symlink():
+        return None, None
+    try:
+        previous = json.loads(path.read_bytes())
+        if not isinstance(previous, dict):
+            return None, None
+        if _sibling("json_schema").load_validate(CANDIDATE_SCHEMA_PATH, previous):
+            return None, None
+    except (ImportError, OSError, UnicodeError, ValueError):
+        return None, None
+    if any(previous.get(key) != value for key, value in (
+            ("schema", CANDIDATE_SCHEMA), ("candidate", frozen["candidate"]),
+            ("candidate_tree", frozen["candidate_tree"]),
+            ("main_head", frozen["main_head"]), ("plan_sha256", plan_sha))):
+        return None, None
+    generation = previous.get("generated")
+    if (not isinstance(generation, str) or Path(generation).name != generation
+            or generation in ("", ".", "..") or not re.fullmatch(r"[A-Za-z0-9_.-]+", generation)):
+        return None, None
+    output = (base_dir / "raw" / generation).resolve()
+    if output.parent != (base_dir / "raw").resolve() or not output.is_dir() or output.is_symlink():
+        return None, None
+    return previous, output
+
+
+def _candidate_reuse_entry(previous, output, issue_id, tasks, repo, frozen, base_dir,
+                           expected_flow, identity):
+    """Return a prior entry only after recomputing its complete evidence chain."""
+    if not isinstance(previous, dict) or output is None:
+        return None, "no prior candidate generation"
+    entries = previous.get("issues") or []
+    matches = [item for item in entries if isinstance(item, dict) and item.get("issue") == issue_id]
+    if len(matches) != 1 or len(entries) != len(frozen["issues"]):
+        return None, "prior candidate ticket set is incomplete or ambiguous"
+    old = matches[0]
+    if not old.get("pass"):
+        return None, "prior ticket verification did not pass"
+    path = output / issue_id / "verification-supervisor.json"
+    expected_relative = _candidate_relative(base_dir, path)
+    if old.get("verification_path") != expected_relative:
+        return None, "prior verification path differs from its candidate generation"
+    try:
+        if not path.is_file() or path.is_symlink() or _sha(path) != old.get("verification_sha256"):
+            return None, "prior verification missing, symlinked or hash-mismatched"
+    except OSError as exc:
+        return None, "prior verification unreadable: %s" % exc
+    entry, error = _candidate_entry_from_evidence(
+        issue_id, path, repo, frozen["candidate"], frozen["candidate_tree"], base_dir, tasks,
+        expected_flow=expected_flow, identity=identity)
+    if error:
+        return None, error
+    if entry != old:
+        return None, "prior aggregate entry differs from revalidated evidence"
+    return entry, ""
+
+
 def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
                   identity_json=None, host=None, agent=None, session=None,
-                  model=None, effort=None, tier=None, args=None) -> dict:
-    """Re-run every candidate ticket's frozen DoD+fast at the candidate HEAD.
+                  model=None, effort=None, tier=None, resume=False, args=None) -> dict:
+    """Run every frozen ticket at one candidate, with exact-candidate recovery.
 
-    Ticket ``ticket-context.json`` files stay in the main workspace ``impl/``
-    tree; per-ticket supervisor evidence and raw logs are written under
-    ``output_dir/<issue>/`` so ticket-level implementer manifests are untouched.
-    The aggregate ``candidate-verification.json`` is written next to candidate.
+    A complete prior aggregate is returned only after every ticket's raw evidence,
+    frozen context, environment, candidate bytes and supervisor identity revalidate.
+    ``resume`` reuses each passing ticket independently and re-runs all others.
     """
     if isinstance(candidate, argparse.Namespace) and repo is None:
         args, candidate = candidate, None
@@ -1382,8 +1486,11 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
         model = model if model is not None else getattr(args, "model", None)
         effort = effort if effort is not None else getattr(args, "effort", None)
         tier = tier if tier is not None else getattr(args, "tier", None)
+        resume = bool(getattr(args, "resume", resume))
     if candidate is None or repo is None:
         raise VerificationError("run_candidate requires candidate and repo")
+    if resume and output_dir:
+        raise VerificationError("--resume uses the standard candidate generation; do not combine --output-dir")
     candidate_path = Path(candidate).resolve()
     repo = Path(repo).resolve()
     feature_dir, _integration_dir = _candidate_location(candidate_path)
@@ -1393,8 +1500,10 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
         raise VerificationError("cannot read candidate %s: %s" % (candidate_path, exc)) from exc
     frozen, plan_sha = _candidate_document(candidate_path, candidate_bytes)
     candidate_sha = hashlib.sha256(candidate_bytes).hexdigest()
-    output = _candidate_output_dir(candidate_path, frozen["candidate"], output_dir)
     base_dir = candidate_path.parent
+    previous, prior_output = _candidate_prior(base_dir, frozen, plan_sha, output_dir)
+    output = prior_output if resume and prior_output is not None else _candidate_output_dir(
+        candidate_path, frozen["candidate"], output_dir)
     identity_args = argparse.Namespace(
         identity_json=identity_json, host=host, agent=agent, session=session,
         model=model, effort=effort, tier=tier)
@@ -1407,12 +1516,41 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
     repo_error = _candidate_repo_error(repo, frozen)
     if repo_error:
         print("verify-issue run-candidate: %s" % repo_error, file=sys.stderr)
+    complete_prior = bool(previous and previous.get("all-passed") is True)
+    _candidate_phase(feature_dir, repo, frozen, "start")
+    if complete_prior and not resume:
+        try:
+            revalidated = []
+            for item in frozen["issues"]:
+                issue_id = item["id"]
+                if repo_error or root is None:
+                    raise VerificationError(repo_error or "cannot locate project root")
+                context, config = _candidate_context(feature_dir, root, issue_id)
+                tasks = verification_tasks({"frontmatter": {}, "dod": context["dod"]},
+                                           context, config, root)
+                flow = _candidate_flow(candidate_path, candidate_sha, issue_id, frozen, plan_sha)
+                entry, error = _candidate_reuse_entry(
+                    previous, prior_output, issue_id, tasks, repo, frozen, base_dir, flow, identity)
+                if error:
+                    raise VerificationError("%s: %s" % (issue_id, error))
+                revalidated.append(entry)
+            if len(revalidated) != len(frozen["issues"]):
+                raise VerificationError("candidate ticket coverage changed during revalidation")
+            print("verify-issue run-candidate: exact candidate evidence revalidated; no commands re-executed")
+            _candidate_phase(feature_dir, repo, frozen, "finish")
+            return previous
+        except (VerificationError, ImportError, OSError, ValueError) as exc:
+            print("verify-issue run-candidate: prior evidence not reusable; fresh full run (%s)" % exc,
+                  file=sys.stderr)
+        complete_prior = False
     entries = []
+    reused = 0
     for item in frozen["issues"]:
         issue_id = item["id"]
         entry = _candidate_entry(issue_id)
         entries.append(entry)
         if repo_error or root is None:
+            complete_prior = False
             continue
         try:
             context, config = _candidate_context(feature_dir, root, issue_id)
@@ -1421,17 +1559,26 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
             if not tasks:
                 raise VerificationError("ticket %s has no verification tasks" % issue_id)
             issue_dir = output / issue_id
-            candidate_flow = json.dumps({
-                "candidate_path": str(candidate_path), "candidate_sha256": candidate_sha,
-                "issue_id": issue_id,
-            })
+            flow = _candidate_flow(candidate_path, candidate_sha, issue_id, frozen, plan_sha)
+            candidate_flow = json.dumps(flow, sort_keys=True)
+            if resume and previous is not None:
+                reused_entry, reuse_error = _candidate_reuse_entry(
+                    previous, prior_output, issue_id, tasks, repo, frozen, base_dir, flow, identity)
+                if reused_entry is not None:
+                    entries[-1] = reused_entry
+                    reused += 1
+                    print("verify-issue run-candidate %s: revalidated existing evidence" % issue_id)
+                    continue
+                print("verify-issue run-candidate %s: re-run (%s)" % (issue_id, reuse_error),
+                      file=sys.stderr)
             _run_tasks(issue_id=issue_id, runner="supervisor", base=context["base"],
                        repo=repo, impl_dir=issue_dir, tasks=tasks, timeout=timeout,
                        config=config, root=root, identity=identity, candidate_flow=candidate_flow)
             state_error = _candidate_repo_error(repo, frozen)
             entry, error = _candidate_entry_from_evidence(
                 issue_id, issue_dir / "verification-supervisor.json", repo,
-                frozen["candidate"], frozen["candidate_tree"], base_dir, tasks)
+                frozen["candidate"], frozen["candidate_tree"], base_dir, tasks,
+                expected_flow=flow, identity=identity)
             if state_error:
                 entry["pass"] = False
                 error = state_error
@@ -1440,9 +1587,17 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
             if error:
                 print("verify-issue run-candidate %s: %s" % (issue_id, error), file=sys.stderr)
         except Exception as exc:
+            complete_prior = False
             # A ticket that cannot execute must fail the aggregate, never abort
             # evidence collection for the remaining candidate tickets.
             print("verify-issue run-candidate %s: %s" % (issue_id, exc), file=sys.stderr)
+    if complete_prior and previous is not None and reused == len(frozen["issues"]):
+        print("verify-issue run-candidate: exact candidate evidence revalidated; no commands re-executed")
+        _candidate_phase(feature_dir, repo, frozen, "finish")
+        return previous
+    if resume:
+        print("verify-issue run-candidate: resumed %d ticket(s), re-executed %d" % (
+            reused, len(frozen["issues"]) - reused))
     aggregate = {
         "schema": CANDIDATE_SCHEMA,
         "candidate": frozen["candidate"],
@@ -1474,6 +1629,7 @@ def run_candidate(candidate=None, repo=None, output_dir=None, timeout=120.0, *,
         raise VerificationError("candidate verification schema validation failed:\n  "
                                 + "\n  ".join(schema_errors))
     _write_json(base_dir / "candidate-verification.json", aggregate)
+    _candidate_phase(feature_dir, repo, frozen, "finish")
     return aggregate
 
 
@@ -1505,6 +1661,8 @@ def main(argv=None) -> int:
     candidate_p.add_argument("--repo", required=True)
     candidate_p.add_argument("--output-dir")
     candidate_p.add_argument("--timeout", type=float, default=120.0)
+    candidate_p.add_argument("--resume", action="store_true",
+                             help="复验同 candidate 的通过票，只补跑缺失/失败票；不跨候选复用")
     _add_identity_arguments(candidate_p)
 
     red_p = sub.add_parser("red", parents=[common])
@@ -1533,7 +1691,8 @@ def main(argv=None) -> int:
             document = run_candidate(
                 args.candidate, args.repo, output_dir=args.output_dir, timeout=args.timeout,
                 identity_json=args.identity_json, host=args.host, agent=args.agent,
-                session=args.session, model=args.model, effort=args.effort, tier=args.tier)
+                session=args.session, model=args.model, effort=args.effort, tier=args.tier,
+                resume=args.resume)
         elif args.command_name == "red":
             document = red_verification(args)
         else:

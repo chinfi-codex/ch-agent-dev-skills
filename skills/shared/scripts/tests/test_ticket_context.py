@@ -283,6 +283,13 @@ class TicketContextTest(unittest.TestCase):
         for mode in ("server-enforced", "cooperative-ci"):
             config["feature-closeout"]["mode"] = mode
             self.assertEqual(tc.target_branch(config, fm), "main")
+        config["feature-closeout"]["mode"] = "local-human"
+        fm["target-branch"] = {}
+        # 空块按未写处理：created 早于 since 时回落 main
+        self.assertEqual(tc.target_branch(config, fm), "main")
+        fm["created"] = "2026-11-14"
+        self.assertEqual(tc.target_branch(config, fm, self.feature), "feat/demo")
+        fm["created"] = "2026-10-01"
         fm["target-branch"] = "../bad"
         with self.assertRaisesRegex(tc.ContextError, "invalid target"):
             tc.target_branch(config, fm)
