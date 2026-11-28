@@ -54,7 +54,7 @@ confirmed → delivery start → TDD + runner evidence → process_check --phase
 → merged → done + accepted + 清理
 ```
 
-CI / PR 模式仍按 provider MR/PR 流程交付，但同样不在票级发起独立评审；feature 级评审、复跑与符合性仍统一在候选上执行。PR 模式由主会话/用户按 campaign 授权推送并建 PR，实现者不 push。
+CI 模式仍按 provider MR 流程交付，但同样不在票级发起独立评审；feature 级评审、复跑与符合性仍统一在候选上执行。`pr` 模式的票级交付与 local-human 相同，PR 只在需求收口时由主会话/用户按 campaign 授权推送集成分支并创建，实现者不 push。
 
 ## 启动前校验（不过则不动代码）
 
@@ -144,7 +144,7 @@ python3 ../shared/scripts/delivery.py start --issue <主工作区票文件> --re
    ```
    它只核票级事实：context/scope/deny、票粒度、见红与既有测试修改映射、生成物、worktree dev 软链、预算、manifest、bug regression、活动 decision、implementer verification。失败则修复或重新拆票。票级不做架构检查。
 2. 票级不再要求独立评审、review receipt、supervisor 复跑或 conformance。票级 tech-spec 覆盖矩阵仍写 impl-log，供 feature 级统一核对。
-3. GitLab / server-enforced 模式按 provider 要求 push 并建 ready MR，然后按 Progress Events 契约写 `mr-submitted`；`pr` 模式实现者不 push，由主会话/用户按 campaign 授权推送并建 PR，实现者停在 MR/PR ready；local-human 不创建独立 MR，保持 `in-progress`，等待主会话合入集成分支。
+3. GitLab / server-enforced 模式按 provider 要求 push 并建 ready MR，然后按 Progress Events 契约写 `mr-submitted`；local-human 与 `pr` 模式不创建独立 MR，保持 `in-progress`，等待主会话合入集成分支（`pr` 模式的 PR 在需求收口时才由主会话/用户按 campaign 授权推送并创建，实现者不 push）。
 4. 交付前核对：票 worktree 与集成分支工作区均 clean；ticket context / HEAD / tree 与 verification 完全一致；没有手工 all-passed。
 
 ## Step 7：合入集成分支与后续 feature 候选

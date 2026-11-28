@@ -52,20 +52,21 @@
 
 ### 需求收口（pr 模式）
 
-用于 remote 执行面：本地候选验证与 `local-human` 完全相同，只把“合 main”换成“用户在 Gitea 合并 PR”。CI 可全停，PR 不以状态检查为门。
+`feature-closeout.mode=pr` 与 local-human 共用候选门，只把「合 main」换成用户在 Gitea 合并 PR：第 1–7 步原样执行，第 8 步只做人工 AC 实测 / 复核 / 豁免与最终报告，不写 confirmation.md（人在 Gitea 合并 PR 即为合并决定）。`ci` 为 null，PR 不以状态检查为门。以下从第 8 步之后接着执行：
 
-1. **前置**：全票 merged/done；按 local-human 的第 1–8 步完成 freeze、整需求独立评审、候选 supervisor 复跑、compliance/conformance、自动 AC、`report` 与 `check --phase verify --record`。任一失败不得进入 PR。
-2. **推送**：按 campaign 授权把票/集成分支推到主仓；实现子 agent 不 push。
-3. **建 PR**：用户在 Gitea 建 PR（或用 API），记录 `integration/pr.json`：`number / head_sha / head_tree / base / merge_commit / strategy(merge|squash) / merged / merged_by / merged_at / provider / repository`。不得记录 token。
-4. **用户合并**：用户在 Gitea 合并；本地 `git fetch` 并 checkout `main`，主工作区 HEAD 必须是该 PR 的 `merge_commit`。
-5. **PR 证据门**：`feature_closeout.py check --phase merge --main-repo <主工作区>` 核 `head_sha/head_tree` 等于候选、`merge_commit` tree 等于候选 tree、merge/squash 父提交关系正确；缺失或不一致即 FAIL。
+1. **推送**：全部票 merged/done、候选门与人工 AC 全部通过后，主会话取得 campaign 授权再把集成分支推到主仓；实现子 agent 不 push。
+2. **建 PR**：用户在 Gitea 建 PR（head = 集成分支，base = main-branch），在 `integration/pr.json` 记录 `provider / repository / number / base / head_sha / head_tree`，字段须与配置和冻结候选一致。不得记录 token。
+3. **合并前核对**：主会话确认远端 main 仍停在 candidate.main_head；已前进则先不合并，回 local-human 第 2 步同步、重新 freeze 并重跑全部门。
+4. **用户合并**：用户在 Gitea 合并（merge 或 squash），补齐 pr.json 的 `merge_commit / strategy / merged / merged_by / merged_at`；本地 `git fetch` 并 checkout main，主工作区 HEAD 必须是 `merge_commit`。
+5. **PR 证据门**：`feature_closeout.py check --phase merge --main-repo <主工作区>` 核 `provider / repository / base` 与配置一致、`head_sha / head_tree` 等于候选、主工作区 main 停在 `merge_commit`、merge commit tree 等于候选 tree、merge / squash 父提交关系正确；缺失或不一致即 FAIL。
 6. **登记合并**：
    ```bash
    python3 ../shared/scripts/delivery.py promote \
      --candidate <integration/candidate.json> --candidate-repo <集成 worktree> --repo <主工作区>
    ```
-   pr 模式不本地合并、不移动 ref，只校验 PR 证据并写 `feature-merged`；随后 `feature_closeout.py finalize`。
-7. **发布**：远端分支删除、部署、Prod 均另行授权；CI 未启用时不得声称有状态检查。
+   pr 模式不本地合并、不移动 ref，只校验 PR 证据并写 `feature-merged`；重复执行幂等。
+7. **关账**：同 local-human 第 10 步执行 `feature_closeout.py finalize`。
+8. **发布**：远端分支删除、部署、Prod 均另行授权；CI 未启用时不得声称有状态检查。
 
 ### 无人值守模式（人离场自动跑）
 
