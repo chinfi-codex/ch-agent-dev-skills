@@ -100,10 +100,15 @@ def validate(config: dict, catalogs: dict | None = None, *, host: str | None = N
     for host, raw_host in hosts.items():
         path = f"dispatch.hosts.{host}"
         host_config = _mapping(raw_host, path)
-        _keys(host_config, {"supervisor-review", "development", "native_session_command"}, path)
-        if set(host_config) - {"native_session_command"} != {"supervisor-review", "development"}:
+        _keys(host_config, {"supervisor-review", "supervisor", "development", "native_session_command"}, path)
+        if not {"supervisor-review", "development"} <= set(host_config):
             raise ConfigError(f"{path} 必须同时配置 supervisor-review 与 development")
         supervisor = _route(host_config["supervisor-review"], host, f"{path}.supervisor-review")
+        main_route = None
+        if "supervisor" in host_config:
+            if host != "codex":
+                raise ConfigError(f"{path}.supervisor 仅用于 Codex 主会话")
+            main_route = _route(host_config["supervisor"], host, f"{path}.supervisor")
         raw_development = _mapping(host_config["development"], f"{path}.development")
         _keys(raw_development, set(TIERS), f"{path}.development")
         if set(raw_development) != set(TIERS):
@@ -112,7 +117,10 @@ def validate(config: dict, catalogs: dict | None = None, *, host: str | None = N
             tier: _route(raw_development[tier], host, f"{path}.development.{tier}")
             for tier in TIERS
         }
-        for role, route in [("supervisor-review", supervisor), *development.items()]:
+        routes = {"supervisor-review": supervisor, **development}
+        if main_route is not None:
+            routes["supervisor"] = main_route
+        for role, route in routes.items():
             if catalogs is None:
                 continue
             host_catalog = _mapping(catalogs.get(host), f"catalogs.{host}")
@@ -122,6 +130,8 @@ def validate(config: dict, catalogs: dict | None = None, *, host: str | None = N
             if route["effort"] not in efforts:
                 raise ConfigError(f"{host}/{route['model']} 不支持 effort={route['effort']}（{role}）")
         validated["hosts"][host] = {"supervisor-review": supervisor, "development": development}
+        if main_route is not None:
+            validated["hosts"][host]["supervisor"] = main_route
         native_command = host_config.get("native_session_command")
         if native_command is not None:
             if host != "dsh":
@@ -149,6 +159,8 @@ def resolve(dispatch: dict, host: str, role: str, tier: str = "default") -> dict
         raise ConfigError(f"未知开发档位: {tier}")
     host_config = dispatch["hosts"][host]
     config_role = "development" if role == "development" else "supervisor-review"
+    if role == "supervisor" and "supervisor" in host_config:
+        config_role = "supervisor"
     route = host_config[config_role][tier] if role == "development" else host_config[config_role]
     context = "current-session" if role == "supervisor" else "independent-subagent"
     result = {
@@ -227,7 +239,8 @@ def render(dispatch: dict, host: str, dsh_profile: str = "headless") -> dict[str
             ) + "\n"
         return files
     if host == "codex":
-        config = [f'model = "{supervisor["model"]}"', f'model_reasoning_effort = "{supervisor["effort"]}"', ""]
+        main_route = host_config.get("supervisor", supervisor)
+        config = [f'model = "{main_route["model"]}"', f'model_reasoning_effort = "{main_route["effort"]}"', ""]
         files = {}
         for name, route in routes.items():
             config.extend([

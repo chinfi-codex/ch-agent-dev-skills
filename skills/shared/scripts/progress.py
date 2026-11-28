@@ -1923,7 +1923,8 @@ def cleanup_plan(repo, branch=None, issue=None, feature_dir=None, intent="close"
                 "reason": "需要可唯一归属的 issue 或 feature-dir"}
     plan = pc.make_plan(repo, ticket=ticket, intent=intent,
                         operation_id=operation_id, authorize=False)
-    if plan.get("eligible") and plan.get("branch"):
+    # release 只删 worktree、branch 保留，在途子票不受影响，无需后代延展检查。
+    if plan.get("eligible") and plan.get("branch") and intent != "release-worktree":
         main = detect_main_branch(repo)
         branches = collect_branches(repo, main, inspect=False) if main else {}
         tix_multi = {}
@@ -2150,13 +2151,13 @@ def main():
     p10.add_argument("--api-key", help="API Key（缺省读环境变量；优先用环境变量传密钥）")
     p10.set_defaults(func=summary_command)
 
-    p7 = sub.add_parser("close-and-clean", help="授权收尾/丢弃清理：默认 preview；apply 需 operation-id + confirm")
+    p7 = sub.add_parser("close-and-clean", help="授权收尾/丢弃清理与 merged 票释放 worktree：默认 preview；apply 需 operation-id + confirm")
     p7.add_argument("--repo", help="仓库根目录（默认从当前目录向上找）")
     target = p7.add_mutually_exclusive_group(required=True)
     target.add_argument("--issue", help="票文件 stem 或票号")
     target.add_argument("--feature-dir", help="已 feature-merged 的主工作区需求目录")
     p7.add_argument("--round", help="--feature-dir 为多轮复用目录时指定本轮 round 名（与 freeze --round 一致）")
-    p7.add_argument("--intent", choices=["close", "discard"], default="close")
+    p7.add_argument("--intent", choices=["close", "discard", "release-worktree"], default="close")
     p7.add_argument("--apply", action="store_true", help="执行；缺省只 preview 并授权 journal")
     p7.add_argument("--operation-id", help="preview 返回的授权操作 ID")
     p7.add_argument("--confirm", help="preview 返回的完整状态确认指纹")

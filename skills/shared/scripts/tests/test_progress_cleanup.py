@@ -207,6 +207,87 @@ enforcement: {review-trust: operator-attested}
         self.assertIn("真实 done", plan["reason"])
         self.assertTrue(wt.exists())
 
+    def test_release_worktree_keeps_branch_dev_and_status(self):
+        branch, wt, _, _ = self.merged_worktree()
+        (wt / ".logs").mkdir()
+        (wt / ".logs" / "run.log").write_text("release salvage me\n")
+        plan = self.plan(status="merged", intent="release-worktree")
+        self.assertTrue(plan["eligible"], plan.get("reason"))
+        self.assertEqual(plan["intent"], "release-worktree")
+        self.assertFalse(plan["delete_branch"])
+        self.assertEqual(plan["branch"], branch)
+        import json_schema
+        errors = json_schema.load_validate(SCRIPT_DIR.parent / "references/cleanup-operation.schema.json", plan["_auth"])
+        self.assertEqual(errors, [])
+        result = self.apply(plan)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "completed")
+        self.assertFalse(wt.exists())
+        self.assertEqual(result["branch_deleted"], False)
+        self.assertEqual(result["branch_retained"], True)
+        self.assertTrue(self.git("rev-parse", "--verify", branch, check=False).returncode == 0)
+        salvage = Path(result["salvage_dir"])
+        self.assertTrue((salvage / "files/.logs/run.log").is_file())
+        # release 不触碰 dev 过程物、票状态，也不写 close-clean 事件
+        self.assertTrue((self.impl_dir / "old.orig").is_file())
+        self.assertIn("status: merged", (self.feature_dir / "issues" / "issue-001-sample.md").read_text())
+        events_path = self.feature_dir / "progress.jsonl"
+        events = [json.loads(line) for line in events_path.read_text().splitlines()] if events_path.exists() else []
+        self.assertEqual(sum(event["event"] == "close-clean" for event in events), 0)
+        journal = pc.OperationJournal.load(pc.operation_path(self.repo, plan["operation_id"]))
+        self.assertEqual(journal.state, "completed")
+        self.assertEqual([step["id"] for step in journal.steps], list(pc.RELEASE_STEPS))
+        # release 之后 finalize close 仍能删 branch + dev 过程物
+        close_plan = self.plan(status="done", intent="close")
+        self.assertTrue(close_plan["eligible"], close_plan.get("reason"))
+        close = self.apply(close_plan)
+        self.assertTrue(close["ok"], close)
+        self.assertTrue(close["branch_deleted"])
+        self.assertFalse((self.impl_dir / "old.orig").exists())
+
+    def test_release_worktree_gates_reject_done_and_unmerged(self):
+        branch, wt, _, _ = self.merged_worktree()
+        self.add_unmerged_commit(branch, wt)
+        plan = self.plan(status="merged", intent="release-worktree")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("merged 记录", plan["reason"])
+        self.assertTrue(wt.exists())
+        plan = self.plan(status="done", intent="release-worktree")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("只接受 merged", plan["reason"])
+        plan = self.plan(status="in-progress", intent="release-worktree")
+        self.assertFalse(plan["eligible"])
+        self.assertIn("只接受 merged", plan["reason"])
+
+    def test_release_worktree_nothing_to_release(self):
+        _, wt, _, _ = self.merged_worktree()
+        self.git("worktree", "remove", "--force", str(wt))
+        plan = self.plan(status="merged", intent="release-worktree")
+        self.assertTrue(plan["ok"])
+        self.assertFalse(plan["eligible"])
+        self.assertEqual(plan.get("state"), "nothing-to-release")
+
+    def test_release_worktree_cli_preview_apply(self):
+        branch, wt, _, _ = self.merged_worktree()
+        self.write_issue("issue-001", "merged")
+        (wt / ".logs").mkdir()
+        (wt / ".logs" / "cli.log").write_text("cli\n")
+        base = [sys.executable, "-I", str(SCRIPT_DIR / "progress.py"), "close-and-clean",
+                "--repo", str(self.repo), "--issue", "issue-001", "--intent", "release-worktree"]
+        preview = subprocess.run(base, capture_output=True, text=True)
+        self.assertEqual(preview.returncode, 0, preview.stderr + preview.stdout)
+        plan = json.loads(preview.stdout)
+        self.assertEqual(plan["intent"], "release-worktree")
+        self.assertTrue(plan["eligible"])
+        applied = subprocess.run(base + ["--apply", "--operation-id", plan["operation_id"],
+                                         "--confirm", plan["confirm"]],
+                                 capture_output=True, text=True)
+        self.assertEqual(applied.returncode, 0, applied.stderr + applied.stdout)
+        result = json.loads(applied.stdout)
+        self.assertEqual(result["state"], "completed")
+        self.assertFalse(wt.exists())
+        self.assertTrue(self.git("rev-parse", "--verify", branch, check=False).returncode == 0)
+
     def test_discard_saves_patch_then_defers_without_unlocking(self):
         branch, wt, _, _ = self.merged_worktree()
         self.add_unmerged_commit(branch, wt)

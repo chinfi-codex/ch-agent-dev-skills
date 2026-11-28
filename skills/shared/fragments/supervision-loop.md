@@ -9,12 +9,12 @@
 3. **跟踪**：成功结构化回报到达即写 returned。回报只提供分支、worktree、ticket context、verification、process-check-ticket、impl-log 和遗留线索，不作为成功依据。needs-human 不是成功回报。
 4. **票级收口**：
    - 实现会话已执行 `process_check.py --phase ticket`；主会话复核其 JSON、implementer verification、票 scope 和活动 decision，不重复发起独立评审、supervisor 复跑或 conformance。
-   - 只执行 `python3 ../shared/scripts/delivery.py merge --context <ticket-context.json>`。delivery 统一复核 target 未前进、票级门禁、implementer 证据与活动 decision，执行 no-ff 合并，写 `merged` 事件并**保留** worktree/branch。
+   - 只执行 `python3 ../shared/scripts/delivery.py merge --context <ticket-context.json>`。delivery 统一复核 target 未前进、票级门禁、implementer 证据与活动 decision，执行 no-ff 合并，写 `merged` 事件并**释放本票 worktree**（salvage 后删除，本地 branch 保留到 finalize）；释放失败不失败合并。
    - `merged` 解锁下游，但不计入需求验收完成；只有 feature finalize 写 `accepted` 后才把票置 `done`。
    - 不得另跑裸 git / glab merge、公开 record-merge，也不得在票级调用 close-and-clean。
 5. **CI 与晋级**：票级 merge 永远只核 DoD + fast，本机任何 worktree 不执行 full。server-enforced / cooperative-ci 由 `delivery.py promote` 经 CI API 核 run、artifact、ref、commit/tree、归因与外部能力；分支或 tree 前进即重新验证。server-enforced 能力未知即停，cooperative 输出必须注明无服务端强制。CI 不可用时保持未验证，不降级本机补跑。
 6. **打回**：票级 process-check、implementer runner 失败、输出矛盾或活动 decision → 不合并，verify-fails +1 并写 verify-fail。未达 2 时退回实现会话，修复后刷新受影响 DoD 并重跑票级门禁；达 2 时创建 human-decision，不再自动打回。feature 级评审 BLOCKER 另按需求收口处理。
-7. **推进与对账**：每轮先运行只读 `progress.py reconcile`，聚合 cleanup、delivery、human_decision 和 runtime 的真实状态。恢复时必须显式分类：`--kind cleanup --operation-id ...`、`--kind delivery --context ...` 或 feature 的 `--kind delivery --candidate-path ... --candidate-repo ...`、`--kind human_decision [--feature ...]` 或 `--kind runtime --operation-id ... --candidate ...`，并只在已有授权时加 `--apply`。完成票但仍有 worktree / ref / dev 残留时，在 feature finalize 统一处理；不从分支消失反推 merged。全部票 merged/done 后进入需求收口。
+7. **推进与对账**：每轮先运行只读 `progress.py reconcile`，聚合 cleanup、delivery、human_decision 和 runtime 的真实状态。恢复时必须显式分类：`--kind cleanup --operation-id ...`、`--kind delivery --context ...` 或 feature 的 `--kind delivery --candidate-path ... --candidate-repo ...`、`--kind human_decision [--feature ...]` 或 `--kind runtime --operation-id ... --candidate ...`，并只在已有授权时加 `--apply`。完成票但仍有 branch / ref / dev 残留时，在 feature finalize 统一处理；worktree 缺失是 merged 后的正常状态（合入即释放），不是任何事实的信号；不从分支消失反推 merged。全部票 merged/done 后进入需求收口。
 8. **每日 CI 记录（启用时）**：只读最新 run / verdict / proof 与 tree；清单外新失败已由 CI 二分到合入提交时开回修票并创建 human-decision，其他合入不暂停。漏跑只补触发同一 CI workflow；超期隔离项必须向人说明挂起时长、去向和建议。
 9. **唯一问人路径**：needs-human、阻塞、verify-fails 达 2、无法解决的冲突或其他越界问题，统一由主会话按 Human Decision 协议 present → answer → route-begin → 原生调用 → route-ack。子会话不直接问人；ack 前不改票，路由失败不盲目重派。其余自修复、复跑打回和未达标的验证不叫人。
 

@@ -196,7 +196,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "codex": {"$ref": "#/definitions/host-routes"},
+            "codex": {"$ref": "#/definitions/codex-host-routes"},
             "claude-code": {"$ref": "#/definitions/host-routes"},
             "zcode": {"$ref": "#/definitions/host-routes"},
             "dsh": {"$ref": "#/definitions/host-routes"}
@@ -288,6 +288,25 @@
       "properties": {
         "model": {"type": "string", "minLength": 1},
         "effort": {"enum": ["low", "medium", "high", "xhigh", "max", "ultra", "disabled", "enabled", "off"]}
+      }
+    },
+    "codex-host-routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supervisor-review", "development"],
+      "properties": {
+        "supervisor": {"$ref": "#/definitions/route"},
+        "supervisor-review": {"$ref": "#/definitions/route"},
+        "native_session_command": {"type": ["string", "null"], "minLength": 1},
+        "development": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "escalated"],
+          "properties": {
+            "default": {"$ref": "#/definitions/route"},
+            "escalated": {"$ref": "#/definitions/route"}
+          }
+        }
       }
     },
     "host-routes": {

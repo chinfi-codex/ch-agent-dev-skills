@@ -32,6 +32,6 @@
 
 ## 合并后动作（由主会话执行，无需人操作）
 
-- 主会话通过 `delivery.py merge` 完成票级门禁复核并合入集成分支，写 `merged` 并保留 worktree / branch；目标分支前进时先 `delivery.py rebase` 并重新生成验证。
+- 主会话通过 `delivery.py merge` 完成票级门禁复核并合入集成分支，写 `merged` 并释放本票 worktree（branch 保留）；目标分支前进时先 `delivery.py rebase` 并重新生成验证。
 - 全部票 merged/done 后进入 feature 收口；feature-merged 后由 `feature_closeout.py finalize` 写 accepted/done 并统一清理。
 - （后续 P4 验证 / P5 发布——当前 skill 不自动执行，push / Prod 需另行授权）

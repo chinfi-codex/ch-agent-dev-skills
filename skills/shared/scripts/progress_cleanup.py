@@ -30,6 +30,9 @@ SCHEMA = "agent-dev.cleanup-operation/v2"
 JOURNAL_SCHEMA = "agent-dev.operation-journal/v1"
 STATES = ("authorized", "quiesced", "salvaged", "accounted",
           "worktree-removed", "refs-updated", "dev-compacted", "completed")
+RELEASE_INTENT = "release-worktree"
+# release 只删 worktree：没有 ref 删除与 dev 压缩步骤，branch / dev 留给 finalize close。
+RELEASE_STEPS = ("authorized", "quiesced", "salvaged", "accounted", "worktree-removed")
 REPRO_DIRS = {
     ".git", "node_modules", ".venv", "venv", "__pycache__",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "dist", "build",
@@ -704,8 +707,8 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
     repo = Path(repo).resolve()
     if recovery_authorization is not None:
         return _plan_from_authorization(repo, recovery_authorization, operation_id)
-    if intent not in ("close", "discard"):
-        raise CleanupError("intent 必须是 close 或 discard", code="invalid-intent")
+    if intent not in ("close", "discard", RELEASE_INTENT):
+        raise CleanupError("intent 必须是 close、discard 或 release-worktree", code="invalid-intent")
     if (ticket is None) == (feature_dir is None):
         raise CleanupError("issue 与 feature-dir 必须且只能提供一个")
     if ticket is not None:
@@ -769,7 +772,17 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
                 raise CleanupError("存在 remote-only 分支；没有本地精确 upstream，禁止降级为 dev-only")
             if ticket.get("status") == "proposed":
                 raise CleanupError("proposed 尚未开工，不提供清理")
-            if intent == "close":
+            if intent == RELEASE_INTENT:
+                if ticket.get("status") != "merged":
+                    raise CleanupError("release-worktree 只接受 merged 票；done 用 close，中途开发用 discard")
+                proof = _merge_proof(repo, ticket, branch, branch_oid, target, target_oid)
+                if not proof:
+                    raise CleanupError("release-worktree 需要目标分支祖先关系或可验证的精确 merged 记录")
+                plan["merge_proof"] = proof
+                plan["merged_into"] = target
+                # merged ≠ done：释放只删 worktree，branch 与 dev 过程物留给 finalize close。
+                plan["delete_branch"] = False
+            elif intent == "close":
                 if ticket.get("status") != "done" or ticket.get("closed_as"):
                     raise CleanupError("普通 close 只接受真实 done 票；中途开发必须显式 intent=discard")
                 proof = _merge_proof(repo, ticket, branch, branch_oid, target, target_oid)
@@ -782,7 +795,7 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
                 if ticket.get("status") == "done" and not ticket.get("closed_as"):
                     raise CleanupError("done 票不能使用 discard 改写历史")
                 plan["delete_branch"] = bool(local)
-            if local:
+            if local and intent != RELEASE_INTENT:
                 refs.append(dict(local))
             patch_base = None
             if intent == "discard" and local:
@@ -837,19 +850,30 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
             analyses.append({"resource": dict(item), "analysis": analysis})
         if analyses:
             plan["worktree"] = analyses[0]["resource"]["path"]
-        dev = _analyze_dev_cleanup(subject["feature_dir"], ticket["id"] if ticket else None)
-        import artifact_gc
-        generations = artifact_gc.preview_generations(subject["feature_dir"])
-        known_dev_paths = {entry["abs"] for entry in dev["entries"]}
-        for artifact in generations["candidates"]:
-            if artifact["abs"] not in known_dev_paths:
-                dev["entries"].append({"abs": artifact["abs"], "path": artifact["path"],
-                                       "kind": "generation:" + artifact["kind"],
-                                       "size": artifact["size"], "sha256": artifact["sha256"]})
-                known_dev_paths.add(artifact["abs"])
-        dev["entries"].sort(key=lambda item: item["abs"])
-        plan["artifact_gc"] = {"files": generations["files"], "bytes": generations["bytes"],
-                               "protected": len(generations["protected"]), "warnings": generations["warnings"]}
+        if intent == RELEASE_INTENT and not analyses:
+            # 沙箱宿主或已释放：没有已登记 worktree 就没有可释放资源，
+            # branch / dev / 状态全部保留，也不写 journal。
+            plan.update(ok=True, eligible=False, state="nothing-to-release",
+                        reason="本票没有已登记 worktree（沙箱宿主或已释放）；branch 与 dev 过程物保留")
+            return plan
+        if intent == RELEASE_INTENT:
+            # 释放不触碰 dev/：票级中间物与代际 GC 仍由 finalize close 统一预检删除。
+            dev = {"entries": [], "skipped_referenced": 0}
+            plan["artifact_gc"] = {"files": 0, "bytes": 0, "protected": 0, "warnings": []}
+        else:
+            dev = _analyze_dev_cleanup(subject["feature_dir"], ticket["id"] if ticket else None)
+            import artifact_gc
+            generations = artifact_gc.preview_generations(subject["feature_dir"])
+            known_dev_paths = {entry["abs"] for entry in dev["entries"]}
+            for artifact in generations["candidates"]:
+                if artifact["abs"] not in known_dev_paths:
+                    dev["entries"].append({"abs": artifact["abs"], "path": artifact["path"],
+                                           "kind": "generation:" + artifact["kind"],
+                                           "size": artifact["size"], "sha256": artifact["sha256"]})
+                    known_dev_paths.add(artifact["abs"])
+            dev["entries"].sort(key=lambda item: item["abs"])
+            plan["artifact_gc"] = {"files": generations["files"], "bytes": generations["bytes"],
+                                   "protected": len(generations["protected"]), "warnings": generations["warnings"]}
         session_runtime = _session_runtime_state(repo, subject, worktrees)
         plan["session_runtime"] = session_runtime
         blockers = list(session_runtime["sessions"].get("blockers") or [])
@@ -882,7 +906,10 @@ def make_plan(repo, ticket=None, feature_dir=None, intent="close", operation_id=
         if refs and refs[0].get("upstream") and not refs[0].get("remote_delete"):
             plan["warnings"].append("上游不是可证明的精确远端 upstream；只处理本地 ref，远端保留并需关注")
         if analyses:
-            plan["will"].append("停止并核对活动会话/runtime，随后 salvage（含 .logs）并移除 worktree")
+            if intent == RELEASE_INTENT:
+                plan["will"].append("核对活动会话/runtime 后 salvage（含 .logs）并移除 worktree；本地分支保留到 finalize")
+            else:
+                plan["will"].append("停止并核对活动会话/runtime，随后 salvage（含 .logs）并移除 worktree")
         if refs:
             plan["will"].append("用 expected-old CAS 删除本地 ref；仅对 OID 不变的精确 upstream 删除远端")
         if dev["entries"]:
@@ -949,7 +976,8 @@ def authorize_plan(plan, operation_id=None):
     repo = plan["_repo"]
     operation_id = operation_id or plan.get("operation_id") or "cleanup-" + uuid.uuid4().hex
     path = operation_path(repo, operation_id)
-    journal = OperationJournal.create(path, operation_id, STATES[:-1])
+    steps = RELEASE_STEPS if plan.get("intent") == RELEASE_INTENT else STATES[:-1]
+    journal = OperationJournal.create(path, operation_id, steps)
     authorized = journal.steps[0]
     if authorized["status"] == "done":
         journal.advance("authorized", expected=plan["_auth"])
@@ -1421,6 +1449,11 @@ def _result(repo, journal, plan, warnings=None, error=None):
             result.update({key: step["observed"][key] for key in
                            ("dev_files_removed", "bytes_freed", "previous_status", "status")
                            if key in step["observed"]})
+    if plan.get("intent") == RELEASE_INTENT and plan.get("branch"):
+        # release 的 branch_deleted 按真实 ref 观察，而不是按空 refs 列表推断。
+        alive = _git(repo, "rev-parse", "--verify", "refs/heads/" + plan["branch"]).returncode == 0
+        result["branch_deleted"] = not alive
+        result["branch_retained"] = alive
     if error:
         result["error"] = str(error)
     return result

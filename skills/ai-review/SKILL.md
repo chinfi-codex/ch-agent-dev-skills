@@ -160,7 +160,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 - **可重下载的缓存不进 dev/**：安装包 / wheelhouse / keyring / 依赖缓存等官网可重下的内容，临时存放用完即删；确需留存只记版本号与获取命令
 - **merge 中间物即合即删**：`*.ours` / `*.theirs` / `*.orig` / merge-* 工作目录在合并提交后删除——git 历史可取回
 - **删除只能走 `close-and-clean` 预检与确认**：可再下载、字节级相同或明确属于已失效代际的内容才可删除；删除前后核对 Markdown / JSON 引用，最终 evidence、评审、确认记录与被引用捕获物不得为了压体积删除
-- 票合入集成分支后保留 worktree / branch，直到 feature `finalize` 统一 `merged → done` 并逐票 close-and-clean；历史 `done` 票可单独走 close-and-clean。`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
+- 票合入集成分支即释放 worktree：`delivery.py merge` 写 `merged` 事件后内置一次授权 `release-worktree` 清理（salvage `.logs` 等未收集物后删除 worktree；无已登记 worktree 即跳过）；本地 branch 与 dev 过程物保留，直到 feature `finalize` 统一 `merged → done` 并逐票 close-and-clean（删 branch + dev 过程物）；历史 `done` 票可单独走 close-and-clean。释放失败不失败合并，由 `reconcile --kind cleanup --apply` 恢复或 finalize 兜底。`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
 
 ## Dev 配置（agents-config v2）
 
@@ -199,6 +199,8 @@ dev 阶段开始工作前，先用 `agents_config.py validate --config ./dev/age
 - **feature 候选复跑在集成 worktree**：`verify_issue.py run-candidate` 对每票冻结 DoD + fast 真实执行一次，证据写 `integration/raw/<generation>/`，不覆盖票级 implementer manifest。与完整独立评审并行；同 candidate 重验通过可复用，`--resume` 只补缺失 / 失败 / 无效票，新 candidate 不跨代复用。
 - **local-human 需求级验证在本机候选环境**：`scoped_select.py` 关联选择集与单项归因经 `test_slots.py run` 包装；command / browser-agent AC 复用真实执行器和 generation 证据。direct 全跑，indirect 到预算停发并记 feature 级 deferred，不扩大为 full；宿主无浏览器能力时对应 AC 记 unverified 或转人工，不伪造通过。
 - **远端只承接 CI full**：已登记分支的 push 与同一 CI workflow 的定时 / 手工触发是唯一入口。`delivery.promote` 在线核对实际 run 与候选 tree；本机、票内和监督循环不得保存或伪造本地 full 判决。
+
+Codex 可选配置 `dispatch.hosts.codex.supervisor: {model, effort}`，单独指定主会话监督模型；省略时沿用 `supervisor-review`。独立评审仍使用 `supervisor-review`，开发仍使用 `development`。该字段不适用于其他宿主，整份配置与角色校验均须接受并校验此可选路由。
 
 ## ARCH-CHECK 规范与动作
 

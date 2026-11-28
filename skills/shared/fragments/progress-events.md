@@ -11,7 +11,7 @@
 | `in-progress` | 实现或回修进行中 | 否 |
 | `in-review` | 独立评审进行中 | 否 |
 | `mr-submitted` | 等待主会话收口 | 否 |
-| `merged` | 已合入目标集成分支（local-human 即 feature 集成分支）；worktree / branch 保留到 feature finalize | **是**；下游可开工，但本票不计入需求验收完成 |
+| `merged` | 已合入目标集成分支（local-human 即 feature 集成分支）；worktree 随合并释放（salvage 后删除），branch 保留到 feature finalize | **是**；下游可开工，但本票不计入需求验收完成 |
 | `needs-human` | 有同票活动 human-decision 包，等待人回答或路由收尾 | 否 |
 | `done` | feature candidate 已验收并完成验收关账 | **是** |
 | `deferred` | 明确延期，可另行重开 | 否 |
@@ -97,9 +97,9 @@ dispatch:
 | 路由明确失败 | 主会话把包退回 `answered`，票继续 `needs-human` | `human-decision: answered`（带失败 route_id） |
 | 收到真实 ack | 主会话先持久化 resolved 包，再把票改为计划 `next_status` | `human-decision: resolved`；若实际发生新派发，另有 `dispatch` |
 | 明确延期 / 取消 | 主会话按受控计划写 `deferred / cancelled` | `human-decision: resolved` 或显式 `cancelled`；不得写 `merged` |
-| 票级合并 | 主会话执行合并后把票置 `merged`；worktree / branch 保留 | `merged`（`target` 为集成分支） |
+| 票级合并 | 主会话执行合并后把票置 `merged`；worktree 随合并释放，branch 保留 | `merged`（`target` 为集成分支） |
 | feature finalize 验收 | feature 验收通过后把 `merged` 票置 `done`；票级 delivery 不再改状态 | `accepted` |
-| feature 收尾清理 | 验收完成后由 feature finalize / close-and-clean 清理保留的 worktree / branch | 可写 `close-clean` 或 `digest`，不重复写 `merged` / `accepted` |
+| feature 收尾清理 | 验收完成后由 feature finalize / close-and-clean 清理保留的 branch 与 dev 过程物（worktree 已在票级合并后释放） | 可写 `close-clean` 或 `digest`，不重复写 `merged` / `accepted` |
 | 对账补写 | 主会话只根据已经持久化的事实修包 / 票 | 用原稳定 `event_id` 补缺失事件，不创造新事实 |
 
 事件不是“谁最后看见谁补一句”的自由日志。写票状态的职责方必须同时写对应事件；崩溃后对账可以按同一稳定 ID 补齐，但不能用摘要事件替代必须存在的状态事件。
