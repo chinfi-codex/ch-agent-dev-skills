@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 SCHEMA = "agent-dev.ci-proof/v2"
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "references" / "ci-proof.schema.json"
-MODES = ("server-enforced", "cooperative-ci", "local-human")
+MODES = ("server-enforced", "cooperative-ci", "local-human", "pr")
 MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _OID = re.compile(r"^[0-9a-f]{40}$")
@@ -219,9 +219,9 @@ class ProviderAdapter:
         required = core + (("protected_branch", "required_checks", "expected_sha_merge")
                            if mode == "server-enforced" else ())
         ok = all(checks.get(key) is True for key in required)
-        if mode == "local-human":
+        if mode in ("local-human", "pr"):
             ok = False
-            details["mode"] = "local-human never consumes CI proof as a merge authorization"
+            details["mode"] = "%s never consumes CI proof as a merge authorization" % mode
             enforcement = "not-applicable"
         elif mode == "cooperative-ci":
             enforcement = "not-server-enforced"
@@ -460,8 +460,8 @@ def get_adapter(provider, repository, *, base_url, token=None, timeout=10.0, ope
 def capabilities(provider, repository, *, base_url, workflow, branch, mode,
                  token=None, timeout=10.0, opener=None):
     """Return observed capabilities; absence of evidence is always ``unknown``."""
-    if mode == "local-human":
-        raise CIProofError("local-human cannot be upgraded/downgraded into an online CI mode")
+    if mode in ("local-human", "pr"):
+        raise CIProofError("%s cannot be upgraded/downgraded into an online CI mode" % mode)
     adapter = get_adapter(provider, repository, base_url=base_url, token=token, timeout=timeout, opener=opener)
     return adapter.capabilities(workflow=workflow, branch=branch, mode=mode)
 

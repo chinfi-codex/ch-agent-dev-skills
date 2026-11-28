@@ -1929,16 +1929,18 @@ def report(args) -> int:
 
 # ---------- check ----------
 
-def _check_main_unchanged(rep: Report, repo: Path, cfg: dict, cand: dict):
+def _check_main_unchanged(rep: Report, repo: Path, cfg: dict, cand: dict, *, phase: str):
     main = cfg["main-branch"]
     try:
         main_now = git(repo, "rev-parse", main).strip()
     except InputError as exc:
         rep.add("main-drift", "FAIL", str(exc))
         return
-    if cand.get("mode") == "pr":
-        # PR 模式由用户在 Gitea 合并，main 前进是预期行为；候选与 PR merge commit 的
-        # tree 绑定由 _check_pr_evidence 在 --main-repo 上单独核验。
+    if cand.get("mode") == "pr" and phase == "merge":
+        # A pr-mode merge phase runs after the user merged the PR, so main sits
+        # on the merge commit by design; _check_pr_evidence binds that commit to
+        # the candidate tree.  The verify phase keeps the local-human rule: a
+        # candidate frozen on an older main must not be pushed for a PR.
         return
     if main_now != cand.get("main_head"):
         if cand.get("stack_base"):
@@ -2258,7 +2260,7 @@ def check(args) -> Report:
     head, head_tree = head_info(repo)
     if head != cand.get("candidate") or head_tree != tree:
         rep.add("candidate", "FAIL", f"集成分支 HEAD/tree 与冻结候选不一致：冻结后有新提交或 tree 改写，重新 freeze")
-    _check_main_unchanged(rep, repo, cfg, cand)
+    _check_main_unchanged(rep, repo, cfg, cand, phase=args.phase)
     _check_stack_base(rep, fdir, repo, cand)
     check_plan_unchanged(rep, fdir, cand)
     _check_ticket_states(rep, fdir, repo, cand)
@@ -2328,9 +2330,17 @@ def _check_pr_evidence(rep: Report, integ: Path, cand: dict, cfg: dict, main_rep
     if not pr:
         rep.add("pr", "FAIL", "integration/pr.json 不存在：先由用户合并 PR 并记录 PR 证据")
         return
-    for key in ("number", "head_sha", "head_tree", "merge_commit", "strategy", "merged"):
+    for key in ("provider", "repository", "number", "base", "head_sha", "head_tree",
+                "merge_commit", "strategy", "merged"):
         if key not in pr:
             rep.add("pr", "FAIL", f"integration/pr.json 缺字段 {key}")
+    settings = (cfg.get("feature-closeout") or {}).get("pr") or {}
+    if pr.get("provider") != settings.get("provider"):
+        rep.add("pr", "FAIL", "PR provider 与 feature-closeout.pr.provider 不一致")
+    if pr.get("repository") != settings.get("repository"):
+        rep.add("pr", "FAIL", "PR repository 与 feature-closeout.pr.repository 不一致")
+    if pr.get("base") != cfg.get("main-branch"):
+        rep.add("pr", "FAIL", "PR base 必须是配置的 main-branch")
     if pr.get("merged") is not True:
         rep.add("pr", "FAIL", "PR 尚未合并（merged 必须为 true）")
     if pr.get("head_sha") != cand.get("candidate"):
@@ -2412,7 +2422,10 @@ def authorize_merge(args, online_proof=None) -> dict:
         "schema": "agent-dev.feature-merge-authorization/v2",
         "feature_dir": str(fdir.resolve()), "round": getattr(args, "round", None),
         "repo": str(Path(args.repo).resolve()), "mode": mode,
-        "candidate_sha256": _canonical_sha(cand),
+        # pr promote keeps no journal and re-authorizes on replay, when the merge
+        # record is already in candidate.json; local/CI modes hash the full record
+        # so a recorded candidate can never be re-authorized.
+        "candidate_sha256": _canonical_sha(_candidate_record_stripped(cand) if mode == "pr" else cand),
         "candidate": cand["candidate"], "candidate_tree": cand["candidate_tree"],
         "main_head": cand["main_head"], "scope": "merge-main", "conditions": [],
         "report_sha256": sha256_file(integ / "acceptance-report.md"),

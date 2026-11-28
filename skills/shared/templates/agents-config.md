@@ -73,7 +73,8 @@ conformance:
   checker: main-session       # feature conformance 的 checker 身份
 
 feature-closeout:
-  # server-enforced：服务端保护 + CI API 证明；cooperative-ci：CI 可用但无完整服务端强制；local-human：人工确认合 main；pr：用户在 Gitea 合并 PR。
+  # server-enforced：服务端保护 + CI API 证明；cooperative-ci：CI 可用但无完整服务端强制；
+  # local-human（本地模式）：候选门通过并经人确认后本地合 main；pr（PR 模式）：集成分支走 PR，由用户在 Gitea 合并。
   mode: server-enforced
   integration-branch: "feat/<feature-slug>"
   since: null
@@ -87,16 +88,12 @@ feature-closeout:
     artifact: "verdict.json"
     token-env: "GITLAB_TOKEN" # 只存环境变量名，不在配置中保存 token / verdict / proof
   # main 或候选前进后必须重新同步、freeze 和验证，没有 main-drift-ignore 豁免。
-  verify-instance: null       # 仅 local-human：{name, deploy, lease}
-  prod: null                  # 仅 local-human：{instance, sync, dry-run, status, rollback}；始终需单独授权
-  # pr:                       # 仅 mode=pr；用户在 Gitea 合并，CI 可为 null
+  verify-instance: null       # 仅 local-human / pr：{name, deploy, lease}
+  prod: null                  # 仅 local-human / pr：{instance, sync, dry-run, status, rollback}；始终需单独授权
+  pr: null                    # 仅 mode=pr 必填；集成分支走 PR，由用户在 Gitea 合并，不以 CI 状态检查为门
   #   provider: gitea
   #   base-url: "https://git.example.com"
   #   repository: "group/project"
-  #   token-env: "PANDU_GITEA_TOKEN"
-  #   required-checks: []
-  #   merge: user
-  #   delete-branch: authorized-only
 
 # 主会话监督、独立实现与独立评审的原生角色。开发按票风险选档，绝不按测试范围选档。
 dispatch:

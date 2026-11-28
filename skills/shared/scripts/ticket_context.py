@@ -3,7 +3,7 @@
 
 Public API:
     target_branch(config, frontmatter, feature_dir=None) -> str
-        Explicit ticket target > local-human integration branch > main branch.
+        Explicit ticket target > local-human/pr integration branch > main branch.
     parse_issue(path) -> {"frontmatter": dict, "dod": list}
         Parse frontmatter and the DoD Markdown section.  Checkbox commands must
         be backtick-delimited; they become DoD-1, DoD-2, ... .  Empty sections,
@@ -223,7 +223,7 @@ def target_branch(config: Dict[str, Any], frontmatter: Dict[str, Any],
             if not slug and feature_dir is not None:
                 slug = Path(feature_dir).resolve().name
             if "<feature-slug>" in pattern and not slug:
-                raise ContextError("local-human target requires feature-slug or feature_dir")
+                raise ContextError("integration-branch target requires feature-slug or feature_dir")
             if feature_dir is not None:
                 _validate_scope(feature_dir, frontmatter)
                 slug = artifact_scope.branch_key(feature_dir, slug)

@@ -175,15 +175,11 @@
         "pr": {
           "type": ["object", "null"],
           "additionalProperties": false,
-          "required": ["provider", "base-url", "repository", "token-env"],
+          "required": ["provider", "base-url", "repository"],
           "properties": {
             "provider": {"enum": ["gitea"]},
             "base-url": {"type": "string", "minLength": 1},
-            "repository": {"type": "string", "minLength": 1},
-            "token-env": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"},
-            "required-checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-            "merge": {"enum": ["user", "api"]},
-            "delete-branch": {"enum": ["authorized-only", "never"]}
+            "repository": {"type": "string", "minLength": 1}
           }
         }
       }

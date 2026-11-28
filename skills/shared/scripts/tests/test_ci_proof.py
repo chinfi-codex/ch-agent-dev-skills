@@ -333,6 +333,15 @@ class CIProofFixture:
             cp.capabilities("gitea", "o/r", base_url=self.base, token="secret",
                             workflow="full", branch="main", mode="local-human")
 
+    def test_pr_mode_never_consumes_ci_proof(self):
+        with self.assertRaisesRegex(cp.CIProofError, "downgrade|mode"):
+            cp.capabilities("gitea", "o/r", base_url=self.base, token="secret",
+                            workflow="full", branch="main", mode="pr")
+        adapter = cp.get_adapter("gitea", "o/r", base_url=self.base, token="secret")
+        document = adapter._capability_document("pr", {"api": True}, {})
+        self.assertFalse(document["ok"])
+        self.assertEqual(document["server_enforcement"], "not-applicable")
+
     def test_offline_is_never_a_local_proof_fallback(self):
         offline = "http://127.0.0.1:1"
         with self.assertRaisesRegex(cp.CIProofError, "request failed"):

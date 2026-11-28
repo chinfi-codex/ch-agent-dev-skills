@@ -1260,7 +1260,12 @@ def _execute_feature_merge(main_repo, candidate, strategy):
 
 
 def _promote_pr(candidate, fdir, integ, candidate_repo, main_repo, round_name):
-    """Record a user-merged Gitea PR; never move refs or create a merge commit."""
+    """Record a user-merged Gitea PR; never move refs or create a merge commit.
+
+    pr mode keeps no operation journal: a re-run after a recorded (or
+    half-recorded) merge must rebuild the same authorization, so the operation
+    id ignores the merge record the first run wrote into candidate.json.
+    """
     fc = _module("feature_closeout")
     args = SimpleNamespace(feature_dir=str(fdir), repo=str(candidate_repo), round=round_name,
                            phase="merge", record=False, main_repo=str(main_repo))
@@ -1269,7 +1274,7 @@ def _promote_pr(candidate, fdir, integ, candidate_repo, main_repo, round_name):
     except Exception as exc:
         raise DeliveryError("PR merge authorization failed: %s" % exc) from exc
     pr = fc.read_pr_evidence(integ)
-    operation_id = _digest({"candidate": candidate, "pr": pr,
+    operation_id = _digest({"candidate": _candidate_without_merge_record(candidate), "pr": pr,
                             "evidence": _feature_evidence(integ)})
     authorization["operation_id"] = operation_id
     merge_result = {"repo": str(main_repo), "commit": pr["merge_commit"],

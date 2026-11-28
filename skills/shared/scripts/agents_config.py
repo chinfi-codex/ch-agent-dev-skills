@@ -513,14 +513,16 @@ def _check_modes(config: Dict[str, Any]) -> None:
         raise ConfigError("main-branch is not a valid Git branch name")
     if not _valid_branch(closeout["integration-branch"], allow_placeholder=True):
         raise ConfigError("feature-closeout.integration-branch is not a valid branch pattern")
-    if mode != "local-human" and (closeout["verify-instance"] is not None or closeout["prod"] is not None):
-        raise ConfigError("verify-instance/prod are only valid with feature-closeout.mode=local-human")
+    # local-human 与 pr 共用集成分支候选门，只在本机合 main 与 PR 合并处不同。
+    integration_mode = mode in ("local-human", "pr")
+    if not integration_mode and (closeout["verify-instance"] is not None or closeout["prod"] is not None):
+        raise ConfigError("verify-instance/prod are only valid with feature-closeout.mode=local-human/pr")
     ci = closeout["ci"]
-    if mode in ("local-human", "pr") and ci is not None:
+    if integration_mode and ci is not None:
         raise ConfigError("feature-closeout.ci is only valid with server-enforced/cooperative-ci")
-    if mode not in ("local-human", "pr") and config["integration-runtime"]["dev-service"] is not None:
-        raise ConfigError("integration-runtime.dev-service is only valid with local-human")
-    if mode not in ("local-human", "pr") and ci is None:
+    if not integration_mode and config["integration-runtime"]["dev-service"] is not None:
+        raise ConfigError("integration-runtime.dev-service is only valid with local-human/pr")
+    if not integration_mode and ci is None:
         raise ConfigError("server-enforced/cooperative-ci requires feature-closeout.ci")
     pr = closeout.get("pr")
     if mode == "pr":

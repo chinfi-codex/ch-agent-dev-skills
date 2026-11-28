@@ -154,23 +154,26 @@ business_results_sha256: <最终 business-results.json 的 SHA256>
 
 ## 4b. pr.json（mode=pr 的 PR 证据）
 
-`feature-closeout.mode=pr` 不写 `confirmation.md`，改由用户在 Gitea 合并 PR，并在 `integration/pr.json` 记录：
+`feature-closeout.mode=pr` 不写 `confirmation.md`：人工 AC 实测 / 复核 / 豁免照常完成，合 main 换成用户在 Gitea 合并 PR，并在 `integration/pr.json`（JSON）记录；`merged_by` / `merged_at` 可选，其余字段必填：
 
-```yaml
-provider: gitea
-repository: <owner/repo>
-number: <PR 编号>
-base: main
-head_sha: <冻结 candidate 完整 SHA>
-head_tree: <candidate tree>
-merge_commit: <PR 合并后的完整 commit>
-strategy: merge | squash
-merged: true
-merged_by: <Gitea 用户>
-merged_at: <ISO 时间>
+```json
+{
+  "provider": "gitea",
+  "repository": "<owner/repo>",
+  "number": 1,
+  "base": "main",
+  "head_sha": "<冻结 candidate 完整 SHA>",
+  "head_tree": "<candidate tree>",
+  "merge_commit": "<PR 合并后的完整 commit>",
+  "strategy": "merge",
+  "merged": true,
+  "merged_by": "<Gitea 用户>",
+  "merged_at": "<ISO 时间>"
+}
 ```
 
-`check --phase merge --main-repo <主工作区>` 要求：主工作区 main HEAD = `merge_commit`、`head_sha/head_tree` = 冻结候选、merge commit tree = candidate tree、merge/squash 父提交关系正确。CI 可为 null，不以状态检查为门。`delivery.py promote` 在 pr 模式只核验并登记 `feature-merged`，不本地合并、不移动 ref。
+`strategy` 为 `merge` 或 `squash`。
+`check --phase merge --main-repo <主工作区>` 要求：`provider / repository / base` 与配置一致、主工作区 main HEAD = `merge_commit`、`head_sha/head_tree` = 冻结候选、merge commit tree = candidate tree、merge/squash 父提交关系正确；`ci` 必须为 null，不以状态检查为门。verify 阶段与 local-human 一样要求 main 未前进。`delivery.py promote` 在 pr 模式只核验并登记 `feature-merged`，不本地合并、不移动 ref。
 
 ## 7. 集成运行资源与清场
 

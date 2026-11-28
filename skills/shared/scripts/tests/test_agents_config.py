@@ -88,32 +88,57 @@ class AgentsConfigTest(unittest.TestCase):
         self.assertEqual(validated["feature-closeout"]["ci"]["provider"], "gitlab")
         self.assertEqual(validated["verify-policy"]["base-freeze"], True)
 
-    def test_pr_closeout_mode(self):
+    def test_pr_closeout_mode_shares_the_local_integration_gates(self):
         config = fixture()
         config["feature-closeout"] = {
             "mode": "pr", "ci": None,
-            "pr": {"provider": "gitea", "base-url": "https://git.example.com",
-                   "repository": "AI/repo", "token-env": "PANDU_GITEA_TOKEN"},
+            "pr": {"provider": "gitea", "base-url": "https://git.example.com", "repository": "AI/repo"},
+            "verify-instance": {"name": "dev", "deploy": "run", "lease": "lease"},
+            "prod": {"instance": "dev", "sync": "sync", "dry-run": True, "status": "status",
+                     "rollback": "rollback"},
         }
         validated = ac.validate_config(config)
         self.assertEqual(validated["feature-closeout"]["mode"], "pr")
+        self.assertEqual(validated["feature-closeout"]["pr"]["repository"], "AI/repo")
 
-        broken = copy.deepcopy(config)
-        broken["feature-closeout"] = {"mode": "pr", "ci": None}
+    def test_pr_closeout_mode_fails_closed(self):
+        def pr_config():
+            config = fixture()
+            config["feature-closeout"] = {"mode": "pr", "ci": None, "pr": {
+                "provider": "gitea", "base-url": "https://git.example.com", "repository": "AI/repo"}}
+            return config
+
+        missing = pr_config()
+        missing["feature-closeout"] = {"mode": "pr", "ci": None}
         with self.assertRaisesRegex(ac.ConfigError, "requires feature-closeout.pr"):
-            ac.validate_config(broken)
+            ac.validate_config(missing)
 
-    def test_pr_mode_rejects_ci_object(self):
-        config = fixture()
-        config["feature-closeout"] = {
-            "mode": "pr", "ci": {"provider": "gitlab", "base-url": "https://gitlab.example.com",
-                                  "repository": "group/project", "workflow": "full",
-                                  "artifact": "verdict.json", "token-env": "GITLAB_TOKEN"},
-            "pr": {"provider": "gitea", "base-url": "https://git.example.com",
-                   "repository": "AI/repo", "token-env": "PANDU_GITEA_TOKEN"},
-        }
+        legacy = pr_config()
+        legacy["feature-closeout"]["pr"]["token-env"] = "PANDU_GITEA_TOKEN"
+        with self.assertRaisesRegex(ac.ConfigError, "token-env"):
+            ac.validate_config(legacy)
+
+        for patch in ({"base-url": "http://git.example.com"}, {"repository": "/AI/repo"},
+                      {"repository": "AI repo"}):
+            broken = pr_config()
+            broken["feature-closeout"]["pr"].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ac.ConfigError):
+                ac.validate_config(broken)
+
+        with_ci = pr_config()
+        with_ci["feature-closeout"]["ci"] = fixture()["feature-closeout"]["ci"]
         with self.assertRaisesRegex(ac.ConfigError, "ci is only valid"):
-            ac.validate_config(config)
+            ac.validate_config(with_ci)
+
+        other_mode = pr_config()
+        other_mode["feature-closeout"]["mode"] = "local-human"
+        with self.assertRaisesRegex(ac.ConfigError, "only valid with mode=pr"):
+            ac.validate_config(other_mode)
+
+        planes = pr_config()
+        planes["execution-planes"] = {"local": {}, "remote": {}}
+        with self.assertRaisesRegex(ac.ConfigError, "execution-planes"):
+            ac.validate_config(planes)
 
     def test_markdown_load_does_not_rewrite_source(self):
         config = fixture()

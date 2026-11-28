@@ -294,6 +294,18 @@ class TicketContextTest(unittest.TestCase):
         with self.assertRaisesRegex(tc.ContextError, "invalid target"):
             tc.target_branch(config, fm)
 
+    def test_target_branch_pr_mode_uses_the_integration_branch(self):
+        config = {"main-branch": "main", "feature-closeout": {
+            "mode": "pr", "integration-branch": "feat/<feature-slug>", "since": None}}
+        fm = {"feature-slug": "demo", "created": "2026-11-14"}
+        self.assertEqual(tc.target_branch(config, fm), "feat/demo")
+        config["feature-closeout"]["since"] = "2026-11-01"
+        fm["created"] = "2026-10-01"
+        self.assertEqual(tc.target_branch(config, fm, self.feature), "main")
+        config["feature-closeout"]["mode"] = "pr-api"
+        with self.assertRaisesRegex(tc.ContextError, "unsupported feature-closeout.mode"):
+            tc.target_branch(config, {"feature-slug": "demo"})
+
     def test_dod_empty_duplicate_and_malformed_fail(self):
         good = tc.parse_issue(self.issue)
         self.assertEqual([item["command"] for item in good["dod"]],
