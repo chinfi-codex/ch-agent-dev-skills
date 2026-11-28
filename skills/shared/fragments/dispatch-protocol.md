@@ -71,6 +71,6 @@ python3 ../shared/scripts/progress.py reconcile --repo <主工作区> --kind run
 - confirm 绑定票 / config、refs、完整 ignored 状态、软链、session / runtime 和 dev GC 项；apply 锁内重验，强制删除前再扫描。活跃会话、日志增长、错误软链或外部能力未知都停止。
 - `.logs/**`、未收录证据与报告默认 salvage；dev 软链只有解析后等于主工作区 dev 才不跟随打包。依赖和构建缓存可按计划删除，但最终证据、最后成功代际和被引用捕获物不得删除。
 - journal 逐步记录 expected / observed；崩溃后 `reconcile` 按真实状态幂等恢复。部分完成、prune 失败、远端 OID 变化或剩余路径非空都必须报告，不能显示“清理完成”。
-- 票合入集成分支后只写 `merged`，worktree / branch 保留；不在票级 close-and-clean。
-- local-human 的 integration worktree / 分支、逐票 worktree / branch 与 dev 过程物，统一在 feature-merged 后由 `feature_closeout.py finalize` 清理：逐票 close-and-clean，再停服务 / 释放租约，salvage 并清 Git 资源。finalize 失败保持 needs-attention，可重跑；不能用分支消失反推验收完成。
+- 票合入集成分支只写 `merged` 并随即释放 worktree：`delivery.py merge` 在合并事务完成后内置一次授权 `release-worktree` 清理（门禁 = 票状态 merged + 目标分支祖先关系或精确 merged 记录；salvage `.logs` 等未收集物后删 worktree，branch / dev / 票状态不动）。释放失败或被会话 / runtime 阻塞时合并不受影响，走 `reconcile --kind cleanup --apply` 恢复；票级仍不做 close-and-clean。
+- local-human 的 integration worktree / 分支、逐票 branch 与 dev 过程物，统一在 feature-merged 后由 `feature_closeout.py finalize` 清理：逐票 close-and-clean，再停服务 / 释放租约，salvage 并清 Git 资源。finalize 失败保持 needs-attention，可重跑；不能用分支消失反推验收完成。
 - 单独处理已完成历史票时仍可用 `close-and-clean --issue`；它只接受真实 `done` 票，不把 `merged` 当作已验收。

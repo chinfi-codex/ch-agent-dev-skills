@@ -26,7 +26,7 @@ DSH 右侧栏开发进度面板：分支树与需求 × issue 泳道共用票、
 
 - 普通 `close` 只接受真实 done 且已并入票目标分支，或有完整 OID、可重验的精确 merged 记录。目标只由 `ticket_context.target_branch` 解析。
 - 非 done 必须显式 `discard`；先保存 branch.patch、未提交补丁和文件，再删除资源并将票置 deferred，不解锁依赖。
-- Saga 状态：authorized → quiesced → salvaged → accounted → worktree-removed → refs-updated → dev-compacted → completed。journal 在 Git common dir 的 `agent-dev/operations/`。
+- Saga 状态：authorized → quiesced → salvaged → accounted → worktree-removed → refs-updated → dev-compacted → completed；`release-worktree` 只含前五步（只删 worktree，branch / dev 留给 finalize close）。journal 在 Git common dir 的 `agent-dev/operations/`。
 - worktree 确认包含全量 ignored 快照；`.logs` 默认 salvage。正确 dev 软链不跟随，broken/wrong-target 拒绝。活动会话、活性未知、日志增长或未停服务阻止删除。
 - 主工作区、main/target/integration、backup、codex/preserve、bare 和无精确 journal 的 detached/branchless 资源受保护。remote-only 不降级 dev-only；本地 ref 用 expected-old CAS，远端仅处理 OID 未变的精确 upstream。
 - 产物只按 generation manifest 的 supersedes 链清理；当前、running、最近成功、活动引用、staging 和唯一恢复包保留。无 manifest 不按 mtime 猜。

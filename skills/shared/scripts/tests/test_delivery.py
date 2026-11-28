@@ -335,7 +335,7 @@ cases:
             self.start()
         self.assertFalse(self.source.exists())
 
-    def test_green_merge_marks_merged_once_and_retains_worktree(self):
+    def test_green_merge_marks_merged_once_and_releases_worktree(self):
         self.prepare()
         result = self.merge()
         self.assertEqual(result["status"], "merged")
@@ -353,20 +353,43 @@ cases:
         self.assertEqual(merged["branch"], "feat/demo-issue-001")
         self.assertEqual(merged["target"], "feat/demo")
         self.assertRegex(merged["ts"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
-        # Worktree/branch are retained until feature finalize accepts the candidate.
-        self.assertTrue(self.source.exists())
-        self.assertEqual(sh(self.source, "rev-parse", "--abbrev-ref", "HEAD"), "feat/demo-issue-001")
+        # merged releases the ticket worktree immediately; the branch stays until
+        # feature finalize's close-and-clean.
+        self.assertFalse(self.source.exists())
+        self.assertEqual(result["release"]["status"], "released")
+        self.assertEqual(result["retained"], {"branch": "feat/demo-issue-001"})
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
         journal = state_store.OperationJournal.load(self.context_path.parent / "delivery-operation.json")
         self.assertEqual(journal.state, "completed")
-        # Repeated merge is idempotent: same commit, no second event, no cleanup.
+        # Repeated merge is idempotent: same commit, no second event, nothing left to release.
         replay = self.merge()
         self.assertTrue(replay.get("replayed"))
         self.assertEqual(replay["merge_commit"], commit)
         self.assertEqual(replay["status"], "merged")
+        self.assertEqual(replay["release"]["status"], "skipped")
         events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
         self.assertEqual(len([e for e in events if e.get("event") == "merged"]), 1)
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
         self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
+
+    def test_merge_release_salvages_logs_and_keeps_dev_for_finalize(self):
+        self.prepare()
+        (self.source / ".logs").mkdir()
+        (self.source / ".logs" / "run.log").write_text("salvage me\n")
+        result = self.merge()
+        self.assertEqual(result["release"]["status"], "released")
+        salvage = Path(result["release"]["salvage_dir"])
+        self.assertTrue((salvage / "files/.logs/run.log").is_file())
+        self.assertFalse(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
+        # Release never touches dev process artifacts or the ticket status; only
+        # feature finalize's close-and-clean does.
+        residual = self.fdir / "impl" / "issue-001" / "old.orig"
+        residual.write_text("kept until feature finalize\n")
+        self.assertTrue(residual.is_file())
+        self.assertIn("status: merged", self.issue.read_text())
+        events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
+        self.assertEqual(sum(e.get("event") == "close-clean" for e in events), 0)
 
     def test_merge_replay_after_accepted_finalize_is_idempotent(self):
         self.prepare()
@@ -384,7 +407,8 @@ cases:
         events = [json.loads(line) for line in (self.fdir / "progress.jsonl").read_text().splitlines()]
         self.assertEqual(sum(e.get("event") == "merged" for e in events), 1)
         self.assertEqual(sum(e.get("event") == "accepted" for e in events), 1)
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
 
     def test_merge_preflight_calls_process_check_ticket_phase(self):
         self.prepare()
@@ -450,7 +474,8 @@ cases:
         result = self.merge()
         self.assertEqual(result["status"], "merged")
         self.assertIn("status: merged", self.issue.read_text())
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
 
     def test_implementer_verification_is_still_required_and_decision_blocks(self):
         self.prepare()
@@ -478,7 +503,9 @@ cases:
         result = self.reconcile()
         self.assertEqual(result["merge_commit"], merge_commit)
         self.assertIn("status: merged", self.issue.read_text())
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
+        self.assertEqual(result["release"]["status"], "released")
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
         # Repeated reconcile after completion stays an idempotent replay.
         replay = self.reconcile()
         self.assertTrue(replay.get("replayed"))
@@ -585,20 +612,22 @@ cases:
     def test_completed_merge_retains_resources_and_rejects_merged_start(self):
         self.prepare()
         self.merge()
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
         self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
         residual = self.fdir / "impl" / "issue-001" / "old.orig"
         residual.write_text("kept until feature finalize\n")
         replay = delivery.reconcile(self.context_path)
         self.assertTrue(replay["replayed"])
         self.assertEqual(replay["status"], "merged")
+        self.assertEqual(replay["release"]["status"], "skipped")
         self.assertTrue(residual.is_file())
         # A merged ticket cannot be re-opened by delivery.start; feature finalize
         # owns merged -> accepted -> done.
         with self.assertRaisesRegex(delivery.DeliveryError, "already merged|feature finalize"):
             self.start()
         self.assertIn("status: merged", self.issue.read_text())
-        self.assertTrue(self.source.exists())
+        self.assertFalse(self.source.exists())
+        self.assertTrue(delivery.source_branch_exists(self.root, "feat/demo-issue-001"))
 
     def test_crash_after_cas_before_materialize_recovers_without_new_merge(self):
         self.prepare()

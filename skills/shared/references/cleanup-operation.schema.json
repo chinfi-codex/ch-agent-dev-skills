@@ -7,7 +7,7 @@
   "properties": {
     "schema": {"const": "agent-dev.cleanup-operation/v2"},
     "authorized_at": {"type": "string", "format": "date-time"},
-    "intent": {"enum": ["close", "discard"]},
+    "intent": {"enum": ["close", "discard", "release-worktree"]},
     "subject": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "id", "key", "title", "status", "feature", "feature_dir", "issue_path"],

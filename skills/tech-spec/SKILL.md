@@ -293,7 +293,7 @@ dev/ 通常不入库又无 Git 兜底，体积失控主因是迭代中间产物�
 - **可重下载的缓存不进 dev/**：安装包 / wheelhouse / keyring / 依赖缓存等官网可重下的内容，临时存放用完即删；确需留存只记版本号与获取命令
 - **merge 中间物即合即删**：`*.ours` / `*.theirs` / `*.orig` / merge-* 工作目录在合并提交后删除——git 历史可取回
 - **删除只能走 `close-and-clean` 预检与确认**：可再下载、字节级相同或明确属于已失效代际的内容才可删除；删除前后核对 Markdown / JSON 引用，最终 evidence、评审、确认记录与被引用捕获物不得为了压体积删除
-- 票合入集成分支后保留 worktree / branch，直到 feature `finalize` 统一 `merged → done` 并逐票 close-and-clean；历史 `done` 票可单独走 close-and-clean。`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
+- 票合入集成分支即释放 worktree：`delivery.py merge` 写 `merged` 事件后内置一次授权 `release-worktree` 清理（salvage `.logs` 等未收集物后删除 worktree；无已登记 worktree 即跳过）；本地 branch 与 dev 过程物保留，直到 feature `finalize` 统一 `merged → done` 并逐票 close-and-clean（删 branch + dev 过程物）；历史 `done` 票可单独走 close-and-clean。释放失败不失败合并，由 `reconcile --kind cleanup --apply` 恢复或 finalize 兜底。`.salvage` 仅作为可审计恢复包，按保留策略另行预检清理，不能视为永久存储
 
 ## Dev 配置（agents-config v2）
 

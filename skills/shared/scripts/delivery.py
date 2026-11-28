@@ -727,9 +727,11 @@ def _journal(context, context_path):
         "target_before": context["target_commit"], "source_head": context["source_head"],
         "source_tree": context["source_tree"], "issue_id": context["issue_id"], "strategy": "no-ff",
     }
-    # No cleanup step: worktree/branch and the merged ticket are retained until
-    # feature finalize accepts the candidate.  Legacy journals may still carry a
-    # cleanup step; reuse their exact step IDs and treat that step as retention.
+    # No cleanup step: the merge journal ends at `record`; the worktree release
+    # runs afterwards as an isolated authorized cleanup operation (branch and
+    # merged ticket stay until feature finalize accepts the candidate).  Legacy
+    # journals may still carry a cleanup step; reuse their exact step IDs and
+    # treat that step as retention.
     steps = ["merge", "verify", "record"]
     if path.is_file():
         existing = store.OperationJournal.load(path)
@@ -768,14 +770,51 @@ def _verify_ticket_merge(context, target, target_before, merge_commit):
 
 
 
+def _release_ticket_worktree(root: Path, context, issue) -> dict:
+    """After `merged`, salvage .logs etc. and remove the ticket worktree; branch stays.
+
+    Best-effort and failure-isolated: the merge transaction is already complete,
+    so a release problem must never fail the merge result.  An authorized but
+    unfinished release journal stays recoverable via `progress.py reconcile
+    --kind cleanup --apply`, and feature finalize's close-and-clean remains the
+    backstop that removes the branch and dev process artifacts.
+    """
+    try:
+        branch = _source_branch(context, issue)
+        registered = [item for item in _worktrees(root) if item["branch"] == "refs/heads/" + branch]
+        if not registered:
+            return {"status": "skipped",
+                    "reason": "no registered worktree (sandbox host or already released)"}
+        progress = _module("progress")
+        ticket = progress.find_ticket(root, context["issue_id"])
+        if not ticket:
+            return {"status": "blocked", "reason": "ticket not uniquely resolvable for release"}
+        pc = _module("progress_cleanup")
+        plan = pc.make_plan(repo=root, ticket=ticket, intent="release-worktree")
+        if plan.get("state") == "nothing-to-release":
+            return {"status": "skipped", "reason": plan.get("reason")}
+        if not plan.get("eligible"):
+            return {"status": "blocked", "reason": plan.get("reason") or plan.get("error")}
+        result = pc.apply_operation(root, plan["operation_id"], plan["confirm"])
+        return {"status": "released" if result.get("ok") and result.get("worktree_removed")
+                else result.get("state", "needs-attention"),
+                "operation_id": plan["operation_id"], "state": result.get("state"),
+                "branch_retained": result.get("branch_retained"),
+                "salvage_dir": result.get("salvage_dir"),
+                "warnings": result.get("warnings") or []}
+    except Exception as exc:  # release is post-transaction; never fail the merge
+        return {"status": "failed", "reason": str(exc)}
+
+
 def _record_ticket(context, root, issue, merge_commit):
     _verify_ticket_merge(context, _worktree_for_branch(root, context["target_branch"]),
                          context["target_commit"], merge_commit)
     text = issue.read_text(encoding="utf-8")
     if not re.search(r"^status:\s*.*$", text, re.M):
         raise DeliveryError("issue frontmatter lacks status; cannot mark merged")
-    # merged is not acceptance: the worktree/branch stay until feature finalize
-    # emits accepted and moves the ticket to done.
+    # merged is not acceptance: branch, dev process artifacts and the merged
+    # event stay until feature finalize emits accepted and moves the ticket to
+    # done; only the worktree is released right after (see _release_ticket_worktree).
     updated = re.sub(r"^status:\s*.*$", "status: merged", text, count=1, flags=re.M)
     _module("state_store").atomic_write(issue, updated, mode=0o644)
     timestamp = _git(root, "show", "-s", "--format=%cd", "--date=format-local:%Y-%m-%d %H:%M", merge_commit).stdout.strip()
@@ -851,15 +890,17 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
     if journal.state == "failed":
         raise DeliveryError("failed journal requires manual inspection; reconcile will not adopt arbitrary Git state")
     if journal.state == "completed":
-        # The merge transaction is complete; worktree/branch stay for feature
-        # finalize.  Replay must not delete resources or rewrite the ticket.
+        # The merge transaction is complete; replay must not delete resources or
+        # rewrite the ticket.  It only observes — and best-effort performs — the
+        # post-merge worktree release (branch stays for feature finalize).
         status = str(_issue_frontmatter(issue).get("status") or "merged")
         steps = {step["id"]: step for step in journal.steps}
         merge_commit = (steps.get("merge", {}).get("observed") or {}).get("merge_commit")
+        release = _release_ticket_worktree(root, context, issue)
         result = {"schema": SCHEMA, "operation": "reconcile", "operation_id": journal.operation_id,
                   "state": "completed", "replayed": True, "status": status,
-                  "retained": {"worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
-                               "branch": _source_branch(context, issue)}}
+                  "release": release,
+                  "retained": {"branch": _source_branch(context, issue)}}
         if merge_commit:
             result["merge_commit"] = merge_commit
         return result
@@ -902,23 +943,24 @@ def _resume_ticket(context, root, context_path, issue, journal, expected, prefli
         journal.advance("record", expected=verify_expected)
         observed = _record_ticket(context, root, issue, merge_commit)
         journal.advance("record", expected=verify_expected, observed=observed)
-    # Legacy journals may still have a cleanup step.  It is now a retention
-    # observation, never an authorization to remove the ticket worktree/branch.
+    # Legacy journals may still have a cleanup step.  It stays a retention
+    # observation; the actual worktree release runs after the journal completes.
     if "cleanup" in steps and steps["cleanup"]["status"] != "done":
         cleanup_expected = dict(verify_expected, issue_id=context["issue_id"])
         journal.advance("cleanup", expected=cleanup_expected)
-        retained = {"retained": True, "worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
-                    "branch": _source_branch(context, issue),
-                    "reason": "feature finalize owns acceptance cleanup"}
+        retained = {"retained": True, "branch": _source_branch(context, issue),
+                    "reason": "branch/dev retention is owned by feature finalize; "
+                              "worktree release follows journal completion"}
         journal.advance("cleanup", expected=cleanup_expected, observed=retained)
     journal.complete()
     status = str(_issue_frontmatter(issue).get("status") or "merged")
     if status not in ("merged", "done"):
         raise DeliveryError("ticket status after record is neither merged nor done: %r" % status)
+    release = _release_ticket_worktree(root, context, issue)
     result = {"schema": SCHEMA, "operation": "merge", "operation_id": journal.operation_id,
               "merge_commit": merge_commit, "status": status, "state": "completed",
-              "retained": {"worktree": str(artifact_scope.worktree_path(root, root / context["feature_dir"], context["issue_id"])),
-                           "branch": _source_branch(context, issue)}}
+              "release": release,
+              "retained": {"branch": _source_branch(context, issue)}}
     if _config(root, context).get("tracker") == "gitlab":
         mode = (_config(root, context).get("feature-closeout") or {}).get("mode")
         result["target_cas_merge"] = "not-supported-by-official-provider-api"
